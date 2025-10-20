@@ -4111,13 +4111,116 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
             st.info("Procesa las coberturas primero para ver la visualización.")
 
     # --- Sección para Escenarios Hipotéticos (Parte 2) ---
-    # La añadiremos después de confirmar que la Parte 1 funciona.
     st.markdown("---")
-    st.subheader("Modelado de Escenarios Hipotéticos (Próximamente)")
-    st.info("Aquí podrás definir porcentajes de cobertura y estimar el impacto en la escorrentía.")
+    st.subheader("Modelado de Escenarios Hipotéticos de Cobertura")
+    st.info("""
+    Define un escenario hipotético de distribución de coberturas para la cuenca
+    y estima el posible cambio en la escorrentía media anual.
+    **Nota:** Esta es una estimación simplificada basada en el método del Número de Curva (SCS)
+    y promedios anuales. Los resultados reales pueden variar.
+    """)
 
+    # Verificar si tenemos la escorrentía actual calculada
+    balance_results = st.session_state.get('balance_results')
+    q_actual_mm = None
+    p_actual_mm = None
+    if balance_results and not balance_results.get("error"):
+        q_actual_mm = balance_results.get('Q_mm')
+        p_actual_mm = balance_results.get('P_media_anual_mm')
 
+    # Solo mostrar escenarios si tenemos Q y P actuales
+    if q_actual_mm is not None and p_actual_mm is not None:
 
+        st.markdown("##### Define los Porcentajes de Cobertura:")
+
+        # --- Valores CN Base (EJEMPLOS - ¡Necesitan calibración local!) ---
+        # Asumiendo Grupo Hidrológico de Suelo C (promedio/moderado)
+        cn_values = {
+            "Bosque (Buena condición)": 70, # CN más bajo, mayor infiltración
+            "Pasto (Buena condición)": 74,
+            "Cultivos (Contorno, buena condición)": 78,
+            "Suelo Desnudo": 86, # CN alto, poca infiltración
+            "Áreas Urbanas/Impermeables": 92 # CN muy alto
+        }
+        with st.expander("Ver/Editar Números de Curva (CN) Base"):
+             # Permitir editar CN (avanzado)
+             cn_bosque = st.number_input("CN Bosque", value=cn_values["Bosque (Buena condición)"], min_value=30, max_value=100)
+             cn_pasto = st.number_input("CN Pasto", value=cn_values["Pasto (Buena condición)"], min_value=30, max_value=100)
+             cn_cultivo = st.number_input("CN Cultivos", value=cn_values["Cultivos (Contorno, buena condición)"], min_value=30, max_value=100)
+             cn_desnudo = st.number_input("CN Suelo Desnudo", value=cn_values["Suelo Desnudo"], min_value=30, max_value=100)
+             cn_urbano = st.number_input("CN Urbano/Impermeable", value=cn_values["Áreas Urbanas/Impermeables"], min_value=30, max_value=100)
+             # Actualizar diccionario con valores editados
+             cn_values_edited = {
+                 "Bosque": cn_bosque,
+                 "Pasto": cn_pasto,
+                 "Cultivos": cn_cultivo,
+                 "Suelo Desnudo": cn_desnudo,
+                 "Áreas Urbanas": cn_urbano
+             }
+
+        # Sliders para definir porcentajes
+        # Usamos claves únicas para evitar conflictos si esta función se llama en otro lugar
+        perc_bosque = st.slider("🌲 % Bosque", 0, 100, 20, key="perc_bosque")
+        perc_pasto = st.slider("🌾 % Pasto", 0, 100, 20, key="perc_pasto")
+        perc_cultivo = st.slider("🌽 % Cultivos", 0, 100, 20, key="perc_cultivo")
+        perc_desnudo = st.slider("⛰️ % Suelo Desnudo", 0, 100, 20, key="perc_desnudo")
+        perc_urbano = st.slider("🏘️ % Áreas Urbanas", 0, 100, 20, key="perc_urbano")
+
+        total_perc = perc_bosque + perc_pasto + perc_cultivo + perc_desnudo + perc_urbano
+
+        st.metric("Suma de Porcentajes", f"{total_perc:.1f}%")
+
+        if not np.isclose(total_perc, 100.0):
+            st.warning("La suma de los porcentajes debe ser 100%. Ajusta los sliders.")
+        else:
+            if st.button("Estimar Escorrentía del Escenario", key="estimate_scenario_q"):
+                with st.spinner("Estimando escorrentía hipotética..."):
+                    try:
+                        # Usar CN editados si existen, sino los base
+                        cn_dict = cn_values_edited if 'cn_values_edited' in locals() else cn_values
+                        
+                        # Calcular CN ponderado hipotético
+                        cn_hip = (perc_bosque * cn_dict["Bosque"] +
+                                  perc_pasto * cn_dict["Pasto"] +
+                                  perc_cultivo * cn_dict["Cultivos"] +
+                                  perc_desnudo * cn_dict["Suelo Desnudo"] +
+                                  perc_urbano * cn_dict["Áreas Urbanas"]) / 100.0
+
+                        # Calcular S (Almacenamiento potencial máximo) para el escenario
+                        # Asegurar CN >= 1 para evitar división por cero o S negativo
+                        cn_hip_safe = max(1, cn_hip) 
+                        s_hip = (1000 / cn_hip_safe) - 10 # S en pulgadas
+                        s_hip_mm = s_hip * 25.4 # Convertir S a mm
+
+                        # Calcular Ia (Abstracción inicial) = 0.2 * S
+                        ia_hip_mm = 0.2 * s_hip_mm
+
+                        # Calcular Escorrentía Hipotética (Q_hip) usando la fórmula SCS
+                        q_hip_mm = 0.0 # Escorrentía es 0 si P <= Ia
+                        if p_actual_mm > ia_hip_mm:
+                            q_hip_mm = ((p_actual_mm - ia_hip_mm)**2) / (p_actual_mm - ia_hip_mm + s_hip_mm)
+
+                        # Calcular cambio porcentual
+                        cambio_perc = ((q_hip_mm - q_actual_mm) / q_actual_mm) * 100 if q_actual_mm != 0 else np.inf
+
+                        # Mostrar resultados
+                        st.success("Estimación Completada:")
+                        col_res1, col_res2, col_res3 = st.columns(3)
+                        col_res1.metric("CN Ponderado del Escenario", f"{cn_hip:.1f}")
+                        col_res2.metric("Escorrentía Estimada (Q)", f"{q_hip_mm:.0f} mm/año")
+                        col_res3.metric("Cambio vs. Actual", f"{cambio_perc:.1f}%", delta_color=("inverse" if cambio_perc < 0 else "normal"))
+
+                        st.caption(f"Cálculo basado en P = {p_actual_mm:.0f} mm/año y Q actual = {q_actual_mm:.0f} mm/año.")
+
+                    except Exception as e_scen:
+                        st.error(f"Error al calcular el escenario: {e_scen}")
+
+    else:
+        st.info("""
+        Para modelar escenarios, primero calcula el Balance Hídrico
+        en la pestaña 'Mapas Avanzados -> Superficies de Interpolación -> Por Cuenca Específica'
+        para obtener la precipitación y escorrentía actuales.
+        """)
 
 
 
