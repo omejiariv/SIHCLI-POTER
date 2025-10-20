@@ -22,7 +22,8 @@ import io
 from datetime import datetime, timedelta
 import json
 import requests
-import traceback # <--- CORRECCIÓN: Importación para el manejo de errores
+import traceback
+import openmeteo_requests
 
 from modules.analysis import calculate_all_station_trends
 from modules.analysis import calculate_hydrological_balance
@@ -3587,3 +3588,4 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         fig.update_yaxes(title_text="Precipitación (mm)", secondary_y=True, showgrid=False)
         
         st.plotly_chart(fig, use_container_width=True)
+
