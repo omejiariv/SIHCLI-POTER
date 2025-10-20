@@ -3717,12 +3717,11 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
     st.header("Imágenes Satelitales")
     st.info("Visualiza capas WMS de servicios meteorológicos. La disponibilidad y actualización dependen del proveedor.")
 
-    # --- Configuración de Capas WMS ---
-    # ¡IMPORTANTE! Debes buscar URLs y nombres de capas válidos y actualizados.
-    # Estos son solo ejemplos conceptuales. Busca en NOAA, EUMETSAT, IDEAM, etc.
+    # --- Configuración de Capas WMS (ACTUALIZADA) ---
+    # Usando la información proporcionada
     wms_layers_options = {
         "GOES-East B13 Full Disk (SSEC/Wisc)": {
-            "url": "https://sats-ftp.ssec.wisc.edu/wms/wms_goes_east.cgi?", 
+            "url": "https://sats-ftp.ssec.wisc.edu/wms/wms_goes_east.cgi?",
             "layers": "goes_east_abi_b13_fd", # Capa GOES-East ABI Banda 13, Full Disk
             "fmt": 'image/png',
             "transparent": True,
@@ -3730,13 +3729,14 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
         },
         "IDEAM - GOES B13 (Nombre a Verificar)": {
              "url": "http://geoapps.ideam.gov.co:8080/geoserver/wms?", # URL base IDEAM
-             # IMPORTANTE: Este nombre es una suposición, puede ser diferente. 
+             # IMPORTANTE: Este nombre es una suposición, puede ser diferente.
              # Intenta con 'ideam:goes16_abi_band13' o busca en GetCapabilities.
-             "layers": "ideam:goes16_abi_band13", 
+             "layers": "ideam:goes16_abi_band13",
              "fmt": 'image/png',
              "transparent": True,
              "attr": "IDEAM",
         },
+        # Puedes añadir aquí las capas de EUMETSAT si también encontraste URLs/layers válidos para ellas
         "EUMETSAT - Meteosat IR 10.8 (Ejemplo)": {
              "url": "https://eumetview.eumetsat.int/geoserv/wms", # URL de EUMETView WMS
              "layers": "meteosat:msg_ir108", # Capa infrarroja 10.8
@@ -3751,15 +3751,15 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
              "transparent": True,
              "attr": "EUMETSAT",
         },
-        # Intenta buscar servicios WMS del IDEAM también si existen públicamente
     }
     # --- Fin Configuración ---
 
-    # Selector de Mapa Base y Capas WMS
-    col1, col2 = st.columns([1,2])
+    # Columnas para controles y mapa
+    col1, col2 = st.columns([1, 2])
+
     with col1:
         st.markdown("##### Opciones de Visualización")
-        
+
         # --- Define base map options directly here ---
         base_map_options = {
             "CartoDB Positron": {"tiles": "cartodbpositron", "attr": "CartoDB"},
@@ -3768,29 +3768,31 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
                 "tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
                 "attr": "Open TopoMap"
             },
-            # Add other base maps if you used them elsewhere
+            # Add other base maps if you used them elsewhere in display_map_controls
         }
         # --- Create only the base map selectbox directly ---
         selected_base_map_name = st.selectbox(
             "Seleccionar Mapa Base",
             list(base_map_options.keys()),
-            key="satellite_base_map" # Ensure this unique key is used
+            key="satellite_base_map" # Ensure this unique key is used ONLY here in this tab
         )
         selected_base_map_config = base_map_options[selected_base_map_name]
         # --- End direct widget creation ---
 
-        # The WMS multiselect remains
+        # Selector de capas WMS
         selected_wms_names = st.multiselect(
             "Seleccionar Capas Satelitales:",
             options=list(wms_layers_options.keys()),
             # Select the SSEC layer by default if it exists
-            default=[list(wms_layers_options.keys())[0]] if wms_layers_options else [] 
+            default=[list(wms_layers_options.keys())[0]] if wms_layers_options else []
         )
+
     with col2:
+        # Crea el mapa base
         m = create_folium_map(
             location=[4.6, -74.0], # Centrado en Colombia
             zoom=5,
-            base_map_config=selected_base_map_config, # Usa la selección del usuario
+            base_map_config=selected_base_map_config, # Usa la selección directa
             overlays_config=[], # Los WMS se añaden manualmente
             fit_bounds_data=gdf_filtered if not gdf_filtered.empty else None
         )
@@ -3806,20 +3808,21 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
                         layers=config["layers"],
                         fmt=config.get("fmt", 'image/png'),
                         transparent=config.get("transparent", True),
-                        overlay=True,
-                        control=True,
-                        name=name, # Nombre que aparecerá en el control de capas
+                        overlay=True, # Importante para que sea una capa superpuesta
+                        control=True, # Para que aparezca en el control de capas
+                        name=name, # Nombre en el control de capas
                         attr=config.get("attr", name)
                     ).add_to(m)
                     added_layers = True
                 except Exception as e:
-                    st.error(f"No se pudo añadir la capa '{name}'. Verifica la URL y el nombre de la capa. Error: {e}")
-            
+                    # Muestra un error si una capa específica falla, pero continúa
+                    st.error(f"No se pudo añadir la capa '{name}'. Verifica la URL ('{config['url']}') y el nombre de la capa ('{config['layers']}'). Error: {e}")
+
+        # Mensajes informativos
         if not added_layers and selected_wms_names:
-             st.warning("No se pudo añadir ninguna de las capas WMS seleccionadas. Verifica la configuración.")
+             st.warning("No se pudo añadir ninguna de las capas WMS seleccionadas. Verifica la configuración o las URLs.")
         elif not selected_wms_names:
              st.info("Selecciona al menos una capa satelital para visualizar.")
-
 
         # Añade control de capas si se añadió alguna
         if added_layers:
@@ -3827,6 +3830,3 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
 
         # Muestra el mapa
         folium_static(m, height=700, width=None)
-
-
-
