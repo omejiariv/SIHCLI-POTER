@@ -18,42 +18,90 @@ import requests_cache
 import pandas as pd
 from retry_requests import retry
 
-@st.cache_data
+@st.cache_data(ttl=3600) # Cache por 1 hora
 def get_weather_forecast(latitude, longitude):
-    """
-    Obtiene el pronóstico del tiempo. Maneja elegantemente el error de límite de la API.
-    """
+    """Obtiene el pronóstico del tiempo para 7 días con variables adicionales."""
     cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
     retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
     openmeteo = openmeteo_requests.Client(session=retry_session)
 
     url = "https://api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": latitude, "longitude": longitude,
-        "daily": ["temperature_2m_max", "temperature_2m_min", "precipitation_sum"],
-        "timezone": "auto"
-    }
     
+    # --- Variables a solicitar ---
+    daily_variables = [
+        "temperature_2m_max",               # Temperatura máxima a 2m (°C)
+        "temperature_2m_min",               # Temperatura mínima a 2m (°C)
+        "precipitation_sum",                # Suma de precipitación diaria (mm)
+        "relative_humidity_2m_mean",        # Humedad relativa media a 2m (%)
+        "surface_pressure_mean",            # Presión superficial media (hPa) - Usamos esta en lugar de MSL para pronóstico
+        "et0_fao_evapotranspiration",       # Evapotranspiración de referencia (mm)
+        "shortwave_radiation_sum",          # Suma de radiación de onda corta diaria (MJ/m²)
+        "wind_speed_10m_max"                # Velocidad máxima del viento a 10m (km/h o m/s, verificar unidad)
+        # "precipitable_water"             # Agua precipitable (mm) - Si está disponible para diario
+    ]
+    # Nota: "Intensidad lumínica" (lux) no suele estar disponible directamente. Usamos radiación solar.
+    # Nota: Vapor de agua se aproxima con Agua Precipitable si está disponible, o Humedad Relativa.
+
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "daily": daily_variables, # Lista actualizada de variables
+        "timezone": "auto",
+        "forecast_days": 7 # Aseguramos que sean 7 días
+    }
+
     try:
         responses = openmeteo.weather_api(url, params=params)
         response = responses[0]
-        
+
+        # Procesar la respuesta
         daily = response.Daily()
+        if daily is None:
+             st.error("La API no devolvió datos diarios.")
+             return None
+             
         timezone_str = response.Timezone().decode('utf-8')
-        daily_data = {
-            "date": pd.to_datetime(daily.Time(), unit="s", utc=True).tz_convert(timezone_str),
-            "temperature_2m_max": daily.Variables(0).ValuesAsNumpy(),
-            "temperature_2m_min": daily.Variables(1).ValuesAsNumpy(),
-            "precipitation_sum": daily.Variables(2).ValuesAsNumpy(),
-        }
-        return pd.DataFrame(data=daily_data)
         
-    except OpenMeteoRequestsError as e:
-        # Si la API nos dice que hemos excedido el límite, lo mostramos al usuario
-        st.error(f"Error de la API de Pronóstico: Límite diario de solicitudes excedido. Por favor, intente de nuevo mañana. (Detalle: {e})")
+        # --- Diccionario para construir el DataFrame ---
+        daily_data = {
+            "date": pd.to_datetime(daily.Time(), unit="s", utc=True).tz_convert(timezone_str)
+        }
+        
+        # Iterar sobre las variables solicitadas para extraer los datos
+        num_variables = daily.VariablesLength()
+        if num_variables != len(daily_variables):
+             st.warning(f"La API devolvió {num_variables} variables, pero se solicitaron {len(daily_variables)}. Algunas podrían faltar.")
+             # Aun así intentamos procesar las que sí llegaron
+        
+        # Mapeo manual para asegurar el orden y manejar posibles faltantes
+        variable_map = {var: i for i, var in enumerate(daily_variables)}
+        
+        if variable_map.get("temperature_2m_max", -1) < num_variables and variable_map.get("temperature_2m_max", -1) != -1:
+            daily_data["temperature_2m_max"] = daily.Variables(variable_map["temperature_2m_max"]).ValuesAsNumpy()
+        if variable_map.get("temperature_2m_min", -1) < num_variables and variable_map.get("temperature_2m_min", -1) != -1:
+            daily_data["temperature_2m_min"] = daily.Variables(variable_map["temperature_2m_min"]).ValuesAsNumpy()
+        if variable_map.get("precipitation_sum", -1) < num_variables and variable_map.get("precipitation_sum", -1) != -1:
+            daily_data["precipitation_sum"] = daily.Variables(variable_map["precipitation_sum"]).ValuesAsNumpy()
+        if variable_map.get("relative_humidity_2m_mean", -1) < num_variables and variable_map.get("relative_humidity_2m_mean", -1) != -1:
+            daily_data["relative_humidity_2m_mean"] = daily.Variables(variable_map["relative_humidity_2m_mean"]).ValuesAsNumpy()
+        if variable_map.get("surface_pressure_mean", -1) < num_variables and variable_map.get("surface_pressure_mean", -1) != -1:
+            daily_data["surface_pressure_mean"] = daily.Variables(variable_map["surface_pressure_mean"]).ValuesAsNumpy()
+        if variable_map.get("et0_fao_evapotranspiration", -1) < num_variables and variable_map.get("et0_fao_evapotranspiration", -1) != -1:
+            daily_data["et0_fao_evapotranspiration"] = daily.Variables(variable_map["et0_fao_evapotranspiration"]).ValuesAsNumpy()
+        if variable_map.get("shortwave_radiation_sum", -1) < num_variables and variable_map.get("shortwave_radiation_sum", -1) != -1:
+            daily_data["shortwave_radiation_sum"] = daily.Variables(variable_map["shortwave_radiation_sum"]).ValuesAsNumpy()
+        if variable_map.get("wind_speed_10m_max", -1) < num_variables and variable_map.get("wind_speed_10m_max", -1) != -1:
+            daily_data["wind_speed_10m_max"] = daily.Variables(variable_map["wind_speed_10m_max"]).ValuesAsNumpy()
+
+        # Crear DataFrame y devolverlo
+        forecast_df = pd.DataFrame(data=daily_data)
+        # Asegurarse de que solo tenemos 7 días si la API devuelve más
+        return forecast_df.head(7) 
+
+    except openmeteo_requests.ApiError as e: # Catch specific API errors
+        st.error(f"Error de la API de Open-Meteo: {e}")
         return None
     except Exception as e:
-        # Para cualquier otro error inesperado
         st.error(f"Ocurrió un error inesperado al obtener el pronóstico: {e}")
         return None
     
@@ -219,3 +267,4 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
