@@ -3721,32 +3721,29 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
     # Usando la información proporcionada
     wms_layers_options = {
         "GOES-East B13 Full Disk (SSEC/Wisc)": {
-            "url": "https://sats-ftp.ssec.wisc.edu/wms/wms_goes_east.cgi?",
-            "layers": "goes_east_abi_b13_fd", # Capa GOES-East ABI Banda 13, Full Disk
+            "url": "https://sats-ftp.ssec.wisc.edu/wms/wms_goes_east.cgi?", # VERIFICAR si aún funciona
+            "layers": "goes_east_abi_b13_fd", # VERIFICAR si el nombre es correcto
             "fmt": 'image/png',
             "transparent": True,
-            "attr": "NOAA / SSEC-UWisc", # Atribución correcta
+            "attr": "NOAA / SSEC-UWisc",
         },
         "IDEAM - GOES B13 (Nombre a Verificar)": {
-             "url": "http://geoapps.ideam.gov.co:8080/geoserver/wms?", # URL base IDEAM
-             # IMPORTANTE: Este nombre es una suposición, puede ser diferente.
-             # Intenta con 'ideam:goes16_abi_band13' o busca en GetCapabilities.
-             "layers": "ideam:goes16_abi_band13",
+             "url": "http://geoapps.ideam.gov.co:8080/geoserver/wms?", # VERIFICAR si el servicio está activo
+             "layers": "ideam:goes16_abi_band13", # ¡NECESITA VERIFICACIÓN URGENTE! Buscar nombre real en GetCapabilities
              "fmt": 'image/png',
              "transparent": True,
              "attr": "IDEAM",
         },
-        # Puedes añadir aquí las capas de EUMETSAT si también encontraste URLs/layers válidos para ellas
         "EUMETSAT - Meteosat IR 10.8 (Ejemplo)": {
-             "url": "https://eumetview.eumetsat.int/geoserv/wms", # URL de EUMETView WMS
-             "layers": "meteosat:msg_ir108", # Capa infrarroja 10.8
+             "url": "https://eumetview.eumetsat.int/geoserv/wms", # VERIFICAR si aún funciona
+             "layers": "meteosat:msg_ir108", # VERIFICAR si el nombre es correcto
              "fmt": 'image/png',
              "transparent": True,
              "attr": "EUMETSAT",
         },
          "EUMETSAT - Meteosat Vapor de Agua 6.2 (Ejemplo)": {
-             "url": "https://eumetview.eumetsat.int/geoserv/wms", # URL de EUMETView WMS
-             "layers": "meteosat:msg_wv062", # Capa vapor de agua 6.2
+             "url": "https://eumetview.eumetsat.int/geoserv/wms", # VERIFICAR si aún funciona
+             "layers": "meteosat:msg_wv062", # VERIFICAR si el nombre es correcto
              "fmt": 'image/png',
              "transparent": True,
              "attr": "EUMETSAT",
@@ -3830,3 +3827,4 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
 
         # Muestra el mapa
         folium_static(m, height=700, width=None)
+
