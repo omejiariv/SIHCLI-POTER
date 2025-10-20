@@ -3762,14 +3762,24 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
         # Reutilizamos el control de mapa base
         selected_base_map_config, _ = display_map_controls(st, "satellite") 
         
-        selected_wms_names = st.multiselect(
-            "Seleccionar Capas Satelitales:",
-            options=list(wms_layers_options.keys()),
-            default=list(wms_layers_options.keys())[0] if wms_layers_options else [] # Selecciona la primera por defecto
-        )
+    selected_wms_names = st.multiselect(
+        "Seleccionar Capas Satelitales:",
+        options=list(wms_layers_options.keys()),
+        # Selecciona la capa de SSEC por defecto si existe
+        default=[list(wms_layers_options.keys())[0]] if wms_layers_options else [] 
+    )
+
+    # Crea el mapa base (puedes usar display_map_controls si quieres)
+    col1, col2 = st.columns([1,2]) # Mantenemos la estructura de columnas
+    with col1:
+        st.markdown("##### Opciones de Visualización")
+        # Reutilizamos el control de mapa base
+        selected_base_map_config, _ = display_map_controls(st, "satellite") 
+        
+        # El multiselect ya está definido arriba
+        # selected_wms_names = st.multiselect(...) 
 
     with col2:
-        # Crea el mapa base
         m = create_folium_map(
             location=[4.6, -74.0], # Centrado en Colombia
             zoom=5,
