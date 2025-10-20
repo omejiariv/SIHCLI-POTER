@@ -161,11 +161,12 @@ def perform_loocv_for_all_methods(_year, _gdf_metadata, _df_anual_non_na):
 # FUNCIÓN ORIGINAL, AHORA ACTUALIZADA PARA USAR LA FUNCIÓN AUXILIAR
 # -----------------------------------------------------------------------------
 @st.cache_data
-def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_metadata, df_anual_non_na):
+def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_metadata,
+ df_anual_non_na):
     """Crea una superficie de interpolación y calcula el error RMSE."""
     fig_var = None
     error_msg = None
-
+    
     df_year = pd.merge(
         df_anual_non_na[df_anual_non_na[Config.YEAR_COL] == year],
         gdf_metadata,
@@ -175,15 +176,15 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
     clean_cols = [Config.LONGITUDE_COL, Config.LATITUDE_COL, Config.PRECIPITATION_COL]
     if method == "Kriging con Deriva Externa (KED)" and Config.ELEVATION_COL in df_year.columns:
         clean_cols.append(Config.ELEVATION_COL)
-
+        
     df_clean = df_year.dropna(subset=clean_cols).copy()
     df_clean = df_clean[np.isfinite(df_clean[clean_cols]).all(axis=1)]
     df_clean = df_clean.drop_duplicates(subset=[Config.LONGITUDE_COL, Config.LATITUDE_COL])
-    
+
     if len(df_clean) < 4:
         error_msg = f"Se necesitan al menos 4 estaciones con datos para el año {year} para interpolar."
         fig = go.Figure().update_layout(title=error_msg, xaxis_visible=False, yaxis_visible=False)
-        return fig, None, error_msg
+        return fig, None, error_msg # Devuelve 3 valores
 
     lons = df_clean[Config.LONGITUDE_COL].values
     lats = df_clean[Config.LATITUDE_COL].values
@@ -191,7 +192,7 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
     elevs = df_clean[Config.ELEVATION_COL].values if Config.ELEVATION_COL in df_clean else None
 
     # Llama a la función auxiliar para obtener métricas
-    metrics = _perform_loocv(method, lons, lats, vals, elevs)
+    metrics = _perform_loocv(method, lons, lats, vals, elevs) 
     rmse = metrics.get('RMSE')
 
     grid_lon = np.linspace(gdf_bounds[0] - 0.1, gdf_bounds[2] + 0.1, 200)
@@ -200,7 +201,8 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
 
     try:
         if method in ["Kriging Ordinario", "Kriging con Deriva Externa (KED)"]:
-            model_map = {'gaussian': gs.Gaussian(dim=2), 'exponential': gs.Exponential(dim=2), 'spherical': gs.Spherical(dim=2), 'linear': gs.Linear(dim=2)}
+            model_map = {'gaussian': gs.Gaussian(dim=2), 'exponential': gs.Exponential(dim=2),
+                         'spherical': gs.Spherical(dim=2), 'linear': gs.Linear(dim=2)}
             model = model_map.get(variogram_model, gs.Spherical(dim=2))
             bin_center, gamma = gs.vario_estimate((lons, lats), vals)
             model.fit_variogram(bin_center, gamma, nugget=True)
@@ -213,38 +215,36 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
 
             if method == "Kriging Ordinario":
                 krig = gs.krige.Ordinary(model, (lons, lats), vals)
-                z_grid, _ = krig.structured([grid_lon, grid_lat])
+                z_grid, _ = krig.structured([grid_lon, grid_lat]) 
             else: # KED
-                # Necesitamos crear una grilla de elevación para la predicción
-                rbf_elev = Rbf(lons, lats, elevs, function='thin_plate')
+                rbf_elev = Rbf(lons, lats, elevs, function='thin_plate') 
                 grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
                 drift_grid = rbf_elev(grid_x, grid_y)
                 krig = gs.krige.ExtDrift(model, (lons, lats), vals, drift_src=elevs)
-                z_grid, _ = krig.structured([grid_lon, grid_lat], drift_tgt=drift_grid.T)
+                z_grid, _ = krig.structured([grid_lon, grid_lat], drift_tgt=drift_grid.T) 
 
         elif method == "IDW":
-            z_grid = interpolate_idw(lons, lats, vals, grid_lon, grid_lat)
-            
+            z_grid = interpolate_idw(lons, lats, vals, grid_lon, grid_lat) 
         elif method == "Spline (Thin Plate)":
             rbf = Rbf(lons, lats, vals, function='thin_plate')
             grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
-            z_grid = rbf(grid_x, grid_y)
-            
+            z_grid = rbf(grid_x, grid_y) 
+
     except Exception as e:
         error_message = f"Error al calcular {method}: {e}"
         fig = go.Figure().update_layout(title=error_message, xaxis_visible=False, yaxis_visible=False)
-        return fig, None, error_message
+        return fig, None, error_message # Devuelve 3 valores
 
     if z_grid is not None:
         fig = go.Figure(data=go.Contour(
             z=z_grid.T, x=grid_lon, y=grid_lat,
-            colorscale=px.colors.sequential.YlGnBu,
+            colorscale=px.colors.sequential.YIGnBu,
             colorbar_title='Precipitación (mm)',
             contours=dict(showlabels=True, labelfont=dict(size=10, color='white'), labelformat=".0f")
         ))
-        
         fig.add_trace(go.Scatter(
-            x=lons, y=lats, mode='markers', marker=dict(color='red', size=5, line=dict(width=1, color='black')),
+            x=lons, y=lats, mode='markers', marker=dict(color='red', size=5, line=dict(width=1,
+            color='black')),
             name='Estaciones',
             hoverinfo='text',
             text=[f"<b>{row[Config.STATION_NAME_COL]}</b><br>" +
@@ -253,7 +253,6 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
                   f"Precipitación: {row[Config.PRECIPITATION_COL]:.0f} mm"
                   for _, row in df_clean.iterrows()]
         ))
-        
         if rmse is not None:
             fig.add_annotation(
                 x=0.01, y=0.99, xref="paper", yref="paper",
@@ -261,18 +260,15 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
                 showarrow=False, font=dict(size=12, color="black"),
                 bgcolor="rgba(255, 255, 255, 0.7)", bordercolor="black", borderwidth=1
             )
-            
         fig.update_layout(
             title=f"Precipitación en {year} ({method})",
             xaxis_title="Longitud", yaxis_title="Latitud", height=600,
             legend=dict(x=0.01, y=0.01, bgcolor="rgba(0,0,0,0)")
         )
-        return fig, fig_variogram, None
+        return fig, fig_variogram, None # Devuelve 3 valores
 
-    return go.Figure().update_layout(title="Error: Método no implementado"), None, "Método no implementado"
-
-# In modules/interpolation.py
-
+    return go.Figure().update_layout(title="Error: Método no implementado"), None, "Método no implementado" # Devuelve 3 valores
+     
 @st.cache_data
 def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
     """
