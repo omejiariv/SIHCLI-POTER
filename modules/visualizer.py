@@ -4232,7 +4232,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
 
     # --- Configuración ---
     # !! Ajusta el nombre si tu archivo de precipitación se llama diferente !!
-    precip_raster_filename = "PptMeanAnual.tif" 
+    precip_raster_filename = "PPAMAnt.tif"
     # --- Fin Configuración ---
 
     # Construir rutas a los archivos necesarios
@@ -4355,6 +4355,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
