@@ -4271,7 +4271,12 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
             
             mean_latitude = 6.5
             # Llamar a la función de cálculo del módulo life_zones
-            classified_raster, output_profile, name_map = generate_life_zone_map(dem_path, precip_raster_path, mean_latitude)
+            classified_raster, output_profile, name_map = generate_life_zone_map(
+                dem_path, 
+                precip_raster_path, 
+                mean_latitude,
+                downscale_factor=4
+            )    
 
             # Limpiar el archivo DEM temporal DESPUÉS de usarlo
             if os.path.exists(dem_path):
@@ -4365,5 +4370,6 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
