@@ -216,9 +216,9 @@ def main():
     with tabs[3]:
         display_advanced_maps_tab(**display_args)
     with tabs[4]: # Variables Climáticas (nuevo índice 4)
-    display_additional_climate_maps_tab(**display_args)
+        display_additional_climate_maps_tab(**display_args)
     with tabs[5]: # Imágenes Satelitales (nuevo índice 5)
-    display_satellite_imagery_tab(**display_args)
+        display_satellite_imagery_tab(**display_args)
     with tabs[6]:
         display_anomalies_tab(df_long=st.session_state.df_long, **display_args)
     with tabs[7]:
@@ -463,5 +463,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
