@@ -3721,12 +3721,21 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
     # ¡IMPORTANTE! Debes buscar URLs y nombres de capas válidos y actualizados.
     # Estos son solo ejemplos conceptuales. Busca en NOAA, EUMETSAT, IDEAM, etc.
     wms_layers_options = {
-        "GOES-East - Infrarrojo Full Disk (NOAA - Ejemplo)": {
-            "url": "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/conus_ir.cgi?", # URL de ejemplo, puede no funcionar
-            "layers": "goes_conus_ir", # Nombre de capa de ejemplo
+        "GOES-East B13 Full Disk (SSEC/Wisc)": {
+            "url": "https://sats-ftp.ssec.wisc.edu/wms/wms_goes_east.cgi?", 
+            "layers": "goes_east_abi_b13_fd", # Capa GOES-East ABI Banda 13, Full Disk
             "fmt": 'image/png',
             "transparent": True,
-            "attr": "NOAA / Iowa State Mesonet",
+            "attr": "NOAA / SSEC-UWisc", # Atribución correcta
+        },
+        "IDEAM - GOES B13 (Nombre a Verificar)": {
+             "url": "http://geoapps.ideam.gov.co:8080/geoserver/wms?", # URL base IDEAM
+             # IMPORTANTE: Este nombre es una suposición, puede ser diferente. 
+             # Intenta con 'ideam:goes16_abi_band13' o busca en GetCapabilities.
+             "layers": "ideam:goes16_abi_band13", 
+             "fmt": 'image/png',
+             "transparent": True,
+             "attr": "IDEAM",
         },
         "EUMETSAT - Meteosat IR 10.8 (Ejemplo)": {
              "url": "https://eumetview.eumetsat.int/geoserv/wms", # URL de EUMETView WMS
@@ -3801,4 +3810,5 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
 
         # Muestra el mapa
         folium_static(m, height=700, width=None)
+
 
