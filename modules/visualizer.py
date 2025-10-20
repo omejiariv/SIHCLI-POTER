@@ -3746,6 +3746,7 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
     )
 
     if st.button(f"Generar Mapa Promedio ({start_year}-{end_year}) para {selected_variable_name}", key="gen_clim_map_btn"):
+        st.session_state['last_climate_data'] = None # Clear previous data
         with st.spinner(f"Obteniendo datos de {start_year}-{end_year} y generando mapa..."):
             
             # Prepara coordenadas únicas para la API
@@ -3758,6 +3759,11 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
             
             # Llama a la función de la API para obtener los promedios
             df_climate_data = get_historical_climate_average(lats, lons, variable_code, start_date_str, end_date_str)
+            # Store the fetched data in session state for download
+            if df_climate_data is not None and not df_climate_data.empty:
+                st.session_state['last_climate_data'] = df_climate_data
+                st.session_state['last_climate_variable'] = selected_variable_name
+                st.session_state['last_climate_period'] = f"{start_year}-{end_year}"
 
             if df_climate_data is not None and not df_climate_data.empty:
                 
@@ -3825,6 +3831,31 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
                     st.warning("No hay suficientes datos válidos (<4) devueltos por la API para interpolar.")
             else:
                 st.error(f"No se pudieron obtener datos históricos para '{variable_code}' de la API.")
+
+# --- ADD THIS BLOCK OUTSIDE (AFTER) THE if st.button(...) BLOCK ---
+    # Display download button if data exists in session state
+    if 'last_climate_data' in st.session_state and st.session_state['last_climate_data'] is not None:
+        st.markdown("---")
+        st.subheader("Descargar Datos Climáticos")
+        
+        # Use a helper function (or define one if needed) to convert DataFrame to CSV
+        @st.cache_data # Cache the conversion
+        def convert_df_to_csv_bytes(df):
+            return df.to_csv(index=False, sep=';').encode('utf-8') # Use semicolon separator
+
+        csv_data = convert_df_to_csv_bytes(st.session_state['last_climate_data'])
+        
+        var_name_safe = st.session_state['last_climate_variable'].replace(" ", "_").replace("(", "").replace(")", "").replace("/", "")
+        period_safe = st.session_state['last_climate_period']
+        
+        st.download_button(
+            label=f"Descargar Datos ({st.session_state['last_climate_variable']} {period_safe})",
+            data=csv_data,
+            file_name=f"datos_climaticos_{var_name_safe}_{period_safe}.csv",
+            mime="text/csv",
+            key="download_climate_data_btn"
+        )
+    # --- END ADD ---
 
 # --- Función para Imágenes Satelitales ---
 def display_satellite_imagery_tab(gdf_filtered, **kwargs):
@@ -3941,6 +3972,7 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
 
         # Muestra el mapa
         folium_static(m, height=700, width=None)
+
 
 
 
