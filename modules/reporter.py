@@ -1,5 +1,3 @@
-# modules/reporter.py
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,33 +8,49 @@ from fpdf import FPDF
 import io
 import os
 import tempfile
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.chrome.options import Options
 import pymannkendall as mk
 
+# Importaciones de Módulos Propios
 from modules.config import Config
 from modules.visualizer import create_folium_map, generate_station_popup_html
+from modules.analysis import calculate_monthly_anomalies # Reutilizando importación en reportes
+# from modules.utils import ...
 
-# --- Configuración para Selenium ---
+#--- Configuración para Selenium (Importaciones MOVIDAS al interior de setup_driver)
+
 def setup_driver():
     """Configura y retorna un driver de Selenium para usar Chromium en Streamlit Cloud."""
+    
+    # IMPORTACIONES MOVIDAS AL INTERIOR PARA EVITAR EL KEYERROR EN EL ARRANQUE
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.service import Service as ChromeService
+        from selenium.webdriver.chrome.options import Options
+    except ImportError as e:
+        # En Streamlit Cloud, si el entorno no está listo, esto puede fallar.
+        # Es mejor no mostrar un error crítico, sino retornar None.
+        return None
+
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1200,800")
+    
+    # Asumiendo que el contenedor de Streamlit Cloud tiene Chromium en /usr/bin/chromium
     chrome_options.binary_location = "/usr/bin/chromium"
     
     try:
+        # Asumiendo que el ChromeDriver también está en la ruta estándar del contenedor
         service = ChromeService(executable_path="/usr/bin/chromedriver")
         driver = webdriver.Chrome(service=service, options=chrome_options)
         return driver
     except Exception as e:
-        st.error(f"Error al iniciar WebDriver para generar mapa: {e}")
+        # st.error(f"Error al iniciar WebDriver para generar mapa: {e}")
         return None
 
-# --- Clase para generar el PDF ---
+#--- Clase para generar el PDF
+
 class PDF(FPDF):
     def header(self):
         if os.path.exists(Config.LOGO_PATH):
@@ -64,22 +78,28 @@ class PDF(FPDF):
         if df.empty:
             self.add_body_text("No hay datos disponibles para esta tabla.")
             return
-        
+
         self.set_font('Arial', 'B', 8)
         col_width = (self.w - 2 * self.l_margin) / len(df.columns)
+
         for col_name in df.columns:
             self.cell(col_width, 8, str(col_name), 1, 0, 'C')
+
         self.ln()
-        
+
         self.set_font('Arial', '', 7)
         for _, row in df.iterrows():
             for item in row:
                 self.cell(col_width, 8, str(item), 1, 0, 'L')
+
             self.ln()
+
         self.ln(5)
 
     def add_plotly_fig(self, fig, width=190):
         try:
+            # Asegurar que se importa io para la escritura de la imagen si no está en el scope global
+            import io 
             img_bytes = fig.to_image(format="png", width=1000, height=500, scale=2)
             self.image(io.BytesIO(img_bytes), w=width)
             self.ln(5)
@@ -87,15 +107,20 @@ class PDF(FPDF):
             self.add_body_text(f"Error al generar imagen del gráfico: {e}")
 
     def add_folium_map(self, map_obj, width=190):
+        # Esta importación es segura porque setup_driver() ya maneja la lógica de Selenium
+        import tempfile
+        import os
+        
         driver = setup_driver()
+
         if not driver:
             self.add_body_text("No se pudo generar la imagen del mapa (WebDriver no disponible).")
             return
 
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode='w', encoding='utf-8') as tmp_html:
             map_obj.save(tmp_html.name)
-            html_path = tmp_html.name
-        
+
+        html_path = tmp_html.name
         png_path = html_path.replace(".html", ".png")
 
         try:
@@ -103,12 +128,14 @@ class PDF(FPDF):
             driver.save_screenshot(png_path)
             self.image(png_path, w=width)
             self.ln(5)
+
         finally:
             driver.quit()
             if os.path.exists(html_path): os.unlink(html_path)
             if os.path.exists(png_path): os.unlink(png_path)
 
-# --- Función Principal para Generar el Reporte ---
+#--- Función Principal para Generar el Reporte ---
+
 def generate_pdf_report(report_title, sections_to_include, summary_data, df_anomalies, **data):
     pdf = PDF()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -117,19 +144,19 @@ def generate_pdf_report(report_title, sections_to_include, summary_data, df_anom
     pdf.cell(0, 10, report_title, 0, 1, 'C')
     pdf.ln(10)
 
-    # --- Extracción de DataFrames para fácil acceso ---
+    #--- Extracción de DataFrames para fácil acceso
     gdf_filtered = data.get('gdf_filtered', pd.DataFrame())
     df_anual_melted = data.get('df_anual_melted', pd.DataFrame())
     df_monthly_filtered = data.get('df_monthly_filtered', pd.DataFrame())
     stations_for_analysis = data.get('stations_for_analysis', [])
 
-    # --- LÓGICA COMPLETA PARA TODAS LAS SECCIONES ---
-    
+    #--- LÓGICA COMPLETA PARA TODAS LAS SECCIONES
+
     if "Resumen Ejecutivo" in sections_to_include:
         # NUEVA SECCIÓN: Resumen Ejecutivo (Texto de ejemplo)
         pdf.add_section_title("1. Resumen Ejecutivo")
         pdf.add_body_text(
-            "Este reporte presenta un análisis hidroclimático detallado de las estaciones seleccionadas. "
+            "Este reporte presenta un análisis hidroclimático detallado de las estaciones seleccionadas."
             "Se evalúan las tendencias de precipitación, la ocurrencia de anomalías y eventos extremos, "
             "y se realizan análisis de correlación con fenómenos macroclimáticos. El objetivo es proporcionar "
             "una visión integral del comportamiento de la lluvia en la región de estudio."
@@ -156,27 +183,27 @@ def generate_pdf_report(report_title, sections_to_include, summary_data, df_anom
             pdf.add_dataframe(stations_table)
         else:
             pdf.add_body_text("No hay datos de estaciones para mostrar.")
-            
+
     if "Distribución Espacial" in sections_to_include:
         pdf.add_section_title("2. Mapa de Distribución Espacial")
         if not gdf_filtered.empty:
             m = create_folium_map(
-                location=[4.57, -74.29], zoom=5, 
-                base_map_config={"tiles": "cartodbpositron", "attr": "CartoDB"}, 
-                overlays_config=[], 
+                location=[4.57, -74.29], zoom=5,
+                base_map_config={"tiles": "cartodbpositron", "attr": "CartoDB"},
+                overlays_config=[],
                 fit_bounds_data=gdf_filtered
             )
             for _, row in gdf_filtered.iterrows():
                 popup = generate_station_popup_html(row, df_anual_melted)
                 folium.Marker(
-                    location=[row.geometry.y, row.geometry.x], 
-                    tooltip=row[Config.STATION_NAME_COL], 
+                    location=[row.geometry.y, row.geometry.x],
+                    tooltip=row[Config.STATION_NAME_COL],
                     popup=popup
                 ).add_to(m)
             pdf.add_folium_map(m)
         else:
             pdf.add_body_text("No hay estaciones seleccionadas para mostrar en el mapa.")
-            
+
     if "Gráficos de Series Temporales" in sections_to_include:
         pdf.add_section_title("3. Gráficos de Series Temporales")
         pdf.set_font('Arial', 'B', 10)
@@ -246,7 +273,8 @@ def generate_pdf_report(report_title, sections_to_include, summary_data, df_anom
         pdf.add_section_title("10. Metodología y Fuentes")
         pdf.add_body_text(
             "Los datos de precipitación fueron obtenidos de [Tu Fuente de Datos]. El análisis se realizó utilizando Python y las librerías Pandas, Plotly y Streamlit. "
-            "Las tendencias se evaluaron con la prueba no paramétrica de Mann-Kendall y la pendiente de Sen. Las anomalías se calcularon con respecto al promedio histórico del período seleccionado."
+            "Las tendencias se evaluaron con la prueba no paramétrica de Mann-Kendall y la pendiente de Sen. Las anomalías se calcularon con respecto al promedio "
+            "histórico del período seleccionado."
         )
 
     return bytes(pdf.output(dest='S'))
