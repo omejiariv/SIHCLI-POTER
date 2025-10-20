@@ -4,6 +4,7 @@ import base64
 import geopandas as gpd
 import altair as alt
 import folium
+from rasterstats import zonal_stats
 from folium.plugins import MarkerCluster, MiniMap
 from folium.raster_layers import WmsTileLayer
 from streamlit_folium import folium_static
@@ -1233,13 +1234,13 @@ def create_interpolation_surface(year, method, variogram_model, bounds, gdf_meta
         return None, None, f"Error en la interpolación: {e}\n{traceback.format_exc()}"
 
 @st.cache_data
-def create_climate_risk_map(df_anual, gdf_filtered):
+def create_climate_risk_map(df_anual, _gdf_filtered):
     """
     Calcula y visualiza un mapa de riesgo por variabilidad climática basado en tendencias.
     """
     with st.spinner("Calculando tendencias para todas las estaciones..."):
         # Llama a la función que calcula la tendencia para cada estación
-        gdf_trends = calculate_all_station_trends(df_anual, gdf_filtered)
+        gdf_trends = calculate_all_station_trends(df_anual, _gdf_filtered)
 
     if gdf_trends.empty or len(gdf_trends) < 4:
         st.warning("No hay suficientes estaciones con datos de tendencia (>10 años) para generar un mapa de riesgo.")
@@ -1250,7 +1251,7 @@ def create_climate_risk_map(df_anual, gdf_filtered):
     values = gdf_trends['slope_sen'].values
     
     # Crea la grilla de interpolación
-    bounds = gdf_filtered.total_bounds
+    bounds = _gdf_filtered.total_bounds
     grid_lon = np.linspace(bounds[0], bounds[2], 200)
     grid_lat = np.linspace(bounds[1], bounds[3], 200)
     grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
@@ -1277,12 +1278,18 @@ def create_climate_risk_map(df_anual, gdf_filtered):
 
     # Añade los puntos de las estaciones con sus datos de tendencia
     fig.add_trace(go.Scatter(
-        x=coords[:, 0], y=coords[:, 1], mode='markers',
-        marker=dict(color='black', size=5, symbol='circle-open'),
-        hoverinfo='text',
-        hovertext=gdf_trends.apply(lambda row: f"<b>{row[Config.STATION_NAME_COL]}</b><br>Tendencia: {row['slope_sen']:.2f} mm/año<br>p-valor: {row['p_value']:.3f}", axis=1),
-        name='Estaciones con Tendencia'
-    ))
+            x=coords[:, 0], y=coords[:, 1], mode='markers',
+            marker=dict(color='black', size=5, symbol='circle-open'),
+            hoverinfo='text',
+            hovertext=gdf_trends.apply(lambda row:
+                                       f"<b>Estación: {row[Config.STATION_NAME_COL]}</b><br><br>"
+                                       f"Municipio: {row.get(Config.MUNICIPALITY_COL, 'N/A')}<br>" # Added Municipio
+                                       f"Altitud: {row.get(Config.ALTITUDE_COL, 'N/A'):.0f} m<br>" # Added Altitud
+                                       f"Tendencia: {row['slope_sen']:.2f} mm/año<br>"
+                                       f"Significancia (p-valor): {row['p_value']:.3f}", 
+                                       axis=1),
+            name='Estaciones con Tendencia' # Esta línea (1291) está bien indentada
+        ))
 
     fig.update_layout(
         title="Mapa de Riesgo por Tendencias de Precipitación",
@@ -1435,6 +1442,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     dem_file = st.session_state.get('dem_file')
 
                     if st.button("Generar Mapa para Cuenca(s)", disabled=not selected_basins, key="generate_basin_map_button"):
+                        st.session_state['run_balance'] = run_balance
                         st.session_state['fig_basin'] = None
                         st.session_state['error_msg'] = None
                         st.session_state['mean_precip'] = None
@@ -1556,6 +1564,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 error_msg = st.session_state.get('error_msg')
                 mean_precip = st.session_state.get('mean_precip')
                 
+                # --- CORRECCIÓN DE LÓGICA ---
+                # 1. Obtenemos TODOS los resultados de la sesión primero
+                unified_basin_gdf = st.session_state.get('unified_basin_gdf')
+                morph_results = st.session_state.get('morph_results')
+                run_balance = st.session_state.get('run_balance')
+                
                 if error_msg:
                     st.error(error_msg)
                 
@@ -1563,17 +1577,17 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     st.subheader(f"Resultados para: {st.session_state.get('selected_basins_title', '')}")
                     st.plotly_chart(fig_basin, use_container_width=True)
 
-                unified_basin_gdf = st.session_state.get('unified_basin_gdf')
-                morph_results = st.session_state.get('morph_results')
-                run_balance = st.session_state.get('run_balance')
-
+                # 2. Mostramos el Balance Hídrico
                 if mean_precip is not None and unified_basin_gdf is not None and run_balance:
                     st.markdown("---")
                     st.subheader("Balance Hídrico Estimado")
                     
+                    # 3. Extraemos la altitud promedio de los resultados de morfometría
+                    # Si no hay morfometría (ej. no se cargó el DEM), alt_prom será None
                     alt_prom = morph_results.get('alt_prom_m') if morph_results else None
                     
                     with st.spinner("Calculando balance..."):
+                        # 4. Llamamos a la función con los TRES argumentos correctos
                         balance_results = calculate_hydrological_balance(mean_precip, alt_prom, unified_basin_gdf)
                         
                         if balance_results.get("error"):
@@ -1581,11 +1595,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         else:
                             c1, c2, c3, c4 = st.columns(4)
                             c1.metric("Precipitación Media (P)", f"{balance_results['P_media_anual_mm']:.0f} mm/año")
-                            c2.metric("Altitud Media", f"{balance_results['Altitud_media_m']:.0f} m" if balance_results['Altitud_media_m'] else "N/A")
-                            c3.metric("ET Media Estimada (ET)", f"{balance_results['ET_media_anual_mm']:.0f} mm/año" if balance_results['ET_media_anual_mm'] else "N/A")
-                            c4.metric("Escorrentía (Q=P-ET)", f"{balance_results['Q_mm']:.0f} mm/año" if balance_results['Q_mm'] else "N/A")
+                            c2.metric("Altitud Media", f"{balance_results['Altitud_media_m']:.0f} m" if balance_results['Altitud_media_m'] is not None else "N/A")
+                            c3.metric("ET Media Estimada (ET)", f"{balance_results['ET_media_anual_mm']:.0f} mm/año" if balance_results['ET_media_anual_mm'] is not None else "N/A")
+                            c4.metric("Escorrentía (Q=P-ET)", f"{balance_results['Q_mm']:.0f} mm/año" if balance_results['Q_mm'] is not None else "N/A")
                             st.success(f"Volumen de escorrentía anual estimado: **{balance_results['Q_m3_año']/1e6:.2f} millones de m³** sobre un área de **{balance_results['Area_km2']:.2f} km²**.")
-
+                
+                # 5. Mostramos la Morfometría (AHORA esta sección está después del balance)
                 if morph_results:
                     st.markdown("---")
                     st.subheader("Morfometría de la Cuenca")
@@ -1600,8 +1615,10 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         c4.metric("Altitud Máxima", f"{morph_results.get('alt_max_m', 'N/A'):.0f} m")
                         c5.metric("Altitud Mínima", f"{morph_results.get('alt_min_m', 'N/A'):.0f} m")
                         c6.metric("Altitud Promedio", f"{morph_results.get('alt_prom_m', 'N/A'):.1f} m")
-                elif dem_file is None:
-                    st.info("Para ver la morfometría y el balance hídrico completo, suba un archivo DEM en el panel lateral.")
+                
+                elif st.session_state.get('dem_file') is None and run_balance:
+                    st.info("Para ver el Balance Hídrico completo y la Morfometría, suba un archivo DEM en el panel lateral.")
+                    
         else: # MODO REGIONAL
             df_anual_non_na = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
             if not stations_for_analysis or df_anual_non_na.empty:
@@ -1739,72 +1756,22 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
 
     with risk_map_tab:
         st.subheader("Mapa de Vulnerabilidad por Tendencias de Precipitación a Largo Plazo")
-        st.info("Este mapa muestra la tendencia (Pendiente de Sen) para cada estación con datos suficientes (>10 años).")
+        st.info("""
+        Este mapa interpola la tendencia (Pendiente de Sen) de todas las estaciones con datos suficientes (>10 años)
+        para crear una superficie de riesgo.
+        - **Zonas Azules:** Indican una tendencia a precipitación *creciente* (más mm/año).
+        - **Zonas Rojas:** Indican una tendencia a precipitación *decreciente* (menos mm/año).
+        """)
         
-        with st.expander("Opciones del Mapa"):
-            map_style = st.selectbox(
-                "Estilo del Mapa Base:",
-                options=["carto-positron", "open-street-map", "stamen-terrain", "white-bg"],
-                key="risk_map_style"
-            )
-            marker_size = st.slider("Tamaño de los Puntos de Estación:", 5, 25, 10, key="risk_marker_size")
-            show_trend_surface = st.toggle("Mostrar superficie de tendencia interpolada", value=False)
-
-        if st.button("Generar Mapa de Riesgo Integrado"):
-            with st.spinner("Calculando tendencias y generando mapa..."):
-                gdf_trends = calculate_all_station_trends(df_anual_melted, gdf_filtered)
-
-                if not gdf_trends.empty:
-                    gdf_trends['hover_text'] = gdf_trends.apply(
-                        lambda row: f"<b>Estación: {row[Config.STATION_NAME_COL]}</b><br><br>"
-                                    f"Municipio: {row[Config.MUNICIPALITY_COL]}<br>"
-                                    f"Altitud: {row[Config.ALTITUDE_COL]:.0f} m<br>"
-                                    f"Tendencia: {row['slope_sen']:.2f} mm/año<br>"
-                                    f"Significancia (p-valor): {row['p_value']:.3f}",
-                        axis=1
-                    )
-                    
-                    fig_risk = px.scatter_mapbox(
-                        gdf_trends,
-                        lat=gdf_trends.geometry.y,
-                        lon=gdf_trends.geometry.x,
-                        color="slope_sen",
-                        size=np.abs(gdf_trends['slope_sen']),
-                        color_continuous_scale=px.colors.diverging.RdBu,
-                        size_max=marker_size,
-                        zoom=5,
-                        mapbox_style=map_style,
-                        hover_name=Config.STATION_NAME_COL,
-                        custom_data=['hover_text']
-                    )
-                    fig_risk.update_traces(hovertemplate="%{customdata[0]}")
-                    fig_risk.update_layout(
-                        title="Tendencias de Precipitación sobre Mapa Base",
-                        legend_title_text='Tendencia (mm/año)',
-                        margin={"r":0,"t":40,"l":0,"b":0}
-                    )
-
-                    if show_trend_surface:
-                        if len(gdf_trends) < 4:
-                            st.warning("Se necesitan al menos 4 estaciones para generar la superficie de tendencia.")
-                        else:
-                            coords = np.array(gdf_trends.geometry.apply(lambda p: (p.x, p.y)).tolist())
-                            values = gdf_trends['slope_sen'].values
-                            bounds = gdf_filtered.total_bounds
-                            grid_lon = np.linspace(bounds[0], bounds[2], 150)
-                            grid_lat = np.linspace(bounds[1], bounds[3], 150)
-                            grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
-                            grid_z = griddata(coords, values, (grid_x, grid_y), method='cubic')
-                            
-                            fig_risk.add_trace(go.Contour(
-                                z=grid_z.T, x=grid_lon, y=grid_lat,
-                                colorscale='RdBu', contours=dict(coloring='heatmap'),
-                                hoverinfo='none', opacity=0.5, showscale=False
-                            ))
-                    
-                    st.plotly_chart(fig_risk, use_container_width=True)
-                else:
-                    st.warning("No hay suficientes datos de tendencia (>10 años) para generar el mapa.")
+        # Llamamos a la función que SÍ interpola la superficie (definida alrededor de la línea 2751)
+        # Asegúrate de que los argumentos pasados (df_anual_melted, gdf_filtered) 
+        # son los correctos según el contexto de tu función display_advanced_maps_tab
+        fig_risk_contour = create_climate_risk_map(df_anual_melted, gdf_filtered)
+        
+        if fig_risk_contour:
+            st.plotly_chart(fig_risk_contour, use_container_width=True)
+        else:
+            st.warning("No hay suficientes datos de tendencia (>10 años) para generar el mapa.")
 
     with validation_tab:
         st.subheader("Validación Cruzada Comparativa de Métodos de Interpolación")
