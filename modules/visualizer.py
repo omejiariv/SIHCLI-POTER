@@ -3973,6 +3973,137 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
         # Muestra el mapa
         folium_static(m, height=700, width=None)
 
+def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
+    st.header("Análisis de Cobertura del Suelo por Cuenca")
+
+    # --- Configuración ---
+    # !! IMPORTANTE: Ajusta esta ruta si es necesario !!
+    land_cover_zip_path = os.path.join('modules', 'data', 'coberturasCV.zip')
+    # !! IMPORTANTE: Cambia 'COBERTURA_TIPO' al nombre real de la columna
+    #    que contiene la descripción de la cobertura en tu shapefile !!
+    cover_column_name = 'COBERTURA_TIPO' # EJEMPLO: podría ser 'DESCRIP', 'USO', etc.
+    # Define el CRS proyectado para cálculos de área (ej. MAGNA-SIRGAS Colombia Bogota)
+    projected_crs = "EPSG:3116"
+    # --- Fin Configuración ---
+
+    st.info(f"Se utilizará el archivo de coberturas: '{os.path.basename(land_cover_zip_path)}'. Asegúrate de que la columna de descripción sea '{cover_column_name}'.")
+
+    # Obtener la cuenca unificada de la sesión (generada en la pestaña de interpolación)
+    unified_basin_gdf = st.session_state.get('unified_basin_gdf')
+    basin_name = st.session_state.get('selected_basins_title', 'Cuenca Seleccionada')
+
+    if unified_basin_gdf is None or unified_basin_gdf.empty:
+        st.warning("Primero debes generar un mapa para una cuenca específica en la pestaña 'Mapas Avanzados -> Superficies de Interpolación'.")
+        return
+
+    if not os.path.exists(land_cover_zip_path):
+        st.error(f"No se encontró el archivo de coberturas en la ruta: {land_cover_zip_path}")
+        return
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader(f"Cobertura del Suelo en: {basin_name}")
+        try:
+            with st.spinner("Cargando y procesando coberturas..."):
+                # Cargar shapefile desde el zip
+                # Asumiendo que el .shp dentro del zip se llama igual que el zip sin la extensión
+                shp_name_inside_zip = os.path.splitext(os.path.basename(land_cover_zip_path))[0] + ".shp"
+                # Construir la ruta de acceso especial para geopandas
+                full_zip_path = f"zip://{land_cover_zip_path}!{shp_name_inside_zip}"
+                
+                gdf_land_cover = gpd.read_file(full_zip_path)
+
+                # Verificar que la columna de cobertura exista
+                if cover_column_name not in gdf_land_cover.columns:
+                    st.error(f"La columna '{cover_column_name}' no se encontró en el archivo de coberturas. Columnas disponibles: {', '.join(gdf_land_cover.columns)}")
+                    return
+
+                # Reproyectar a CRS proyectado para cálculos de área
+                basin_proj = unified_basin_gdf.to_crs(projected_crs)
+                land_cover_proj = gdf_land_cover.to_crs(projected_crs)
+
+                # Recortar coberturas con la geometría de la cuenca
+                gdf_clipped = gpd.clip(land_cover_proj, basin_proj)
+
+                if gdf_clipped.empty:
+                    st.warning("No se encontraron coberturas dentro del área de la cuenca seleccionada.")
+                    return
+
+                # Calcular área por tipo de cobertura
+                gdf_clipped['area_m2'] = gdf_clipped.geometry.area
+                coverage_stats = gdf_clipped.groupby(cover_column_name)['area_m2'].sum().reset_index()
+
+                # Calcular área total y porcentajes
+                total_area_m2 = basin_proj.geometry.area.iloc[0] # Área total de la cuenca
+                coverage_stats['area_km2'] = coverage_stats['area_m2'] / 1_000_000
+                coverage_stats['percentage'] = (coverage_stats['area_m2'] / total_area_m2) * 100
+
+                # Guardar resultados para posible uso posterior (ej. escenarios)
+                st.session_state['current_coverage_stats'] = coverage_stats
+                st.session_state['total_basin_area_km2'] = total_area_m2 / 1_000_000
+
+                # Mostrar tabla de resultados
+                st.dataframe(coverage_stats[[cover_column_name, 'area_km2', 'percentage']]
+                             .rename(columns={cover_column_name: 'Tipo de Cobertura',
+                                              'area_km2': 'Área (km²)',
+                                              'percentage': 'Porcentaje (%)'})
+                             .style.format({'Área (km²)': '{:.2f}', 'Porcentaje (%)': '{:.1f}%'}),
+                             use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error al procesar el archivo de coberturas: {e}")
+            import traceback
+            st.error(traceback.format_exc()) # Más detalles del error
+            return # Detener si hay error aquí
+
+    with col2:
+        st.subheader("Visualización y Relación con Escorrentía")
+        if 'current_coverage_stats' in st.session_state:
+            stats_df = st.session_state['current_coverage_stats']
+            if not stats_df.empty:
+                # Gráfico de Pastel
+                fig_pie = px.pie(stats_df, names=cover_column_name, values='percentage',
+                                 title=f"Distribución de Coberturas (%)",
+                                 hole=0.3) # Gráfico de dona
+                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+                # Mostrar Escorrentía (si está disponible del balance)
+                balance_results = st.session_state.get('balance_results') # Asumiendo que guardaste los resultados del balance aquí
+                if balance_results and not balance_results.get("error"):
+                    q_mm = balance_results.get('Q_mm')
+                    q_m3 = balance_results.get('Q_m3_año')
+                    if q_mm is not None and q_m3 is not None:
+                         st.metric("Escorrentía Media Anual Estimada (Q)",
+                                   f"{q_mm:.0f} mm/año",
+                                   f"Volumen: {q_m3 / 1e6:.2f} Millones m³/año")
+                    else:
+                         st.info("La escorrentía no se calculó previamente.")
+                else:
+                    # Intentar obtener Q_mm directamente si balance_results no existe pero mean_precip sí
+                    mean_precip = st.session_state.get('mean_precip')
+                    morph_results = st.session_state.get('morph_results')
+                    if mean_precip and morph_results and morph_results.get('alt_prom_m'):
+                        # Recalcular solo para mostrar Q (asumiendo que P y Altitud están)
+                        temp_balance = calculate_hydrological_balance(mean_precip, morph_results.get('alt_prom_m'), unified_basin_gdf)
+                        if temp_balance and temp_balance.get('Q_mm') is not None:
+                             st.metric("Escorrentía Media Anual Estimada (Q)", f"{temp_balance['Q_mm']:.0f} mm/año")
+                        else:
+                             st.info("No se pudo recalcular la escorrentía. Ejecuta el Balance Hídrico primero.")
+                    else:
+                        st.info("Ejecuta el Balance Hídrico en la pestaña 'Superficies de Interpolación' para ver la escorrentía aquí.")
+
+            else:
+                st.info("No hay estadísticas de cobertura para visualizar.")
+        else:
+            st.info("Procesa las coberturas primero para ver la visualización.")
+
+    # --- Sección para Escenarios Hipotéticos (Parte 2) ---
+    # La añadiremos después de confirmar que la Parte 1 funciona.
+    st.markdown("---")
+    st.subheader("Modelado de Escenarios Hipotéticos (Próximamente)")
+    st.info("Aquí podrás definir porcentajes de cobertura y estimar el impacto en la escorrentía.")
 
 
 
