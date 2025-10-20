@@ -3706,7 +3706,17 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
         "Radiación Global Diaria (Onda Corta)": "shortwave_radiation_sum",
         "Evapotranspiración de Referencia (ET₀)": "et0_fao_evapotranspiration",
         "Humedad Relativa Media (2m)": "relative_humidity_2m_mean",
-        "Presión a Nivel del Mar": "pressure_msl_mean"
+        "Presión a Nivel del Mar": "pressure_msl_mean" # Mantener MSL si es lo que usas
+    }
+    
+    # --- AÑADIR ESTE DICCIONARIO DE UNIDADES ---
+    variable_units = {
+        "Velocidad Media del Viento (10m)": "(km/h)", # O (m/s) - Verifica la API
+        "Temperatura Media del Aire (2m)": "(°C)",
+        "Radiación Global Diaria (Onda Corta)": "(MJ/m²)",
+        "Evapotranspiración de Referencia (ET₀)": "(mm)",
+        "Humedad Relativa Media (2m)": "(%)",
+        "Presión a Nivel del Mar": "(hPa)"
     }
     
     col1, col2, col3 = st.columns([2,1,1])
@@ -3779,15 +3789,21 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
                         z_grid = np.nan_to_num(z_grid) # Asegura que no queden NaNs
 
                         # Crea la figura con go.Contour
+                        # --- MODIFICAR LA CREACIÓN DE LA FIGURA ---
+                        # Obtener la unidad
+                        unit = variable_units.get(selected_variable_name, "") # Obtiene la unidad, "" si no se encuentra
+                        
                         fig = go.Figure(data=go.Contour(
                             z=z_grid.T, 
                             x=grid_lon, 
                             y=grid_lat,
-                            colorscale='viridis', # Puedes cambiar la escala de color
-                            colorbar_title=selected_variable_name,
+                            colorscale='viridis', 
+                            # Modifica esta línea para añadir la unidad:
+                            colorbar_title=f"{selected_variable_name} {unit}", 
                             contours=dict(showlabels=True, labelfont=dict(size=10, color='white')),
                             line_smoothing=0.85
                         ))
+                        # --- FIN DE LA MODIFICACIÓN DE LA FIGURA ---
                         # Añade los puntos de las estaciones originales con sus valores
                         fig.add_trace(go.Scatter(
                             x=lons_data, y=lats_data, mode='markers', 
@@ -3925,5 +3941,6 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
 
         # Muestra el mapa
         folium_static(m, height=700, width=None)
+
 
 
