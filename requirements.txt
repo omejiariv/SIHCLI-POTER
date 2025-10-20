@@ -1,4 +1,4 @@
-# Forzando la reinstalación de paquetes v2
+# requirements.txt
 
 numpy==1.26.4
 pandas==2.2.2
@@ -28,3 +28,6 @@ Pillow==10.3.0
 openmeteo-requests
 requests-cache
 retry-requests
+rich==13.7.1
+rasterstats
+PyKrige
