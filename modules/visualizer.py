@@ -4015,7 +4015,16 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
                 full_zip_path = f"zip://{land_cover_zip_path}!{shp_name_inside_zip}"
                 
                 gdf_land_cover = gpd.read_file(full_zip_path)
-
+                if gdf_land_cover.crs is None:
+                    st.warning("Advertencia: El shapefile de coberturas no tiene CRS definido. Asumiendo EPSG:XXXX...") # Inform the user
+                    try:
+                        # !! Reemplaza "EPSG:XXXX" con el código EPSG original correcto !!
+                        # Ejemplos: "EPSG:4686", "EPSG:3116", "EPSG:4326"
+                        gdf_land_cover.set_crs("EPSG:9377", inplace=True)
+                    except Exception as e_crs:
+                        st.error(f"Error al asignar CRS inicial al shapefile de coberturas: {e_crs}")
+                        return # Stop if CRS cannot be set
+                
                 # Verificar que la columna de cobertura exista
                 if cover_column_name not in gdf_land_cover.columns:
                     st.error(f"La columna '{cover_column_name}' no se encontró en el archivo de coberturas. Columnas disponibles: {', '.join(gdf_land_cover.columns)}")
@@ -4106,6 +4115,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     st.markdown("---")
     st.subheader("Modelado de Escenarios Hipotéticos (Próximamente)")
     st.info("Aquí podrás definir porcentajes de cobertura y estimar el impacto en la escorrentía.")
+
 
 
 
