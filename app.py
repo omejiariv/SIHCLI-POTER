@@ -19,7 +19,8 @@ from modules.visualizer import (
     display_trends_and_forecast_tab, display_downloads_tab, display_station_table_tab,
     display_weekly_forecast_tab,
     display_additional_climate_maps_tab, 
-    display_satellite_imagery_tab
+    display_satellite_imagery_tab,
+    display_land_cover_analysis_tab
 )
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
@@ -98,6 +99,7 @@ def main():
     tab_names = [
         "Bienvenida", "Distribución Espacial", "Gráficos", "Mapas Avanzados",
         "Variables Climáticas", "Imágenes Satelitales",
+        "Análisis Cobertura Suelo",
         "Análisis de Anomalías", "Análisis de Extremos", "Estadísticas",
         "Correlación", "Análisis ENSO", "Tendencias y Pronósticos",
         "Pronóstico Semanal",
@@ -219,26 +221,28 @@ def main():
         display_additional_climate_maps_tab(**display_args)
     with tabs[5]: # Imágenes Satelitales (nuevo índice 5)
         display_satellite_imagery_tab(**display_args)
-    with tabs[6]:
-        display_anomalies_tab(df_long=st.session_state.df_long, **display_args)
+    with tabs[6]: # Análisis Cobertura Suelo
+        display_land_cover_analysis_tab(**display_args)    
     with tabs[7]:
-        display_drought_analysis_tab(df_long=st.session_state.df_long, **display_args)
+        display_anomalies_tab(df_long=st.session_state.df_long, **display_args)
     with tabs[8]:
-        display_stats_tab(df_long=st.session_state.df_long, **display_args)
+        display_drought_analysis_tab(df_long=st.session_state.df_long, **display_args)
     with tabs[9]:
-        display_correlation_tab(**display_args)
+        display_stats_tab(df_long=st.session_state.df_long, **display_args)
     with tabs[10]:
-        display_enso_tab(df_enso=st.session_state.df_enso, **display_args)
+        display_correlation_tab(**display_args)
     with tabs[11]:
+        display_enso_tab(df_enso=st.session_state.df_enso, **display_args)
+    with tabs[12]:
         display_trends_and_forecast_tab(df_full_monthly=st.session_state.df_long, **display_args)
         
-    with tabs[12]:
+    with tabs[13]:
         display_weekly_forecast_tab(
         stations_for_analysis=stations_for_analysis,
         gdf_filtered=gdf_filtered
     )
     
-    with tabs[13]:
+    with tabs[14]:
         display_downloads_tab(
             df_anual_melted=df_anual_melted,
             df_monthly_filtered=df_monthly_filtered,
@@ -246,7 +250,7 @@ def main():
             analysis_mode=st.session_state.analysis_mode
         )
 
-    with tabs[14]:
+    with tabs[15]:
         st.header("Análisis Agregado por Cuenca Hidrográfica")
         if st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
             BASIN_NAME_COLUMN = 'SUBC_LBL'
@@ -291,7 +295,7 @@ def main():
         else:
             st.warning("Los datos de las subcuencas no están cargados.")
 
-    with tabs[15]:
+    with tabs[16]:
         st.header("Comparación de Periodos de Tiempo")
         analysis_level = st.radio(
             "Seleccione el nivel de análisis para la comparación:",
@@ -377,10 +381,10 @@ def main():
                     st.write(f"**Periodo 2 ({periodo2[0]}-{periodo2[1]})**")
                     st.dataframe(df_periodo2[Config.PRECIPITATION_COL].describe().round(2))
     
-    with tabs[16]:
+    with tabs[17]:
         display_station_table_tab(**display_args)
     
-    with tabs[17]:
+    with tabs[18]:
         st.header("Generación de Reporte PDF")
        
         # Opciones para el reporte
@@ -463,6 +467,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
