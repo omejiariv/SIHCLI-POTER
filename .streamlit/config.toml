@@ -1,0 +1,4 @@
+[server]
+folderWatchBlacklist = ['venv', '.*', 'data', 'assets']
+headless = true
+fileWatcherType = "poll"
