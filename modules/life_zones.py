@@ -1,255 +1,272 @@
 # modules/life_zones.py
-
 import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.warp import reproject, Resampling
 import streamlit as st
+import math # Para logaritmos
 
 # --- Constantes (Ajustar según tu región si es necesario) ---
 LAPSE_RATE = 6.5 # Tasa de lapso estándar (°C / 1000m)
-BASE_TEMP_SEA_LEVEL = 28.0 # Temp base estimada a nivel del mar (°C)
+# Ajustar T° base según datos locales si es posible
+BASE_TEMP_SEA_LEVEL = 28.0 # Temp base estimada a nivel del mar (°C) 
+# Factor de ajuste simple por latitud (puede requerir calibración)
+# Holdridge original sugiere un ajuste, pero es complejo. Usaremos uno simple.
+# Valor negativo porque T° disminuye al alejarse del ecuador.
+# Podríamos usar 0 si asumimos que BASE_TEMP_SEA_LEVEL ya es para la latitud de interés.
+LATITUDE_ADJUSTMENT_FACTOR = 0.0 # -0.1 # Grados C por grado de latitud desde el ecuador
 
-# --- Funciones de Cálculo (Sin cambios respecto a la versión anterior) ---
+# --- Funciones de Cálculo MEJORADAS ---
 
 def estimate_mean_annual_temp(elevation_m):
     """Estima la Temperatura Media Anual (TMA) basada en la altitud."""
     estimated_temp = BASE_TEMP_SEA_LEVEL - (LAPSE_RATE * elevation_m / 1000.0)
-    return np.maximum(estimated_temp, -10) # Límite inferior razonable
+    return np.maximum(estimated_temp, -15) # Límite inferior más realista para alta montaña
 
-def estimate_biotemperature(mean_annual_temp):
+def calculate_biotemperature(mean_annual_temp, latitude):
     """
-    Estima la Biotemperature Anual Media (BAT) a partir de la TMA.
-    Holdridge define BAT como el promedio de temperaturas > 0°C y < 30°C.
-    Aquí usamos una aproximación clampeando la TMA.
+    Estima la Biotemperature Anual Media (BAT) a partir de la TMA y Latitud.
+    Aproximación: Clampea TMA entre 0-30 Y aplica un ajuste simple por latitud.
+    Holdridge: Suma de T medias diarias > 0 / 365. Si T>30, se trata como 30 en la suma.
+    Esto es difícil sin datos diarios/mensuales.
     """
-    # Clampar temperaturas: T° < 0 se vuelve 0, T° > 30 se vuelve 30
+    # Clampear temperaturas base Holdridge (0 a 30)
     clamped_temp = np.clip(mean_annual_temp, 0, 30)
-    # Corrección: Las temperaturas bajo cero sí se cuentan como 0 en la suma,
-    # pero para el promedio se podría usar una corrección más compleja.
-    # Por simplicidad, mantenemos el clampeo como aproximación.
-    return clamped_temp
+    
+    # Ajuste simple por latitud (opcional, puede desactivarse con LATITUDE_ADJUSTMENT_FACTOR = 0)
+    # Asume que la T° base es ecuatorial y disminuye con latitud.
+    lat_adjustment = LATITUDE_ADJUSTMENT_FACTOR * np.abs(latitude)
+    
+    # Aplicar ajuste y asegurar que BAT no sea negativa
+    biotemp = np.maximum(0, clamped_temp + lat_adjustment) 
+    
+    # Otra corrección Holdridge: si TMA < 0, BAT es 0.
+    biotemp = np.where(mean_annual_temp < 0, 0, biotemp)
+    
+    return biotemp
 
+# --- calculate_pet y calculate_per SIN CAMBIOS ---
 def calculate_pet(biotemperature):
-    """Calcula la Evapotranspiración Potencial (PET) anual media (mm)."""
-    # Fórmula simplificada de Holdridge: PET = 58.93 * BAT
     return 58.93 * biotemperature
 
 def calculate_per(pet, precipitation):
-    """Calcula la Razón de Evapotranspiración Potencial (PER)."""
-    # Evitar división por cero
-    precipitation = np.maximum(precipitation, 1) # Asegura Ppt mínima de 1mm
+    precipitation = np.maximum(precipitation, 1) 
     per = pet / precipitation
-    return per # No limitamos PER aquí, la clasificación lo manejará
+    return per 
 
-# --- Mapeo de Zonas a Enteros ---
-# Basado en los nombres de image_2cf16d.png
-# Asignamos un entero único a cada zona. El 0 será para NoData/Desconocido.
+# --- Diccionario de Zonas de Vida (REVISADO Y AMPLIADO) ---
+# Basado en el diagrama estándar y tu tabla. Reordenado por ID numérico.
 holdridge_zone_map = {
-    # Nival
-    "Nival": 1,
-    # Alpino (Subnival en tabla)
-    "Tundra pluvial Alpina": 2,
-    "Tundra húmeda Alpina": 3,
-    "Tundra seca Alpina": 4,
-    # Subalpino (Páramo en tabla)
-    "Páramo pluvial Subalpino": 5,
-    "Páramo húmedo Subalpino": 6, # Asumiendo este es "Paramo muy humedo"
-    "Páramo seco Subalpino": 7,
-    # Montano (Montano en tabla)
-    "Bosque pluvial Montano": 8,
-    "Bosque muy húmedo Montano": 9,
-    "Bosque húmedo Montano": 10,
-    "Bosque seco Montano": 11,
-    "Estepa espinosa Montano": 12,
-    # Montano Bajo (Premontano en tabla)
-    "Bosque pluvial Montano Bajo": 13,
-    "Bosque muy húmedo Montano Bajo": 14,
-    "Bosque húmedo Montano Bajo": 15,
-    "Bosque seco Montano Bajo": 16,
-    "Estepa espinosa Montano Bajo": 17,
-    "Monte espinoso Montano Bajo": 18, # Agregado basado en patrón Holdridge general
-    # Tropical y Subtropical (Basal en tabla) - Holdridge original los separa por BAT > 24
-    # Aquí los agrupamos como "Basal" según la tabla, pero podríamos separarlos si es necesario.
-    # Asumiendo que > 18 es el piso Basal completo (Premontano/Tropical)
-    "Bosque pluvial Tropical/Premontano": 19, # Combinado
-    "Bosque muy húmedo Tropical/Premontano": 20, # Combinado
-    "Bosque húmedo Tropical/Premontano": 21, # Combinado
-    "Bosque seco Tropical/Premontano": 22, # Combinado
-    "Estepa espinosa Tropical/Premontano": 23, # Combinado (antes Monte Espinoso)
-    "Monte espinoso Tropical/Premontano": 24, # Renombrado/Agregado
-    "Desierto Tropical/Premontano": 25, # Agregado basado en patrón
-    # Zona Desconocida / NoData
-    "Zona Desconocida": 0
+    # Nival / Polar (BAT < 1.5)
+    "Nival / Hielo": 1,
+    # Alpino / Subnival (1.5 <= BAT < 3)
+    "Tundra seca Alpina": 2,          # Semiárido a Superárido
+    "Tundra húmeda Alpina": 3,       # Húmedo a Subhúmedo
+    "Tundra pluvial Alpina": 4,        # Perhúmedo a Superhúmedo
+    # Subalpino / Páramo (3 <= BAT < 6)
+    "Páramo seco Subalpino": 5,        # Semiárido a Arido
+    "Páramo húmedo Subalpino": 6,     # Húmedo a Subhúmedo (Tu "muy húmedo"?)
+    "Páramo pluvial Subalpino": 7,     # Perhúmedo a Superhúmedo
+    # Montano (6 <= BAT < 12)
+    "Estepa Montano": 11,             # Semiárido
+    "Bosque seco Montano": 12,        # Subhúmedo
+    "Bosque húmedo Montano": 13,       # Húmedo
+    "Bosque muy húmedo Montano": 14,   # Perhúmedo
+    "Bosque pluvial Montano": 15,      # Superhúmedo
+    "Estepa espinosa Montano": 10,     # Árido (Añadido)
+    "Desierto Montano": 9,           # Perárido a Superárido (Añadido)
+    # Montano Bajo / Premontano (12 <= BAT < 18)
+    "Monte espinoso Montano Bajo": 18, # Árido
+    "Estepa espinosa Montano Bajo": 17, # Semiárido
+    "Bosque seco Montano Bajo": 16,    # Subhúmedo
+    "Bosque húmedo Montano Bajo": 15,   # Húmedo
+    "Bosque muy húmedo Montano Bajo": 14,# Perhúmedo
+    "Bosque pluvial Montano Bajo": 13,  # Superhúmedo
+    "Desierto Montano Bajo": 19,       # Perárido a Superárido (Añadido)
+    # Subtropical (18 <= BAT < 24) - Equivalente a Basal cálido?
+    "Desierto Subtropical": 28,         # Perárido a Superárido
+    "Monte espinoso Subtropical": 27,   # Árido
+    "Estepa espinosa Subtropical": 26,  # Semiárido
+    "Bosque seco Subtropical": 25,     # Subhúmedo
+    "Bosque húmedo Subtropical": 24,    # Húmedo
+    "Bosque muy húmedo Subtropical": 23,# Perhúmedo
+    "Bosque pluvial Subtropical": 22,   # Superhúmedo
+    # Tropical (BAT >= 24) - Equivalente a Basal muy cálido?
+    "Desierto Tropical": 35,            # Perárido a Superárido
+    "Monte espinoso Tropical": 34,      # Árido
+    "Estepa espinosa Tropical": 33,     # Semiárido
+    "Bosque seco Tropical": 32,        # Subhúmedo
+    "Bosque húmedo Tropical": 31,       # Húmedo
+    "Bosque muy húmedo Tropical": 30,   # Perhúmedo
+    "Bosque pluvial Tropical": 29,      # Superhúmedo
+    # Otros
+    "Zona Desconocida / NoData": 0
 }
 
-# Crear el mapa inverso para obtener el nombre a partir del número
+# Mapa inverso ID -> Nombre
 holdridge_int_to_name = {v: k for k, v in holdridge_zone_map.items()}
 
-# --- Función de Clasificación ---
+# --- Función de Clasificación REESCRITA ---
 
-def classify_holdridge_zone(bat, ppt, per):
+def classify_holdridge_zone_detailed(bat, ppt, per):
     """
-    Clasifica la Zona de Vida de Holdridge basado en Biotemperatura (BAT),
-    Precipitación Total Anual (PPT) y Razón PET (PER).
-    Basado en los umbrales de las imágenes proporcionadas.
+    Clasifica la Zona de Vida usando lógica más cercana al diagrama hexagonal.
+    Utiliza umbrales logarítmicos para PPT y PER donde sea apropiado.
     """
     
-    # 1. Determinar Región Latitudinal / Piso Altitudinal (Según BAT)
-    # Límites de image_2cf96b.png
-    if bat < 1.5:
-        piso = "Nival"
-    elif bat < 3:
-        piso = "Alpino" # (Subnival en tabla)
-    elif bat < 6:
-        piso = "Subalpino" # (Paramo en tabla)
-    elif bat < 12:
-        piso = "Montano"
-    elif bat < 18: # Límite inferior de Basal/Premontano
-        piso = "Montano Bajo" # (Premontano en tabla)
-    else: # bat >= 18
-        # Aquí podrías diferenciar Tropical (>=24) si fuera necesario,
-        # pero la tabla agrupa en "Basal"
-        piso = "Tropical/Premontano" # (Basal en tabla)
+    # Manejar valores no válidos o extremos
+    if pd.isna(bat) or pd.isna(ppt) or pd.isna(per) or bat < 0 or ppt <= 0:
+        return "Zona Desconocida / NoData"
 
-    # 2. Determinar Provincia de Humedad (Según PER)
-    # Límites de image_2cf96b.png
-    if per <= 0.125: # Límite superior Superárido
-         # Podríamos diferenciar aún más si ppt es muy bajo (Desierto o Hielo)
-         # Simplificación: Asignar Superárido o related based on Piso
-         if piso == "Nival": return "Nival" # Hielo/Nieve permanente
-         elif piso == "Alpino": return "Tundra seca Alpina" # Muy seco
-         elif piso in ["Subalpino", "Montano", "Montano Bajo"]: return "Desierto" # Muy seco
-         else: return "Desierto Tropical/Premontano" # Muy seco
-    elif per <= 0.25:
-        humidity = "Perárido"
-    elif per <= 0.5:
-        humidity = "Árido"
-    elif per <= 1.0:
-        humidity = "Semiárido"
-    elif per <= 2.0:
-        humidity = "Subhúmedo"
-    elif per <= 4.0:
-        humidity = "Húmedo"
-    elif per <= 8.0:
-        humidity = "Perhúmedo"
-    else: # per > 8.0
-        humidity = "Superhúmedo"
+    # 1. Determinar Piso Altitudinal / Región Latitudinal (Basado en BAT)
+    if bat < 1.5: piso = "Nival"
+    elif bat < 3: piso = "Alpino"
+    elif bat < 6: piso = "Subalpino"
+    elif bat < 12: piso = "Montano"
+    elif bat < 18: piso = "Montano Bajo"
+    elif bat < 24: piso = "Subtropical"
+    else: piso = "Tropical"
 
-    # 3. Combinar Piso y Humedad para obtener la Zona Específica
-    #    (Usando los nombres de image_2cf16d.png y lógica de combinación)
+    # 2. Determinar Provincia de Humedad (Basado en PER)
+    # Umbrales del diagrama (aproximados, escala log base 2)
+    if per > 32.0: humidity_province = "Superárido"
+    elif per > 16.0: humidity_province = "Perárido"
+    elif per > 8.0: humidity_province = "Árido"
+    elif per > 4.0: humidity_province = "Semiárido"
+    elif per > 2.0: humidity_province = "Subhúmedo"
+    elif per > 1.0: humidity_province = "Húmedo"
+    elif per > 0.5: humidity_province = "Perhúmedo"
+    elif per > 0.25: humidity_province = "Superhúmedo (Pluvial)" # Bosque muy húmedo en algunos diagramas
+    else: humidity_province = "Superhúmedo++ (Rain Forest)" # El más húmedo
+
+    # 3. Asignar Zona de Vida Específica
+    # Esta es la lógica principal que mapea combinaciones a nombres.
+    # Es compleja y requiere cuidadosa traducción del diagrama.
+    # Ejemplo parcial mejorado:
+
+    zone_name = "Zona Desconocida / NoData" # Default
+
+    if piso == "Nival": zone_name = "Nival / Hielo"
     
-    zone_name = "Zona Desconocida" # Default
+    elif piso == "Alpino":
+        if humidity_province in ["Superhúmedo++", "Superhúmedo (Pluvial)"]: zone_name = "Tundra pluvial Alpina"
+        elif humidity_province in ["Perhúmedo", "Húmedo"]: zone_name = "Tundra húmeda Alpina"
+        else: zone_name = "Tundra seca Alpina" # Cubre Subhúmedo a Superárido
 
-    if piso == "Alpino":
-        if humidity == "Superhúmedo": zone_name = "Tundra pluvial Alpina"
-        elif humidity == "Perhúmedo": zone_name = "Tundra húmeda Alpina" # Asumiendo Perhumedo=humedo aqui
-        elif humidity == "Húmedo": zone_name = "Tundra húmeda Alpina"
-        else: zone_name = "Tundra seca Alpina" # Cubre Subhumedo a Perarido
     elif piso == "Subalpino":
-        if humidity == "Superhúmedo": zone_name = "Páramo pluvial Subalpino"
-        elif humidity == "Perhúmedo": zone_name = "Páramo húmedo Subalpino" # Asumiendo Perhumedo="muy humedo"
-        elif humidity == "Húmedo": zone_name = "Páramo húmedo Subalpino" # Asumiendo Húmedo también es "muy humedo"
-        else: zone_name = "Páramo seco Subalpino" # Cubre Subhumedo a Perarido
+        if humidity_province in ["Superhúmedo++", "Superhúmedo (Pluvial)"]: zone_name = "Páramo pluvial Subalpino"
+        elif humidity_province in ["Perhúmedo", "Húmedo"]: zone_name = "Páramo húmedo Subalpino"
+        else: zone_name = "Páramo seco Subalpino" # Cubre Subhúmedo a Superárido
+
     elif piso == "Montano":
-        if humidity == "Superhúmedo": zone_name = "Bosque pluvial Montano"
-        elif humidity == "Perhúmedo": zone_name = "Bosque muy húmedo Montano"
-        elif humidity == "Húmedo": zone_name = "Bosque húmedo Montano"
-        elif humidity == "Subhúmedo": zone_name = "Bosque seco Montano"
-        elif humidity == "Semiárido": zone_name = "Estepa espinosa Montano"
-        # Faltarían Árido, Perárido (podrían mapear a Desierto Montano si existiera)
+        if humidity_province == "Superhúmedo++": zone_name = "Bosque pluvial Montano"
+        elif humidity_province == "Superhúmedo (Pluvial)": zone_name = "Bosque pluvial Montano" # O muy húmedo? Check diagram
+        elif humidity_province == "Perhúmedo": zone_name = "Bosque muy húmedo Montano"
+        elif humidity_province == "Húmedo": zone_name = "Bosque húmedo Montano"
+        elif humidity_province == "Subhúmedo": zone_name = "Bosque seco Montano"
+        elif humidity_province == "Semiárido": zone_name = "Estepa Montano" # O Estepa Espinosa? Check
+        elif humidity_province == "Árido": zone_name = "Estepa espinosa Montano" # O Desierto? Check
+        else: zone_name = "Desierto Montano" # Cubre Perárido, Superárido
+
     elif piso == "Montano Bajo":
-        if humidity == "Superhúmedo": zone_name = "Bosque pluvial Montano Bajo"
-        elif humidity == "Perhúmedo": zone_name = "Bosque muy húmedo Montano Bajo"
-        elif humidity == "Húmedo": zone_name = "Bosque húmedo Montano Bajo"
-        elif humidity == "Subhúmedo": zone_name = "Bosque seco Montano Bajo"
-        elif humidity == "Semiárido": zone_name = "Estepa espinosa Montano Bajo"
-        elif humidity == "Árido": zone_name = "Monte espinoso Montano Bajo"
-        # Faltaría Perárido (podría mapear a Desierto MB)
-    elif piso == "Tropical/Premontano":
-        if humidity == "Superhúmedo": zone_name = "Bosque pluvial Tropical/Premontano"
-        elif humidity == "Perhúmedo": zone_name = "Bosque muy húmedo Tropical/Premontano"
-        elif humidity == "Húmedo": zone_name = "Bosque húmedo Tropical/Premontano"
-        elif humidity == "Subhúmedo": zone_name = "Bosque seco Tropical/Premontano"
-        elif humidity == "Semiárido": zone_name = "Estepa espinosa Tropical/Premontano" # Renombrado de Monte espinoso
-        elif humidity == "Árido": zone_name = "Monte espinoso Tropical/Premontano" # Renombrado/Agregado
-        elif humidity == "Perárido": zone_name = "Desierto Tropical/Premontano"
-        # Superárido ya fue manejado al inicio
+        if humidity_province == "Superhúmedo++": zone_name = "Bosque pluvial Montano Bajo"
+        elif humidity_province == "Superhúmedo (Pluvial)": zone_name = "Bosque pluvial Montano Bajo"
+        elif humidity_province == "Perhúmedo": zone_name = "Bosque muy húmedo Montano Bajo"
+        elif humidity_province == "Húmedo": zone_name = "Bosque húmedo Montano Bajo"
+        elif humidity_province == "Subhúmedo": zone_name = "Bosque seco Montano Bajo"
+        elif humidity_province == "Semiárido": zone_name = "Estepa espinosa Montano Bajo"
+        elif humidity_province == "Árido": zone_name = "Monte espinoso Montano Bajo"
+        else: zone_name = "Desierto Montano Bajo" # Cubre Perárido, Superárido
 
-    return zone_name
+    elif piso == "Subtropical":
+        if humidity_province == "Superhúmedo++": zone_name = "Bosque pluvial Subtropical"
+        elif humidity_province == "Superhúmedo (Pluvial)": zone_name = "Bosque pluvial Subtropical"
+        elif humidity_province == "Perhúmedo": zone_name = "Bosque muy húmedo Subtropical"
+        elif humidity_province == "Húmedo": zone_name = "Bosque húmedo Subtropical"
+        elif humidity_province == "Subhúmedo": zone_name = "Bosque seco Subtropical"
+        elif humidity_province == "Semiárido": zone_name = "Estepa espinosa Subtropical"
+        elif humidity_province == "Árido": zone_name = "Monte espinoso Subtropical"
+        else: zone_name = "Desierto Subtropical" # Cubre Perárido, Superárido
+        
+    elif piso == "Tropical":
+        if humidity_province == "Superhúmedo++": zone_name = "Bosque pluvial Tropical"
+        elif humidity_province == "Superhúmedo (Pluvial)": zone_name = "Bosque pluvial Tropical"
+        elif humidity_province == "Perhúmedo": zone_name = "Bosque muy húmedo Tropical"
+        elif humidity_province == "Húmedo": zone_name = "Bosque húmedo Tropical"
+        elif humidity_province == "Subhúmedo": zone_name = "Bosque seco Tropical"
+        elif humidity_province == "Semiárido": zone_name = "Estepa espinosa Tropical"
+        elif humidity_province == "Árido": zone_name = "Monte espinoso Tropical"
+        else: zone_name = "Desierto Tropical" # Cubre Perárido, Superárido
+
+    # Retorna el nombre encontrado o el default si algo falló
+    return holdridge_zone_map.get(zone_name, 0) # Devuelve el ID entero
 
 
-# --- Función Principal para Generar el Mapa (Sin cambios excepto el diccionario de mapeo) ---
-
+# --- Función Principal para Generar el Mapa ---
 @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...")
-def generate_life_zone_map(dem_path, precip_raster_path):
+def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude): # Añadido mean_latitude
     """
     Genera un mapa raster clasificado de Zonas de Vida de Holdridge.
     """
     try:
-        # 1. Abrir DEM y obtener metadatos
+        # 1. Abrir DEM
         with rasterio.open(dem_path) as dem_src:
-            dem_data = dem_src.read(1).astype(np.float32) # Leer como float
+            dem_data = dem_src.read(1).astype(np.float32)
             dem_profile = dem_src.profile
             dem_crs = dem_src.crs
             dem_transform = dem_src.transform
             nodata_dem = dem_src.nodata
-
-            # Mascarar nodata si existe
             dem_mask = (dem_data == nodata_dem) if nodata_dem is not None else np.zeros(dem_data.shape, dtype=bool)
-            dem_data[dem_mask] = np.nan # Usar NaN para nodata internamente
+            dem_data[dem_mask] = np.nan
 
-        # 2. Abrir raster de precipitación y reproyectar/remuestrear al DEM
+        # 2. Abrir Precipitación y alinear
         with rasterio.open(precip_raster_path) as precip_src:
             profile_dest = dem_profile.copy()
             profile_dest.update({'dtype': rasterio.float32, 'nodata': np.nan})
             precip_data_aligned = np.empty(dem_data.shape, dtype=rasterio.float32)
-
             reproject(
-                source=rasterio.band(precip_src, 1),
-                destination=precip_data_aligned,
-                src_transform=precip_src.transform,
-                src_crs=precip_src.crs,
-                src_nodata=precip_src.nodata,
-                dst_transform=dem_transform,
-                dst_crs=dem_crs,
-                dst_nodata=np.nan,
+                source=rasterio.band(precip_src, 1), destination=precip_data_aligned,
+                src_transform=precip_src.transform, src_crs=precip_src.crs, src_nodata=precip_src.nodata,
+                dst_transform=dem_transform, dst_crs=dem_crs, dst_nodata=np.nan,
                 resampling=Resampling.bilinear
             )
             precip_mask = np.isnan(precip_data_aligned)
 
-        # 3. Realizar cálculos pixel a pixel
-        with np.errstate(invalid='ignore'): # Ignorar warnings de cálculos con NaN
+        # 3. Cálculos (Ahora incluyendo latitud)
+        with np.errstate(invalid='ignore'):
             tma_raster = estimate_mean_annual_temp(dem_data)
-            bat_raster = estimate_biotemperature(tma_raster)
+            # Pasamos la latitud promedio a la función BAT
+            bat_raster = calculate_biotemperature(tma_raster, mean_latitude) 
             pet_raster = calculate_pet(bat_raster)
             per_raster = calculate_per(pet_raster, precip_data_aligned)
 
-        # 4. Clasificar cada píxel
-        classified_raster = np.full(dem_data.shape, holdridge_zone_map["Zona Desconocida"], dtype=np.int16)
+        # 4. Clasificar píxeles usando la función DETALLADA
+        classified_raster = np.full(dem_data.shape, 0, dtype=np.int16) # 0 para NoData
         valid_pixels = ~dem_mask & ~precip_mask & ~np.isnan(bat_raster) & ~np.isnan(per_raster) & ~np.isnan(precip_data_aligned)
 
         bat_values = bat_raster[valid_pixels]
         ppt_values = precip_data_aligned[valid_pixels]
         per_values = per_raster[valid_pixels]
 
-        # Aplicar la clasificación vectorizada (si es posible) o por bucle
-        # Para mejorar rendimiento, reescribir classify_holdridge_zone con np.select o similar
-        # Por ahora, usamos el bucle (puede ser lento)
-        zone_names = [classify_holdridge_zone(b, p, pe) for b, p, pe in zip(bat_values, ppt_values, per_values)]
-        zone_ints = [holdridge_zone_map.get(name, holdridge_zone_map["Zona Desconocida"]) for name in zone_names]
+        # Vectorizar la clasificación detallada
+        # ¡IMPORTANTE! np.vectorize es conveniente pero no necesariamente rápido.
+        # Si el rendimiento es un problema, la lógica if/elif de classify_holdridge_zone_detailed
+        # debería reescribirse usando np.select o condiciones booleanas de numpy.
+        vectorized_classify = np.vectorize(classify_holdridge_zone_detailed)
+        zone_ints = vectorized_classify(bat_values, ppt_values, per_values)
         
-        classified_raster[valid_pixels] = zone_ints
+        classified_raster[valid_pixels] = zone_ints.astype(np.int16)
 
         # 5. Preparar salida
         output_profile = dem_profile.copy()
         output_profile.update({
             'dtype': rasterio.int16,
-            'nodata': holdridge_zone_map["Zona Desconocida"], # Usar 0 como nodata
+            'nodata': 0, # Usar 0 (Zona Desconocida) como nodata
             'count': 1
         })
 
-        return classified_raster, output_profile, holdridge_int_to_name
+        # Retornar también el diccionario ID -> Nombre actualizado
+        return classified_raster, output_profile, holdridge_int_to_name 
 
     except Exception as e:
         st.error(f"Error generando mapa de zonas de vida: {e}")
