@@ -204,69 +204,113 @@ def classify_holdridge_zone_detailed(bat, ppt, per):
 
 # --- Función Principal para Generar el Mapa ---
 @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...")
-def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude): # Añadido mean_latitude
+def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, downscale_factor=4): # Añadido downscale_factor
     """
-    Genera un mapa raster clasificado de Zonas de Vida de Holdridge.
+    Genera un mapa raster clasificado de Zonas de Vida de Holdridge,
+    con opción de reducir la resolución para visualización.
+    downscale_factor: 1 = original, 2 = mitad res (1/4 pixeles), 4 = cuarto res (1/16 pixeles), etc.
     """
     try:
-        # 1. Abrir DEM
+        # --- NUEVO: Factor de reescalado ---
+        if downscale_factor <= 0:
+            downscale_factor = 1 # Evitar factor inválido
+        
+        # 1. Abrir DEM y obtener metadatos originales
         with rasterio.open(dem_path) as dem_src:
-            dem_data = dem_src.read(1).astype(np.float32)
-            dem_profile = dem_src.profile
-            dem_crs = dem_src.crs
-            dem_transform = dem_src.transform
+            src_profile = dem_src.profile
+            src_crs = dem_src.crs
+            src_transform = dem_src.transform
             nodata_dem = dem_src.nodata
-            dem_mask = (dem_data == nodata_dem) if nodata_dem is not None else np.zeros(dem_data.shape, dtype=bool)
-            dem_data[dem_mask] = np.nan
 
-        # 2. Abrir Precipitación y alinear
-        with rasterio.open(precip_raster_path) as precip_src:
-            profile_dest = dem_profile.copy()
-            profile_dest.update({'dtype': rasterio.float32, 'nodata': np.nan})
-            precip_data_aligned = np.empty(dem_data.shape, dtype=rasterio.float32)
+            # --- NUEVO: Calcular dimensiones y transform reescalado ---
+            dst_height = src_profile['height'] // downscale_factor
+            dst_width = src_profile['width'] // downscale_factor
+            
+            # Ajustar transform para la nueva resolución
+            dst_transform = src_transform * src_transform.scale(
+                (src_profile['width'] / dst_width),
+                (src_profile['height'] / dst_height)
+            )
+
+            # Crear perfil destino para remuestreo
+            dst_profile = src_profile.copy()
+            dst_profile.update({
+                'height': dst_height,
+                'width': dst_width,
+                'transform': dst_transform,
+                'dtype': rasterio.float32, # Trabajar con floats
+                'nodata': np.nan # Usar NaN para nodata internamente
+            })
+
+            # --- NUEVO: Leer y remuestrear DEM ---
+            st.write(f"Remuestreando DEM a {dst_width}x{dst_height} píxeles...")
+            dem_data = np.empty((dst_height, dst_width), dtype=rasterio.float32)
             reproject(
-                source=rasterio.band(precip_src, 1), destination=precip_data_aligned,
-                src_transform=precip_src.transform, src_crs=precip_src.crs, src_nodata=precip_src.nodata,
-                dst_transform=dem_transform, dst_crs=dem_crs, dst_nodata=np.nan,
-                resampling=Resampling.bilinear
+                source=rasterio.band(dem_src, 1),
+                destination=dem_data,
+                src_transform=src_transform,
+                src_crs=src_crs,
+                src_nodata=nodata_dem,
+                dst_transform=dst_transform,
+                dst_crs=src_crs, # Mantener CRS original por ahora
+                dst_nodata=np.nan,
+                resampling=Resampling.average # Usar promedio para altitud
+            )
+            dem_mask = np.isnan(dem_data)
+            st.write("Remuestreo DEM completado.")
+
+        # 2. Abrir Precipitación y reproyectar/remuestrear al DEM reescalado
+        with rasterio.open(precip_raster_path) as precip_src:
+            st.write(f"Remuestreando Precipitación a {dst_width}x{dst_height} píxeles...")
+            precip_data_aligned = np.empty((dst_height, dst_width), dtype=rasterio.float32)
+            reproject(
+                source=rasterio.band(precip_src, 1),
+                destination=precip_data_aligned,
+                src_transform=precip_src.transform,
+                src_crs=precip_src.crs,
+                src_nodata=precip_src.nodata,
+                dst_transform=dst_transform, # Usar el transform reescalado
+                dst_crs=src_crs,         # Usar el CRS reescalado
+                dst_nodata=np.nan,
+                resampling=Resampling.bilinear # Bilinear es bueno para precipitación
             )
             precip_mask = np.isnan(precip_data_aligned)
+            st.write("Remuestreo Precipitación completado.")
 
-        # 3. Cálculos (Ahora incluyendo latitud)
+
+        # 3. Cálculos (Ahora sobre rasters de menor resolución)
+        st.write("Calculando variables biofísicas...")
         with np.errstate(invalid='ignore'):
             tma_raster = estimate_mean_annual_temp(dem_data)
-            # Pasamos la latitud promedio a la función BAT
-            bat_raster = calculate_biotemperature(tma_raster, mean_latitude) 
+            bat_raster = calculate_biotemperature(tma_raster, mean_latitude)
             pet_raster = calculate_pet(bat_raster)
             per_raster = calculate_per(pet_raster, precip_data_aligned)
+        st.write("Cálculos completados.")
 
-        # 4. Clasificar píxeles usando la función DETALLADA
-        classified_raster = np.full(dem_data.shape, 0, dtype=np.int16) # 0 para NoData
+        # 4. Clasificar píxeles
+        st.write("Clasificando Zonas de Vida...")
+        classified_raster = np.full((dst_height, dst_width), 0, dtype=np.int16) # 0 para NoData
         valid_pixels = ~dem_mask & ~precip_mask & ~np.isnan(bat_raster) & ~np.isnan(per_raster) & ~np.isnan(precip_data_aligned)
 
         bat_values = bat_raster[valid_pixels]
         ppt_values = precip_data_aligned[valid_pixels]
         per_values = per_raster[valid_pixels]
 
-        # Vectorizar la clasificación detallada
-        # ¡IMPORTANTE! np.vectorize es conveniente pero no necesariamente rápido.
-        # Si el rendimiento es un problema, la lógica if/elif de classify_holdridge_zone_detailed
-        # debería reescribirse usando np.select o condiciones booleanas de numpy.
         vectorized_classify = np.vectorize(classify_holdridge_zone_detailed)
         zone_ints = vectorized_classify(bat_values, ppt_values, per_values)
         
         classified_raster[valid_pixels] = zone_ints.astype(np.int16)
+        st.write("Clasificación completada.")
 
-        # 5. Preparar salida
-        output_profile = dem_profile.copy()
+        # 5. Preparar salida (usando el perfil reescalado)
+        output_profile = dst_profile.copy() # Usar perfil destino del remuestreo
         output_profile.update({
             'dtype': rasterio.int16,
             'nodata': 0, # Usar 0 (Zona Desconocida) como nodata
             'count': 1
         })
 
-        # Retornar también el diccionario ID -> Nombre actualizado
-        return classified_raster, output_profile, holdridge_int_to_name 
+        return classified_raster, output_profile, holdridge_int_to_name
 
     except Exception as e:
         st.error(f"Error generando mapa de zonas de vida: {e}")
