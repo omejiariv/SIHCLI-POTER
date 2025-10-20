@@ -1,4 +1,4 @@
-caverde# Archivo: config.yaml
+# Archivo: config.yaml
 
 credentials:
   usernames:
@@ -28,3 +28,4 @@ preauthorized:
   - direccion@cuencaverde.org
   - subdir.tecnica@cuencaverde.org
   - jose.gutierrez@cuencaverde.org
+
