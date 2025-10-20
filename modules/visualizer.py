@@ -3759,26 +3759,33 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
     col1, col2 = st.columns([1,2])
     with col1:
         st.markdown("##### Opciones de Visualización")
-        # Reutilizamos el control de mapa base
-        selected_base_map_config, _ = display_map_controls(st, "satellite") 
         
-    selected_wms_names = st.multiselect(
-        "Seleccionar Capas Satelitales:",
-        options=list(wms_layers_options.keys()),
-        # Selecciona la capa de SSEC por defecto si existe
-        default=[list(wms_layers_options.keys())[0]] if wms_layers_options else [] 
-    )
+        # --- Define base map options directly here ---
+        base_map_options = {
+            "CartoDB Positron": {"tiles": "cartodbpositron", "attr": "CartoDB"},
+            "OpenStreetMap": {"tiles": "OpenStreetMap", "attr": "OpenStreetMap"},
+            "Topografía (Open TopoMap)": {
+                "tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+                "attr": "Open TopoMap"
+            },
+            # Add other base maps if you used them elsewhere
+        }
+        # --- Create only the base map selectbox directly ---
+        selected_base_map_name = st.selectbox(
+            "Seleccionar Mapa Base",
+            list(base_map_options.keys()),
+            key="satellite_base_map" # Ensure this unique key is used
+        )
+        selected_base_map_config = base_map_options[selected_base_map_name]
+        # --- End direct widget creation ---
 
-    # Crea el mapa base (puedes usar display_map_controls si quieres)
-    col1, col2 = st.columns([1,2]) # Mantenemos la estructura de columnas
-    with col1:
-        st.markdown("##### Opciones de Visualización")
-        # Reutilizamos el control de mapa base
-        selected_base_map_config, _ = display_map_controls(st, "satellite") 
-        
-        # El multiselect ya está definido arriba
-        # selected_wms_names = st.multiselect(...) 
-
+        # The WMS multiselect remains
+        selected_wms_names = st.multiselect(
+            "Seleccionar Capas Satelitales:",
+            options=list(wms_layers_options.keys()),
+            # Select the SSEC layer by default if it exists
+            default=[list(wms_layers_options.keys())[0]] if wms_layers_options else [] 
+        )
     with col2:
         m = create_folium_map(
             location=[4.6, -74.0], # Centrado en Colombia
@@ -3820,5 +3827,6 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
 
         # Muestra el mapa
         folium_static(m, height=700, width=None)
+
 
 
