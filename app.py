@@ -17,7 +17,7 @@ from modules.visualizer import (
     display_advanced_maps_tab, display_anomalies_tab, display_drought_analysis_tab,
     display_stats_tab, display_correlation_tab, display_enso_tab,
     display_trends_and_forecast_tab, display_downloads_tab, display_station_table_tab,
-    display_weekly_forecast_tab
+    display_weekly_forecast_tab,
     display_additional_climate_maps_tab, 
     display_satellite_imagery_tab
 )
@@ -463,4 +463,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
