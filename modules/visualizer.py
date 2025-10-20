@@ -3508,6 +3508,7 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
             except Exception as e:
                 st.error(f"Ocurrió un error al calcular las estadísticas: {e}")
 
+
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     st.header("Pronóstico del Tiempo a 7 Días (Open-Meteo)")
 
@@ -3522,75 +3523,172 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         key="weekly_forecast_station"
     )
 
-    if selected_station and st.button("Obtener Pronóstico", key="get_forecast_button"):
-        station_info = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == selected_station].iloc[0]
-        lat = station_info.geometry.y
-        lon = station_info.geometry.x
+    # Botón para obtener/actualizar pronóstico
+    if st.button("Obtener/Actualizar Pronóstico", key="get_forecast_button"):
+        if selected_station:
+            station_info = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == selected_station].iloc[0]
+            lat = station_info.geometry.y
+            lon = station_info.geometry.x
 
-        with st.spinner(f"Obteniendo pronóstico para {selected_station}..."):
-            # Asumimos que 'get_weather_forecast' está en 'modules.forecasting' y funciona
-            from modules.forecasting import get_weather_forecast 
-            forecast_df = get_weather_forecast(lat, lon)
-            
-            if forecast_df is not None and not forecast_df.empty:
-                st.session_state['forecast_df'] = forecast_df
-                st.session_state['forecast_station_name'] = selected_station
-            else:
-                st.error("No se pudieron obtener los datos del pronóstico. Inténtelo de nuevo más tarde.")
+            with st.spinner(f"Obteniendo pronóstico para {selected_station}..."):
+                # Llama a la función MODIFICADA de forecasting.py
+                forecast_df_new = get_weather_forecast(lat, lon) 
 
+                if forecast_df_new is not None and not forecast_df_new.empty:
+                    st.session_state['forecast_df'] = forecast_df_new # Guarda el DF en sesión
+                    st.session_state['forecast_station_name'] = selected_station
+                    st.success("Pronóstico obtenido con éxito.")
+                else:
+                    # El error ya se muestra dentro de get_weather_forecast
+                    st.session_state['forecast_df'] = None # Limpia si falla
+                    st.session_state['forecast_station_name'] = None
+        else:
+             st.warning("Por favor, seleccione una estación primero.")
+
+
+    # Mostrar pronóstico si está en la sesión
     if 'forecast_df' in st.session_state and st.session_state.forecast_df is not None:
         forecast_df = st.session_state['forecast_df']
         station_name = st.session_state['forecast_station_name']
 
-        st.subheader(f"Pronóstico para los próximos 7 días en {station_name}")
-        
-        # --- SOLUCIÓN 1 y 3: Tabla con Fechas Corregidas y Formato Decimal ---
+        st.subheader(f"Pronóstico para los próximos 7 días en: {station_name}")
+
+        # --- Tabla con Nuevas Variables ---
         display_df = forecast_df.copy()
-        # Generamos un rango de fechas limpio para evitar errores de la fuente
-        start_date = pd.to_datetime(display_df['date'].iloc[0])
-        display_df['date_corrected'] = pd.date_range(start=start_date, periods=len(display_df))
         
-        display_df['Fecha'] = display_df['date_corrected'].dt.strftime('%A, %d de %B')
-        display_df['T. Máx (°C)'] = display_df['temperature_2m_max'].round(1)
-        display_df['T. Mín (°C)'] = display_df['temperature_2m_min'].round(1)
-        display_df['Ppt. (mm)'] = display_df['precipitation_sum'].round(1)
+        # Generamos un rango de fechas limpio por si acaso
+        try:
+             start_date = pd.to_datetime(display_df['date'].iloc[0])
+             display_df['date_corrected'] = pd.date_range(start=start_date, periods=len(display_df))
+        except: # Si falla la conversión, usa el índice como último recurso
+             display_df['date_corrected'] = display_df.index
+
+        # Formatear columnas para la tabla
+        display_df['Fecha'] = display_df['date_corrected'].dt.strftime('%A, %d %b') # Formato más corto
         
+        # Diccionario para renombrar y seleccionar columnas
+        column_rename_map = {
+            'Fecha': 'Fecha',
+            'temperature_2m_max': 'T. Máx (°C)',
+            'temperature_2m_min': 'T. Mín (°C)',
+            'precipitation_sum': 'Ppt. (mm)',
+            'relative_humidity_2m_mean': 'HR Media (%)',
+            'surface_pressure_mean': 'Presión (hPa)',
+            'et0_fao_evapotranspiration': 'ET₀ (mm)',
+            'shortwave_radiation_sum': 'Radiación SW (MJ/m²)',
+            'wind_speed_10m_max': 'Viento Máx (km/h)' # Asumiendo km/h, verificar unidad API
+        }
+        
+        # Seleccionar y renombrar solo las columnas que existen en el DataFrame
+        cols_to_display = ['Fecha'] + [col for col in column_rename_map if col in display_df.columns and col != 'Fecha']
+        df_for_table = display_df[cols_to_display].copy()
+        df_for_table.rename(columns=column_rename_map, inplace=True)
+
+        # Diccionario de formato para la tabla
+        format_dict = {
+             'T. Máx (°C)': '{:.1f}', 'T. Mín (°C)': '{:.1f}', 'Ppt. (mm)': '{:.1f}',
+             'HR Media (%)': '{:.0f}', 'Presión (hPa)': '{:.1f}', 'ET₀ (mm)': '{:.2f}',
+             'Radiación SW (MJ/m²)': '{:.1f}', 'Viento Máx (km/h)': '{:.1f}'
+        }
+        
+        # Aplicar formato solo a columnas existentes
+        valid_format_dict = {k: v for k, v in format_dict.items() if k in df_for_table.columns}
+
         st.dataframe(
-            display_df[['Fecha', 'T. Máx (°C)', 'T. Mín (°C)', 'Ppt. (mm)']].set_index('Fecha'),
+            df_for_table.set_index('Fecha').style.format(valid_format_dict),
             use_container_width=True
         )
 
-        # --- SOLUCIÓN 2: Gráfico Corregido con Eje Doble ---
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        # --- Gráfico Principal (Temperatura y Precipitación) ---
+        st.markdown("---")
+        st.subheader("Gráfico de Temperatura y Precipitación")
+        fig_temp_ppt = make_subplots(specs=[[{"secondary_y": True}]])
 
         # Temperaturas (eje Y primario)
-        fig.add_trace(go.Scatter(
-            x=display_df['date_corrected'], y=display_df['T. Máx (°C)'],
-            name='Temp. Máxima', mode='lines+markers', line=dict(color='red')
-        ), secondary_y=False)
-        
-        fig.add_trace(go.Scatter(
-            x=display_df['date_corrected'], y=display_df['T. Mín (°C)'],
-            name='Temp. Mínima', mode='lines+markers', line=dict(color='blue'),
-            fill='tonexty', fillcolor='rgba(173, 216, 230, 0.2)'
-        ), secondary_y=False)
+        if 'temperature_2m_max' in display_df.columns:
+            fig_temp_ppt.add_trace(go.Scatter(
+                x=display_df['date_corrected'], y=display_df['temperature_2m_max'],
+                name='Temp. Máxima', mode='lines+markers', line=dict(color='red')
+            ), secondary_y=False)
+        if 'temperature_2m_min' in display_df.columns:
+             fig_temp_ppt.add_trace(go.Scatter(
+                x=display_df['date_corrected'], y=display_df['temperature_2m_min'],
+                name='Temp. Mínima', mode='lines+markers', line=dict(color='blue'),
+                fill='tonexty', fillcolor='rgba(173, 216, 230, 0.2)'
+            ), secondary_y=False)
 
         # Precipitación (eje Y secundario)
-        fig.add_trace(go.Bar(
-            x=display_df['date_corrected'], y=display_df['Ppt. (mm)'],
-            name='Precipitación', marker_color='lightblue', opacity=0.7
-        ), secondary_y=True)
+        if 'precipitation_sum' in display_df.columns:
+             fig_temp_ppt.add_trace(go.Bar(
+                x=display_df['date_corrected'], y=display_df['precipitation_sum'],
+                name='Precipitación', marker_color='lightblue', opacity=0.7
+            ), secondary_y=True)
 
-        fig.update_layout(
-            title_text=f"Pronóstico de Temperatura y Precipitación para {station_name}",
+        fig_temp_ppt.update_layout(
+            #title_text=f"Pronóstico de Temperatura y Precipitación", # Título redundante
             xaxis_title="Fecha",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-        fig.update_yaxes(title_text="Temperatura (°C)", secondary_y=False, range=[display_df['T. Mín (°C)'].min() - 2, display_df['T. Máx (°C)'].max() + 2])
-        fig.update_yaxes(title_text="Precipitación (mm)", secondary_y=True, showgrid=False)
-        
-        st.plotly_chart(fig, use_container_width=True)
+        # Ajustar rangos de ejes si hay datos
+        if 'temperature_2m_min' in display_df.columns and 'temperature_2m_max' in display_df.columns:
+             min_temp = display_df['temperature_2m_min'].min()
+             max_temp = display_df['temperature_2m_max'].max()
+             if pd.notna(min_temp) and pd.notna(max_temp):
+                 fig_temp_ppt.update_yaxes(title_text="Temperatura (°C)", secondary_y=False, range=[min_temp - 2, max_temp + 2])
+             else:
+                  fig_temp_ppt.update_yaxes(title_text="Temperatura (°C)", secondary_y=False)
+        else:
+             fig_temp_ppt.update_yaxes(title_text="Temperatura (°C)", secondary_y=False)
 
+        fig_temp_ppt.update_yaxes(title_text="Precipitación (mm)", secondary_y=True, showgrid=False)
+        st.plotly_chart(fig_temp_ppt, use_container_width=True)
+
+        # --- Gráficos Adicionales (Opcional) ---
+        st.markdown("---")
+        st.subheader("Gráficos Adicionales")
+        
+        # Crear columnas para poner gráficos lado a lado
+        col_g1, col_g2 = st.columns(2)
+
+        with col_g1:
+            # Gráfico de Humedad y ET₀
+            fig_hr_et = make_subplots(specs=[[{"secondary_y": True}]])
+            if 'relative_humidity_2m_mean' in display_df.columns:
+                 fig_hr_et.add_trace(go.Scatter(
+                      x=display_df['date_corrected'], y=display_df['relative_humidity_2m_mean'],
+                      name='HR Media (%)', mode='lines+markers', line=dict(color='green')
+                 ), secondary_y=False)
+            if 'et0_fao_evapotranspiration' in display_df.columns:
+                  fig_hr_et.add_trace(go.Scatter(
+                      x=display_df['date_corrected'], y=display_df['et0_fao_evapotranspiration'],
+                      name='ET₀ (mm)', mode='lines+markers', line=dict(color='orange', dash='dot')
+                 ), secondary_y=True)
+            fig_hr_et.update_layout(title="Humedad Relativa y ET₀", xaxis_title="Fecha")
+            fig_hr_et.update_yaxes(title_text="Humedad Relativa (%)", secondary_y=False)
+            fig_hr_et.update_yaxes(title_text="ET₀ (mm)", secondary_y=True, showgrid=False)
+            st.plotly_chart(fig_hr_et, use_container_width=True)
+
+        with col_g2:
+             # Gráfico de Viento y Radiación
+             fig_wind_rad = make_subplots(specs=[[{"secondary_y": True}]])
+             if 'wind_speed_10m_max' in display_df.columns:
+                  fig_wind_rad.add_trace(go.Scatter(
+                      x=display_df['date_corrected'], y=display_df['wind_speed_10m_max'],
+                      name='Viento Máx (km/h)', mode='lines+markers', line=dict(color='purple')
+                 ), secondary_y=False)
+             if 'shortwave_radiation_sum' in display_df.columns:
+                  fig_wind_rad.add_trace(go.Bar(
+                       x=display_df['date_corrected'], y=display_df['shortwave_radiation_sum'],
+                       name='Radiación SW (MJ/m²)', marker_color='gold', opacity=0.6
+                 ), secondary_y=True)
+             fig_wind_rad.update_layout(title="Viento y Radiación Solar", xaxis_title="Fecha")
+             fig_wind_rad.update_yaxes(title_text="Velocidad Viento (km/h)", secondary_y=False)
+             fig_wind_rad.update_yaxes(title_text="Radiación SW (MJ/m²)", secondary_y=True, showgrid=False)
+             st.plotly_chart(fig_wind_rad, use_container_width=True)
+
+    # Si no hay pronóstico en la sesión, muestra un mensaje
+    elif 'forecast_df' not in st.session_state or st.session_state.forecast_df is None:
+        st.info("Presiona el botón 'Obtener/Actualizar Pronóstico' para ver los datos de la estación seleccionada.")
 
 # --- Función para Mapas Climáticos Adicionales ---
 def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
@@ -3827,4 +3925,5 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
 
         # Muestra el mapa
         folium_static(m, height=700, width=None)
+
 
