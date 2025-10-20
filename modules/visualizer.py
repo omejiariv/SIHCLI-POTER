@@ -1592,7 +1592,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     with st.spinner("Calculando balance..."):
                         # 4. Llamamos a la función con los TRES argumentos correctos
                         balance_results = calculate_hydrological_balance(mean_precip, alt_prom, unified_basin_gdf)
-                        
+                        st.session_state['balance_results'] = balance_results
                         if balance_results.get("error"):
                             st.error(balance_results["error"])
                         else:
@@ -4221,6 +4221,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         en la pestaña 'Mapas Avanzados -> Superficies de Interpolación -> Por Cuenca Específica'
         para obtener la precipitación y escorrentía actuales.
         """)
+
 
 
 
