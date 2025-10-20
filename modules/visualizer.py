@@ -3981,7 +3981,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     land_cover_zip_path = os.path.join('modules', 'data', 'coberturasCV.zip')
     # !! IMPORTANTE: Cambia 'COBERTURA_TIPO' al nombre real de la columna
     #    que contiene la descripción de la cobertura en tu shapefile !!
-    cover_column_name = 'COBERTURA_TIPO' # EJEMPLO: podría ser 'DESCRIP', 'USO', etc.
+    cover_column_name = 'nivel_2'
     # Define el CRS proyectado para cálculos de área (ej. MAGNA-SIRGAS Colombia Bogota)
     projected_crs = "EPSG:3116"
     # --- Fin Configuración ---
@@ -4104,6 +4104,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     st.markdown("---")
     st.subheader("Modelado de Escenarios Hipotéticos (Próximamente)")
     st.info("Aquí podrás definir porcentajes de cobertura y estimar el impacto en la escorrentía.")
+
 
 
 
