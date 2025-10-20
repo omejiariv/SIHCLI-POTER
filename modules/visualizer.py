@@ -30,6 +30,7 @@ from modules.analysis import calculate_all_station_trends
 from modules.analysis import calculate_hydrological_balance
 from modules.interpolation import create_kriging_by_basin
 import rasterio
+from modules.life_zones import generate_life_zone_map, holdridge_zone_map, holdridge_int_to_name
 from rasterio.transform import from_origin
 from rasterio.mask import mask
 from scipy.interpolate import griddata
@@ -4222,6 +4223,138 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         para obtener la precipitación y escorrentía actuales.
         """)
 
+def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos todos
+    st.header("Clasificación de Zonas de Vida (Holdridge)")
+    st.info("""
+    Esta sección genera un mapa de Zonas de Vida de Holdridge basado en la precipitación
+    media anual y la biotemperatura estimada a partir de un Modelo Digital de Elevación (DEM).
+    """)
+
+    # --- Configuración ---
+    # !! Ajusta el nombre si tu archivo de precipitación se llama diferente !!
+    precip_raster_filename = "PptMeanAnual.tif" 
+    # --- Fin Configuración ---
+
+    # Construir rutas a los archivos necesarios
+    _THIS_FILE_DIR = os.path.dirname(__file__)
+    precip_raster_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', precip_raster_filename))
+    
+    # Obtener la ruta del DEM cargado desde el sidebar
+    dem_file_info = st.session_state.get('dem_file') # Obtiene el objeto UploadedFile
+
+    dem_path = None
+    if dem_file_info:
+         # Necesitamos guardar el DEM temporalmente para que rasterio lo lea
+         # Usaremos un nombre temporal predecible dentro del directorio actual
+         temp_dem_filename = f"temp_dem_for_lifezones_{dem_file_info.name}"
+         dem_path = os.path.join(os.getcwd(), temp_dem_filename)
+         try:
+             with open(dem_path, "wb") as f:
+                 f.write(dem_file_info.getbuffer())
+             st.success(f"DEM '{dem_file_info.name}' listo para usar.")
+         except Exception as e_write:
+             st.error(f"No se pudo escribir el archivo DEM temporal: {e_write}")
+             dem_path = None # Asegurar que no se use si falla la escritura
+    else:
+        st.warning("Sube un archivo DEM en el panel lateral izquierdo para generar el mapa de zonas de vida.")
+
+    # Verificar existencia del raster de precipitación
+    if not os.path.exists(precip_raster_path):
+        st.error(f"No se encontró el archivo raster de precipitación media anual en: {precip_raster_path}")
+        # Limpiar DEM temporal si existe y salimos
+        if dem_path and os.path.exists(dem_path): os.remove(dem_path)
+        return
+
+    # Botón para generar el mapa
+    if dem_path and os.path.exists(precip_raster_path): # Solo mostrar si tenemos ambos archivos
+        if st.button("Generar Mapa de Zonas de Vida", key="gen_life_zone_map"):
+            
+            # Llamar a la función de cálculo del módulo life_zones
+            classified_raster, output_profile, name_map = generate_life_zone_map(dem_path, precip_raster_path)
+
+            # Limpiar el archivo DEM temporal DESPUÉS de usarlo
+            if os.path.exists(dem_path):
+                 try:
+                      os.remove(dem_path)
+                 except Exception as e_del:
+                      st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
+
+
+            if classified_raster is not None and output_profile is not None and name_map is not None:
+                st.subheader("Mapa de Zonas de Vida Generado")
+                
+                # --- Visualización con Plotly Heatmap ---
+                # Obtener coordenadas de la grilla desde el transform del perfil
+                transform = rasterio.transform.Affine(*output_profile['transform'][:6])
+                height, width = classified_raster.shape
+                # Generar coordenadas x e y para los centros de los píxeles
+                cols, rows = np.meshgrid(np.arange(width), np.arange(height))
+                xs, ys = rasterio.transform.xy(transform, rows, cols)
+                x_coords = np.array(xs)[0, :] # Coordenadas X únicas
+                y_coords = np.array(ys)[:, 0] # Coordenadas Y únicas (pueden ir de arriba a abajo)
+
+                # Preparar datos para la leyenda del colorbar
+                unique_zones = np.unique(classified_raster)
+                # Filtrar el valor nodata (0) si está presente y no es la única zona
+                valid_zones = unique_zones[unique_zones != output_profile['nodata']] if len(unique_zones) > 1 else unique_zones 
+                
+                tick_values = sorted(valid_zones.tolist())
+                tick_texts = [name_map.get(val, f"ID {val}") for val in tick_values]
+
+                # Crear una escala de colores discreta (ejemplo usando colores de Plotly)
+                # Necesitarás suficientes colores para tus zonas
+                colors = px.colors.qualitative.Alphabet # O Plotly3, Set3, etc.
+                color_scale_discrete = []
+                for i, val in enumerate(tick_values):
+                     norm_val_start = (i) / len(tick_values)
+                     norm_val_end = (i + 1) / len(tick_values)
+                     color = colors[i % len(colors)] # Ciclar colores si hay más zonas que colores
+                     color_scale_discrete.append([norm_val_start, color])
+                     color_scale_discrete.append([norm_val_end, color])
+                
+                # Ajustar y_coords si el transform indica que el origen es superior-izquierda
+                # Los heatmaps de Plotly esperan Y de abajo hacia arriba
+                if transform.e < 0: # Si la resolución Y es negativa
+                    y_coords = y_coords[::-1] # Invertir eje Y
+                    classified_raster_display = np.flipud(classified_raster) # Invertir datos verticalmente
+                else:
+                    classified_raster_display = classified_raster
+                    
+                fig = go.Figure(data=go.Heatmap(
+                    z=classified_raster_display,
+                    x=x_coords,
+                    y=y_coords,
+                    colorscale=color_scale_discrete if color_scale_discrete else 'Viridis', # Usar escala discreta
+                    showscale=True,
+                    # Configurar la barra de color para mostrar nombres
+                    colorbar=dict(
+                        title="Zona de Vida",
+                        tickvals=tick_values,
+                        ticktext=tick_texts,
+                        tickmode='array'
+                    ),
+                    # Ocultar valor Z en hover (mostraremos nombre)
+                    hoverinfo='skip' 
+                ))
+
+                fig.update_layout(
+                    title="Mapa de Zonas de Vida de Holdridge",
+                    xaxis_title=f"Coordenada X ({output_profile['crs']})",
+                    yaxis_title=f"Coordenada Y ({output_profile['crs']})",
+                    yaxis_scaleanchor="x", # Para mantener la proporción correcta
+                    height=700
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Guardar el raster clasificado en sesión para posible descarga futura (opcional)
+                # st.session_state['classified_life_zone_raster'] = classified_raster
+                # st.session_state['classified_life_zone_profile'] = output_profile
+
+            else:
+                st.error("La generación del mapa de zonas de vida falló. Revisa los errores anteriores.")
+        
+    elif not dem_path and os.path.exists(precip_raster_path):
+         st.info("Sube un archivo DEM para habilitar la generación del mapa.")
 
 
 
