@@ -25,6 +25,7 @@ import requests
 import traceback
 import openmeteo_requests
 
+
 from modules.analysis import calculate_all_station_trends
 from modules.analysis import calculate_hydrological_balance
 from modules.interpolation import create_kriging_by_basin
@@ -37,6 +38,7 @@ import pyproj
 from rasterio.warp import reproject, Resampling
 
 #--- Importaciones de Módulos Propios
+from modules.openmeteo_api import get_historical_climate_average
 from modules.analysis import calculate_morphometry, calculate_hypsometric_curve
 from modules.analysis import (
     calculate_spi,
@@ -3589,3 +3591,213 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         
         st.plotly_chart(fig, use_container_width=True)
 
+
+# --- Función para Mapas Climáticos Adicionales ---
+def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
+    st.header("Mapas de Variables Climáticas Adicionales (Open-Meteo)")
+    st.info("Estos mapas usan datos históricos promediados de Open-Meteo para las ubicaciones de las estaciones seleccionadas y los interpolan.")
+
+    if gdf_filtered.empty:
+        st.warning("Seleccione al menos una estación en el panel de control para ver estos mapas.")
+        return
+
+    # Diccionario de variables disponibles en la API diaria histórica de Open-Meteo
+    variables_openmeteo = {
+        "Velocidad Media del Viento (10m)": "wind_speed_10m_mean",
+        "Temperatura Media del Aire (2m)": "temperature_2m_mean",
+        "Radiación Global Diaria (Onda Corta)": "shortwave_radiation_sum",
+        "Evapotranspiración de Referencia (ET₀)": "et0_fao_evapotranspiration",
+        "Humedad Relativa Media (2m)": "relative_humidity_2m_mean",
+        "Presión a Nivel del Mar": "pressure_msl_mean"
+    }
+    
+    col1, col2, col3 = st.columns([2,1,1])
+    with col1:
+        selected_variable_name = st.selectbox(
+            "Seleccione la Variable Climática:", 
+            list(variables_openmeteo.keys()),
+            key="additional_var_select"
+        )
+    with col2:
+        # Usa el rango de años de la sesión
+        year_range = st.session_state.get('year_range', (2000, 2020))
+        start_year = st.number_input("Año Inicio (Promedio):", min_value=1940, max_value=date.today().year, value=year_range[0], key="clim_start_year")
+    with col3:
+        end_year = st.number_input("Año Fin (Promedio):", min_value=1940, max_value=date.today().year, value=year_range[1], key="clim_end_year")
+
+    if start_year > end_year:
+        st.error("El año de inicio debe ser menor o igual al año de fin.")
+        return
+
+    variable_code = variables_openmeteo[selected_variable_name]
+    interpolation_method_clim = st.radio(
+        "Método de Interpolación:", 
+        ("IDW (Rápido)", "Spline (Suave)"), 
+        horizontal=True, 
+        key="clim_interp_method"
+    )
+
+    if st.button(f"Generar Mapa Promedio ({start_year}-{end_year}) para {selected_variable_name}", key="gen_clim_map_btn"):
+        with st.spinner(f"Obteniendo datos de {start_year}-{end_year} y generando mapa..."):
+            
+            # Prepara coordenadas únicas para la API
+            gdf_unique_coords = gdf_filtered.drop_duplicates(subset=['geometry'])
+            lats = gdf_unique_coords.geometry.y.tolist()
+            lons = gdf_unique_coords.geometry.x.tolist()
+            
+            start_date_str = f"{start_year}-01-01" 
+            end_date_str = f"{end_year}-12-31" 
+            
+            # Llama a la función de la API para obtener los promedios
+            df_climate_data = get_historical_climate_average(lats, lons, variable_code, start_date_str, end_date_str)
+
+            if df_climate_data is not None and not df_climate_data.empty:
+                
+                # Prepara lons, lats, vals para interpolar (usando WGS84 - EPSG:4326)
+                lons_data = df_climate_data['longitude'].values
+                lats_data = df_climate_data['latitude'].values
+                vals_data = df_climate_data['valor_promedio'].values 
+
+                if len(vals_data) >= 4:
+                    # Define la grilla de interpolación (en WGS84)
+                    bounds = gdf_filtered.total_bounds # gdf_filtered está en WGS84
+                    grid_lon = np.linspace(bounds[0] - 0.1, bounds[2] + 0.1, 100) # Menor resolución
+                    grid_lat = np.linspace(bounds[1] - 0.1, bounds[3] + 0.1, 100)
+                    
+                    # Selecciona el método
+                    method_call = 'cubic' if interpolation_method_clim == "Spline (Suave)" else 'linear'
+                    
+                    # Interpola usando griddata (más flexible que interpolate_idw)
+                    grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
+                    points = np.column_stack((lons_data, lats_data))
+                    
+                    try:
+                        z_grid = griddata(points, vals_data, (grid_x, grid_y), method=method_call)
+                        # Rellenar NaNs con el vecino más cercano si es necesario
+                        nan_mask = np.isnan(z_grid)
+                        if np.any(nan_mask):
+                             fill_values = griddata(points, vals_data, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
+                             z_grid[nan_mask] = fill_values
+                        z_grid = np.nan_to_num(z_grid) # Asegura que no queden NaNs
+
+                        # Crea la figura con go.Contour
+                        fig = go.Figure(data=go.Contour(
+                            z=z_grid.T, 
+                            x=grid_lon, 
+                            y=grid_lat,
+                            colorscale='viridis', # Puedes cambiar la escala de color
+                            colorbar_title=selected_variable_name,
+                            contours=dict(showlabels=True, labelfont=dict(size=10, color='white')),
+                            line_smoothing=0.85
+                        ))
+                        # Añade los puntos de las estaciones originales con sus valores
+                        fig.add_trace(go.Scatter(
+                            x=lons_data, y=lats_data, mode='markers', 
+                            marker=dict(color='red', size=5, line=dict(width=1, color='black')),
+                            name='Estaciones',
+                            hoverinfo='text',
+                            text=[f"Valor: {val:.2f}" for val in vals_data] # Texto simple para el hover
+                        ))
+                        fig.update_layout(
+                            title=f"Promedio ({start_year}-{end_year}) de {selected_variable_name}",
+                            xaxis_title="Longitud", yaxis_title="Latitud", height=600
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    except Exception as e:
+                         st.error(f"Error durante la interpolación o graficación: {e}")
+
+                else:
+                    st.warning("No hay suficientes datos válidos (<4) devueltos por la API para interpolar.")
+            else:
+                st.error(f"No se pudieron obtener datos históricos para '{variable_code}' de la API.")
+
+# --- Función para Imágenes Satelitales ---
+def display_satellite_imagery_tab(gdf_filtered, **kwargs):
+    st.header("Imágenes Satelitales")
+    st.info("Visualiza capas WMS de servicios meteorológicos. La disponibilidad y actualización dependen del proveedor.")
+
+    # --- Configuración de Capas WMS ---
+    # ¡IMPORTANTE! Debes buscar URLs y nombres de capas válidos y actualizados.
+    # Estos son solo ejemplos conceptuales. Busca en NOAA, EUMETSAT, IDEAM, etc.
+    wms_layers_options = {
+        "GOES-East - Infrarrojo Full Disk (NOAA - Ejemplo)": {
+            "url": "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/conus_ir.cgi?", # URL de ejemplo, puede no funcionar
+            "layers": "goes_conus_ir", # Nombre de capa de ejemplo
+            "fmt": 'image/png',
+            "transparent": True,
+            "attr": "NOAA / Iowa State Mesonet",
+        },
+        "EUMETSAT - Meteosat IR 10.8 (Ejemplo)": {
+             "url": "https://eumetview.eumetsat.int/geoserv/wms", # URL de EUMETView WMS
+             "layers": "meteosat:msg_ir108", # Capa infrarroja 10.8
+             "fmt": 'image/png',
+             "transparent": True,
+             "attr": "EUMETSAT",
+        },
+         "EUMETSAT - Meteosat Vapor de Agua 6.2 (Ejemplo)": {
+             "url": "https://eumetview.eumetsat.int/geoserv/wms", # URL de EUMETView WMS
+             "layers": "meteosat:msg_wv062", # Capa vapor de agua 6.2
+             "fmt": 'image/png',
+             "transparent": True,
+             "attr": "EUMETSAT",
+        },
+        # Intenta buscar servicios WMS del IDEAM también si existen públicamente
+    }
+    # --- Fin Configuración ---
+
+    # Selector de Mapa Base y Capas WMS
+    col1, col2 = st.columns([1,2])
+    with col1:
+        st.markdown("##### Opciones de Visualización")
+        # Reutilizamos el control de mapa base
+        selected_base_map_config, _ = display_map_controls(st, "satellite") 
+        
+        selected_wms_names = st.multiselect(
+            "Seleccionar Capas Satelitales:",
+            options=list(wms_layers_options.keys()),
+            default=list(wms_layers_options.keys())[0] if wms_layers_options else [] # Selecciona la primera por defecto
+        )
+
+    with col2:
+        # Crea el mapa base
+        m = create_folium_map(
+            location=[4.6, -74.0], # Centrado en Colombia
+            zoom=5,
+            base_map_config=selected_base_map_config, # Usa la selección del usuario
+            overlays_config=[], # Los WMS se añaden manualmente
+            fit_bounds_data=gdf_filtered if not gdf_filtered.empty else None
+        )
+
+        # Añade las capas WMS seleccionadas
+        added_layers = False
+        for name in selected_wms_names:
+            if name in wms_layers_options:
+                config = wms_layers_options[name]
+                try:
+                    WmsTileLayer(
+                        url=config["url"],
+                        layers=config["layers"],
+                        fmt=config.get("fmt", 'image/png'),
+                        transparent=config.get("transparent", True),
+                        overlay=True,
+                        control=True,
+                        name=name, # Nombre que aparecerá en el control de capas
+                        attr=config.get("attr", name)
+                    ).add_to(m)
+                    added_layers = True
+                except Exception as e:
+                    st.error(f"No se pudo añadir la capa '{name}'. Verifica la URL y el nombre de la capa. Error: {e}")
+            
+        if not added_layers and selected_wms_names:
+             st.warning("No se pudo añadir ninguna de las capas WMS seleccionadas. Verifica la configuración.")
+        elif not selected_wms_names:
+             st.info("Selecciona al menos una capa satelital para visualizar.")
+
+
+        # Añade control de capas si se añadió alguna
+        if added_layers:
+            folium.LayerControl().add_to(m)
+
+        # Muestra el mapa
+        folium_static(m, height=700, width=None)
