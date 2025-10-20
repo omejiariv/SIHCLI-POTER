@@ -19,7 +19,7 @@ import pymannkendall as mk
 from scipy import stats
 from prophet.plot import plot_plotly
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import json
 import requests
 import traceback
@@ -3801,3 +3801,4 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
 
         # Muestra el mapa
         folium_static(m, height=700, width=None)
+
