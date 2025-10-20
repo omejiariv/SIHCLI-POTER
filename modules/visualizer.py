@@ -4335,6 +4335,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
                     x=x_coords,
                     y=y_coords, # Usa las coordenadas Y posiblemente invertidas
                     colorscale=color_scale_discrete if color_scale_discrete else 'Viridis',
+                    zsmooth='fast',
                     showscale=True,
                     colorbar=dict(
                         title="Zona de Vida",
@@ -4363,3 +4364,4 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
