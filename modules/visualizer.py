@@ -4289,73 +4289,86 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
             if classified_raster is not None and output_profile is not None and name_map is not None:
                 st.subheader("Mapa de Zonas de Vida Generado")
                 
-                # --- Visualización con Plotly Heatmap ---
-                # Obtener metadatos del perfil
-                transform = rasterio.transform.Affine(*output_profile['transform'][:6])
-                height, width = classified_raster.shape
-                crs = output_profile.get('crs', 'EPSG:???') # Obtener CRS si está disponible
+            # --- Visualización con Plotly Heatmap ---
+                # (Keep the code that calculates x_coords, y_coords, classified_raster_display)
+
+                # --- NUEVA LÓGICA PARA LEYENDA Y COLORES ---
                 nodata_val = output_profile.get('nodata', 0) # Obtener nodata
 
-                # --- NUEVA GENERACIÓN DE COORDENADAS ---
-                # Calcular extensión usando el transform
-                x_start, y_start = transform.c, transform.f # Coords esquina superior-izquierda
-                x_end = x_start + transform.a * width
-                y_end = y_start + transform.e * height
+                # 1. Encontrar Zonas Únicas PRESENTES en el mapa (excluyendo nodata)
+                unique_zones_present = np.unique(classified_raster)
+                present_zone_ids = sorted([zone_id for zone_id in unique_zones_present if zone_id != nodata_val])
 
-                # Generar coordenadas para los centros de píxel de los ejes del heatmap
-                # Sumamos la mitad del tamaño del píxel para obtener el centro
-                x_coords = np.linspace(x_start + transform.a / 2, x_end - transform.a / 2, width)
-                y_coords_raw = np.linspace(y_start + transform.e / 2, y_end - transform.e / 2, height)
+                if not present_zone_ids:
+                    st.warning("No se encontraron zonas de vida clasificadas en el área.")
+                    return # Salir si no hay nada que mostrar
 
-                # Plotly Heatmap espera que el eje Y aumente hacia arriba.
-                # Si transform.e es negativo (origen es sup-izq), y_coords_raw va hacia abajo.
-                # Invertimos y_coords_raw Y volteamos el array de datos (classified_raster).
-                if transform.e < 0:
-                    y_coords = y_coords_raw[::-1] # Invertir eje Y para Plotly
-                    classified_raster_display = np.flipud(classified_raster) # Voltear datos verticalmente
-                else:
-                    y_coords = y_coords_raw
-                    classified_raster_display = classified_raster
-                # --- FIN NUEVA GENERACIÓN DE COORDENADAS ---
-
-                # Preparar datos para la leyenda del colorbar (Este código permanece igual)
-                unique_zones = np.unique(classified_raster)
-                valid_zones = unique_zones[unique_zones != nodata_val] if len(unique_zones) > 1 else unique_zones
-                tick_values = sorted(valid_zones.tolist())
+                # 2. Crear Leyenda Solo con Zonas Presentes
+                tick_values = present_zone_ids
                 tick_texts = [name_map.get(val, f"ID {val}") for val in tick_values]
 
-                # Crear una escala de colores discreta (Este código permanece igual)
-                colors = px.colors.qualitative.Alphabet
+                # 3. Crear Mapeo ID -> Color Único y Escala Discreta
+                #    Usaremos una paleta más grande si es necesario (ej. Plotly)
+                #    O combinaremos paletas si hay muchas zonas
+                color_palette = px.colors.qualitative.Plotly # Paleta con más colores
+                if len(present_zone_ids) > len(color_palette):
+                     # Si hay más zonas que colores, ciclar la paleta (simple)
+                     # Podría mejorarse combinando paletas si es necesario
+                     color_palette = color_palette * (len(present_zone_ids) // len(color_palette) + 1)
+                     
+                zone_color_map = {zone_id: color_palette[i] for i, zone_id in enumerate(present_zone_ids)}
+                
+                # Crear la colorscale discreta para Plotly Heatmap
+                # Necesita puntos normalizados (0 a 1)
                 color_scale_discrete = []
-                # ... (bucle for para crear color_scale_discrete permanece igual) ...
-                for i, val in enumerate(tick_values):
-                     norm_val_start = (i) / len(tick_values)
-                     norm_val_end = (i + 1) / len(tick_values)
-                     color = colors[i % len(colors)] # Ciclar colores
-                     color_scale_discrete.append([norm_val_start, color])
-                     color_scale_discrete.append([norm_val_end, color])
+                n_zones = len(present_zone_ids)
+                min_id, max_id = min(present_zone_ids), max(present_zone_ids) # Rango real de IDs presentes
+                
+                # Escala para Heatmap: mapea valores a colores
+                # Necesitamos un punto medio entre IDs para los límites de color
+                boundaries = np.linspace(min_id - 0.5, max_id + 0.5, n_zones + 1)
+                norm_boundaries = (boundaries - boundaries.min()) / (boundaries.max() - boundaries.min())
 
-                # --- Creación del Heatmap (Usa las nuevas variables) ---
+                for i, zone_id in enumerate(present_zone_ids):
+                    color = zone_color_map[zone_id]
+                    # Asignar color al intervalo correspondiente a zone_id
+                    color_scale_discrete.append([norm_boundaries[i], color])
+                    color_scale_discrete.append([norm_boundaries[i+1], color])
+                    
+                # Añadir explícitamente el color para NoData (0) si existe, usando gris claro
+                if nodata_val in unique_zones_present:
+                     # Podríamos mapear 0 a un punto fuera del rango normalizado o ajustar
+                     # Solución simple: No incluirlo en colorscale explícita, Plotly podría usar el color más bajo o NaN color
+                     pass # Opcionalmente, manejar color nodata explícitamente si es necesario
+
+
+                # (Keep the code that flips y_coords and classified_raster_display if needed)
+
+                # --- Creación del Heatmap (Usa la nueva escala y leyenda) ---
                 fig = go.Figure(data=go.Heatmap(
-                    z=classified_raster_display, # Usa los datos posiblemente volteados
+                    z=classified_raster_display,
                     x=x_coords,
-                    y=y_coords, # Usa las coordenadas Y posiblemente invertidas
-                    colorscale=color_scale_discrete if color_scale_discrete else 'Viridis',
-                    zsmooth='fast',
+                    y=y_coords,
+                    colorscale=color_scale_discrete, # Usar NUEVA escala discreta
+                    zmin=min_id, # Asegurar que el rango de color cubra los IDs presentes
+                    zmax=max_id,
                     showscale=True,
                     colorbar=dict(
                         title="Zona de Vida",
-                        tickvals=tick_values,
-                        ticktext=tick_texts,
+                        tickvals=tick_values, # Solo IDs presentes
+                        ticktext=tick_texts, # Solo Nombres presentes
                         tickmode='array'
                     ),
-                    hoverinfo='skip'
+                    hoverinfo='skip',
+                    # Definir color para NaN/NoData (si Plotly lo maneja bien así)
+                    # nanocolorscale='rgba(200,200,200,0.5)' # Ejemplo gris claro transparente
                 ))
+                # --- FIN NUEVA LÓGICA ---
 
                 fig.update_layout(
                     title="Mapa de Zonas de Vida de Holdridge",
-                    xaxis_title=f"Coordenada X ({crs})", # Usar CRS del perfil
-                    yaxis_title=f"Coordenada Y ({crs})", # Usar CRS del perfil
+                    xaxis_title=f"Coordenada X ({output_profile.get('crs', 'EPSG:???')})", # Usar .get para seguridad
+                    yaxis_title=f"Coordenada Y ({output_profile.get('crs', 'EPSG:???')})",
                     yaxis_scaleanchor="x", # Mantener proporción
                     height=700
                 )
@@ -4370,6 +4383,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
