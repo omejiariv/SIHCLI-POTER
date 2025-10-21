@@ -9,7 +9,7 @@ import math
 # --- Constantes ---
 # Ajustados según la fórmula/tablas proporcionadas
 LAPSE_RATE = 6.0 # °C / 1000m
-BASE_TEMP_SEA_LEVEL = 30.0 # °C (Según fórmula por defecto)
+BASE_TEMP_SEA_LEVEL = 28.0 # °C (Según fórmula por defecto)
 LATITUDE_ADJUSTMENT_FACTOR = 0.0 # Mantener en 0 por ahora
 
 # --- Funciones de Cálculo (Ajustadas/Confirmadas) ---
