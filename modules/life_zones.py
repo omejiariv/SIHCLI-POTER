@@ -113,28 +113,17 @@ def classify_holdridge_zone_antioquia(bat, ppt):
     else: # bat >= 18
         if ppt >= 4000: zone_id = 18 # bp-T
         elif ppt >= 2000: zone_id = 19 # bmh-T
-        # --- RANGOS CORREGIDOS ---
+        elif ppt >= 1000: zone_id = 20 # Bosque húmedo Tropical (bh-T) - SEGÚN TABLA
         elif ppt >= 1000: zone_id = 21 # Bosque seco Tropical (bs-T) - RANGO 1000-2000
         elif ppt >= 500: zone_id = 22 # Monte espinoso Tropical (me-T) - RANGO 500-1000
         elif ppt >= 250: zone_id = 23 # Matorral desértico Tropical (md-T) - RANGO 250-500
         else: zone_id = 24 # Desierto Tropical (d-T) - RANGO < 250
-        # --- FIN CORRECCIÓN ---
+       
         # Nota: Bosque húmedo Tropical (bh-T) quedaría implícitamente fuera con estos rangos.
         # Si bh-T DEBE existir entre 1000-2000, entonces bs-T debería ser < 1000.
         # Revisando la tabla image_04e97d.png: bh-T es 1000-2000, bs-T es 500-1000.
-        # Vamos a REVERTIR a la tabla EXACTAMENTE.
-
-        # --- REVERSIÓN A TABLA EXACTA ---
-        if ppt >= 4000: zone_id = 18 # bp-T
-        elif ppt >= 2000: zone_id = 19 # bmh-T
-        elif ppt >= 1000: zone_id = 20 # Bosque húmedo Tropical (bh-T) - SEGÚN TABLA
-        elif ppt >= 500: zone_id = 21 # Bosque seco Tropical (bs-T) - SEGÚN TABLA
-        else: zone_id = 22 # Monte espinoso Tropical (me-T) - SEGÚN TABLA
-        # --- FIN REVERSIÓN ---
-
-
+        
     return zone_id
-
 
 # --- Función generate_life_zone_map (Sin cambios) ---
 @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...")
