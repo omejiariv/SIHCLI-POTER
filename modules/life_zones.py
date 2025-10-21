@@ -20,10 +20,12 @@ def estimate_mean_annual_temp(elevation_m):
     # Límite inferior más realista para alta montaña Nival/Alpino
     return np.maximum(estimated_temp, -15) 
 
-def calculate_biotemperature(mean_annual_temp):
-    # Aproximación de BAT clampeando TMA entre 0-30, ya que no tenemos datos mensuales
-    # Podría mejorarse si tuviéramos T° mín/máx promedio anual para estimar meses sobre 0°C
-    biotemp = np.clip(mean_annual_temp, 0, 30)
+def calculate_biotemperature(mean_annual_temp, latitude): # <-- AÑADE , latitude AQUÍ
+    # Aproximación de BAT clampeando TMA entre 0-30...
+    clamped_temp = np.clip(mean_annual_temp, 0, 30)
+    # Ajuste simple por latitud (opcional)
+    lat_adjustment = LATITUDE_ADJUSTMENT_FACTOR * np.abs(latitude) 
+    biotemp = np.maximum(0, clamped_temp + lat_adjustment) # Aplicar ajuste
     # Si TMA < 0, BAT debe ser 0 según definición Holdridge
     biotemp = np.where(mean_annual_temp < 0, 0, biotemp)
     return biotemp
