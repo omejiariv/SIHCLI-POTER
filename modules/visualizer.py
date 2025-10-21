@@ -4382,22 +4382,34 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
                         classified_raster_display = classified_raster
                     # --- FIN ASEGURAR ---
 
-                    # --- Creación del Heatmap (Usa la nueva escala y leyenda NUMÉRICA) ---
+                    # --- Creación del Heatmap
+
+                    # --- 1. Crear matriz de nombres para hover ---
+                    # Vectorizar la función get de name_map para aplicarla al raster
+                    # Usar "NoData" o "" para el ID 0 (nodata_val)
+                    get_zone_name = np.vectorize(lambda zid: name_map.get(zid, "NoData" if zid == nodata_val else f"ID {zid}?"))
+                    hover_names_raster = get_zone_name(classified_raster_display)
+                    # --- Fin matriz de nombres ---
+
                     fig = go.Figure(data=go.Heatmap(
                         z=classified_raster_display,
                         x=x_coords,
                         y=y_coords,
-                        colorscale=color_scale_discrete, # Usar NUEVA escala explícita
-                        zmin=min(present_zone_ids) - 0.5, # Rango para cubrir IDs enteros
+                        colorscale=color_scale_discrete,
+                        zmin=min(present_zone_ids) - 0.5,
                         zmax=max(present_zone_ids) + 0.5,
                         showscale=True,
                         colorbar=dict(
-                            title="ID Zona de Vida", # Título cambiado
-                            tickvals=tick_values, # IDs presentes
-                            ticktext=tick_texts, # IDs presentes como texto
+                            title="ID Zona de Vida",
+                            tickvals=tick_values,
+                            ticktext=tick_texts, # IDs numéricos
                             tickmode='array'
                         ),
-                        hoverinfo='skip',
+                        # --- Añadir configuración de Hover ---
+                        hovertext=hover_names_raster, # Matriz con nombres
+                        hoverinfo='text', # Indicar que use hovertext
+                        hovertemplate='<b>Zona:</b> %{hovertext}<extra></extra>' # Formato del popup
+                        # --- Fin Hover ---
                     ))
                 # (Fin del else después de 'if not present_zone_ids:')
 
@@ -4412,18 +4424,21 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     # --- AÑADIR LEYENDA DETALLADA ---
-                st.markdown("---")
-                st.subheader("Leyenda de Zonas de Vida Presentes")
+                    st.markdown("---")
+                    st.subheader("Leyenda de Zonas de Vida Presentes")
 
-                # Crear DataFrame para la leyenda
-                legend_data = {
-                    "ID": tick_values, # IDs presentes que se usaron en el colorbar
-                    "Zona de Vida": tick_texts # Nombres correspondientes a esos IDs
-                }
-                legend_df = pd.DataFrame(legend_data).sort_values(by="ID") # Ordenar por ID
+                    # Crear DataFrame para la leyenda
+                    # Asegurarse de usar los nombres correctos de name_map
+                    legend_data = {
+                        # Usar los IDs presentes como clave
+                        "ID": present_zone_ids, 
+                        # Obtener los nombres correspondientes usando name_map
+                        "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids] 
+                    }
+                    legend_df = pd.DataFrame(legend_data).sort_values(by="ID") # Ordenar por ID
 
-                # Mostrar la tabla de leyenda
-                st.dataframe(legend_df.set_index('ID'), use_container_width=True)
+                    # Mostrar la tabla de leyenda
+                    st.dataframe(legend_df.set_index('ID'), use_container_width=True)
                 # --- FIN LEYENDA DETALLADA ---
 
                 # --- AÑADIR EXPANDER CON INFORMACIÓN ---
@@ -4449,6 +4464,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
