@@ -40,7 +40,7 @@ holdridge_zone_map = {
     "Tundra húmeda alpino (th-A)": 3,       # 750 <= PPT < 1500
     "Tundra seca alpino (ts-A)": 4,         # PPT < 750
     # Páramo / Subalpino (3 <= BAT < 6)
-    "Páramo pluvial subalpino (pp-SA)": 5,   # PPT >= 2000
+    "Páramo pluvial subalpino (pp-SA)": 5,   # PPT >= 1500
     "Páramo muy húmedo subalpino (pmh-SA)": 6,# 1000 <= PPT < 2000
     "Páramo seco subalpino (ps-SA)": 7,     # PPT < 1000
     # Montano (6 <= BAT < 12)
@@ -92,7 +92,7 @@ def classify_holdridge_zone_antioquia(bat, ppt):
         else: zone_id = 4 # ts-A
     # Subalpino (Páramo)
     elif bat < 6:
-        if ppt >= 2000: zone_id = 5 # pp-SA
+        if ppt >= 1500: zone_id = 5 # pp-SA
         elif ppt >= 1000: zone_id = 6 # pmh-SA
         else: zone_id = 7 # ps-SA
     # Montano
@@ -111,9 +111,9 @@ def classify_holdridge_zone_antioquia(bat, ppt):
         else: zone_id = 17 # me-PM
     # Basal (Tropical)
     else: # bat >= 18
-        if ppt >= 4000: zone_id = 18 # bp-T
-        elif ppt >= 2000: zone_id = 19 # bmh-T
-        elif ppt >= 1000: zone_id = 20 # Bosque húmedo Tropical (bh-T) - SEGÚN TABLA
+        if ppt >= 5000: zone_id = 18 # bp-T
+        elif ppt >= 3000: zone_id = 19 # bmh-T
+        elif ppt >= 2000: zone_id = 20 # Bosque húmedo Tropical (bh-T) - SEGÚN TABLA
         elif ppt >= 1000: zone_id = 21 # Bosque seco Tropical (bs-T) - RANGO 1000-2000
         elif ppt >= 500: zone_id = 22 # Monte espinoso Tropical (me-T) - RANGO 500-1000
         elif ppt >= 250: zone_id = 23 # Matorral desértico Tropical (md-T) - RANGO 250-500
