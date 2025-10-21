@@ -4329,26 +4329,28 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
                 boundaries = np.linspace(min_id - 0.5, max_id + 0.5, n_zones + 1)
                 norm_boundaries = (boundaries - boundaries.min()) / (boundaries.max() - boundaries.min())
 
+                # ... (Código anterior para crear color_scale_discrete) ...
                 for i, zone_id in enumerate(present_zone_ids):
                     color = zone_color_map[zone_id]
-                    # Asignar color al intervalo correspondiente a zone_id
                     color_scale_discrete.append([norm_boundaries[i], color])
                     color_scale_discrete.append([norm_boundaries[i+1], color])
-                    
-                # Añadir explícitamente el color para NoData (0) si existe, usando gris claro
-                if nodata_val in unique_zones_present:
-                     # Podríamos mapear 0 a un punto fuera del rango normalizado o ajustar
-                     # Solución simple: No incluirlo en colorscale explícita, Plotly podría usar el color más bajo o NaN color
-                     pass # Opcionalmente, manejar color nodata explícitamente si es necesario
 
-
-                # (Keep the code that flips y_coords and classified_raster_display if needed)
+                # --- AÑADIR/ASEGURAR ESTE BLOQUE ---
+                # Ajustar y_coords si el transform indica que el origen es superior-izquierda
+                # Los heatmaps de Plotly esperan Y de abajo hacia arriba
+                if transform.e < 0: # Si la resolución Y es negativa
+                    y_coords = y_coords_raw[::-1] # Invertir eje Y para Plotly
+                    classified_raster_display = np.flipud(classified_raster) # Voltear datos verticalmente
+                else:
+                    y_coords = y_coords_raw
+                    classified_raster_display = classified_raster
+                # --- FIN BLOQUE AÑADIDO/ASEGURADO ---
 
                 # --- Creación del Heatmap (Usa la nueva escala y leyenda) ---
                 fig = go.Figure(data=go.Heatmap(
-                    z=classified_raster_display,
+                    z=classified_raster_display, # Usa los datos posiblemente volteados
                     x=x_coords,
-                    y=y_coords,
+                    y=y_coords, # Usa las coordenadas Y posiblemente invertidas
                     colorscale=color_scale_discrete, # Usar NUEVA escala discreta
                     zmin=min_id, # Asegurar que el rango de color cubra los IDs presentes
                     zmax=max_id,
@@ -4360,10 +4362,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
                         tickmode='array'
                     ),
                     hoverinfo='skip',
-                    # Definir color para NaN/NoData (si Plotly lo maneja bien así)
-                    # nanocolorscale='rgba(200,200,200,0.5)' # Ejemplo gris claro transparente
                 ))
-                # --- FIN NUEVA LÓGICA ---
 
                 fig.update_layout(
                     title="Mapa de Zonas de Vida de Holdridge",
@@ -4383,6 +4382,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
