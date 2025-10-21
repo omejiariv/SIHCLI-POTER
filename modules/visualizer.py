@@ -4411,12 +4411,45 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
                         height=700
                     )
                     st.plotly_chart(fig, use_container_width=True)
+                    # --- AÑADIR LEYENDA DETALLADA ---
+                st.markdown("---")
+                st.subheader("Leyenda de Zonas de Vida Presentes")
+
+                # Crear DataFrame para la leyenda
+                legend_data = {
+                    "ID": tick_values, # IDs presentes que se usaron en el colorbar
+                    "Zona de Vida": tick_texts # Nombres correspondientes a esos IDs
+                }
+                legend_df = pd.DataFrame(legend_data).sort_values(by="ID") # Ordenar por ID
+
+                # Mostrar la tabla de leyenda
+                st.dataframe(legend_df.set_index('ID'), use_container_width=True)
+                # --- FIN LEYENDA DETALLADA ---
+
+                # --- AÑADIR EXPANDER CON INFORMACIÓN ---
+                st.markdown("---")
+                with st.expander("Sobre la Clasificación de Zonas de Vida de Holdridge"):
+                    st.markdown("""
+                    El sistema de Zonas de Vida de Holdridge es un esquema global de clasificación bioclimática desarrollado por Leslie Holdridge en 1947 y actualizado en 1967. Clasifica las áreas terrestres basándose en tres ejes climáticos principales:
+
+                    1.  **Biotemperatura Media Anual (°C):** Es una medida de la temperatura relacionada con el crecimiento vegetal. Se calcula como el promedio de las temperaturas medias (diarias o mensuales) superiores a 0°C, tratando cualquier temperatura sobre 30°C como si fuera 30°C. En esta aplicación, se *estima* a partir de la temperatura media anual calculada por altitud.
+                    2.  **Precipitación Total Anual (mm):** La cantidad total de lluvia recibida en un año.
+                    3.  **Razón de Evapotranspiración Potencial (PET / PPA):** Es la relación entre la evapotranspiración potencial (la cantidad de agua que *podría* evaporarse y transpirarse si hubiera suficiente agua disponible) y la precipitación anual. Indica la aridez o humedad del clima. La PET se estima a partir de la biotemperatura (PET ≈ 58.93 * BAT).
+
+                    La combinación de estos tres factores define hexágonos en un diagrama logarítmico, donde cada hexágono representa una **Zona de Vida**, caracterizada por un tipo particular de vegetación natural esperada bajo esas condiciones climáticas (ej., Bosque seco Tropical, Páramo pluvial Subalpino).
+
+                    **En esta aplicación:**
+                    * La **Biotemperatura** se estima a partir de un Modelo Digital de Elevación (DEM) y una tasa de lapso estándar.
+                    * La **Precipitación** se obtiene de un raster de precipitación media anual (`PPAMAnt.tif`).
+                    * La clasificación se realiza pixel a pixel usando los rangos definidos específicamente para Antioquia (basados en BAT y PPT).
+                    """)
 
             else:
                 st.error("La generación del mapa de zonas de vida falló. Revisa los errores anteriores.")
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
