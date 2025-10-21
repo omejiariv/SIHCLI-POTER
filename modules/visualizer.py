@@ -4275,7 +4275,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
                 dem_path, 
                 precip_raster_path, 
                 mean_latitude,
-                downscale_factor=4
+                downscale_factor=5
             )    
 
             # Limpiar el archivo DEM temporal DESPUÉS de usarlo
@@ -4464,6 +4464,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
