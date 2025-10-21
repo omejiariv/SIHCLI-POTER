@@ -4293,82 +4293,111 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
                 # Obtener metadatos del perfil
                 height, width = classified_raster.shape
                 crs = output_profile.get('crs', 'EPSG:???') # Obtener CRS si está disponible
-                nodata_val = output_profile.get('nodata', 0) # Obtener nodata
+                # --- NUEVA LÓGICA PARA LEYENDA Y COLORES (ENFOCADA EN IDs) ---
+                nodata_val = output_profile.get('nodata', 0)
 
-                # --- ADD THIS LINE ---
-                # Define transform using the profile information
-                transform = rasterio.transform.Affine(*output_profile['transform'][:6])
-                # --- END ADD ---
-
-                # --- NUEVA GENERACIÓN DE COORDENADAS ---
-                # Calcular extensión usando el transform
-                x_start, y_start = transform.c, transform.f # Coords esquina superior-izquierda
-                x_end = x_start + transform.a * width
-                y_end = y_start + transform.e * height
-
-                # Generar coordenadas para los centros de píxel de los ejes del heatmap
-                # Sumamos la mitad del tamaño del píxel para obtener el centro
-                x_coords = np.linspace(x_start + transform.a / 2, x_end - transform.a / 2, width)
-                y_coords_raw = np.linspace(y_start + transform.e / 2, y_end - transform.e / 2, height)
-                # --- FIN NUEVA GENERACIÓN DE COORDENADAS ---
-
-                # --- NUEVA LÓGICA PARA LEYENDA Y COLORES ---
-                # 1. Encontrar Zonas Únicas PRESENTES en el mapa (excluyendo nodata)
+                # 1. Encontrar Zonas Únicas PRESENTES (excluyendo nodata)
                 unique_zones_present = np.unique(classified_raster)
                 present_zone_ids = sorted([zone_id for zone_id in unique_zones_present if zone_id != nodata_val])
 
                 if not present_zone_ids:
                     st.warning("No se encontraron zonas de vida clasificadas en el área.")
-                    # Need to return from the main function if nothing to show
-                    # However, we are inside the button click, so just skip plotting
                     fig = None # Set fig to None so it doesn't try to plot
                 else:
-                    # 2. Crear Leyenda Solo con Zonas Presentes
-                    tick_values = present_zone_ids
-                    tick_texts = [name_map.get(val, f"ID {val}") for val in tick_values]
+                    # 2. Crear Leyenda NUMÉRICA (IDs presentes)
+                    tick_values = present_zone_ids # Usar los IDs como valores
+                    tick_texts = [str(val) for val in tick_values] # Usar los IDs como texto
 
-                    # 3. Crear Mapeo ID -> Color Único y Escala Discreta
-                    color_palette = px.colors.qualitative.Plotly
-                    if len(present_zone_ids) > len(color_palette):
-                         color_palette = color_palette * (len(present_zone_ids) // len(color_palette) + 1)
-                    zone_color_map = {zone_id: color_palette[i] for i, zone_id in enumerate(present_zone_ids)}
+                    # 3. Crear Mapeo ID -> Color Único
+                    color_palette1 = px.colors.qualitative.Plotly
+                    color_palette2 = px.colors.qualitative.Alphabet
+                    color_palette_combined = color_palette1 + color_palette2
+                    if len(present_zone_ids) > len(color_palette_combined):
+                        color_palette_combined = color_palette_combined * (len(present_zone_ids) // len(color_palette_combined) + 1)
+                    zone_color_map = {zone_id: color_palette_combined[i] for i, zone_id in enumerate(present_zone_ids)}
 
-                    # Crear la colorscale discreta para Plotly Heatmap
+                    # 4. Crear colorscale DISCRETA para Plotly Heatmap
+                    #    Mapea cada ID a su color asignado en puntos específicos.
                     color_scale_discrete = []
-                    n_zones = len(present_zone_ids)
                     min_id, max_id = min(present_zone_ids), max(present_zone_ids)
-                    boundaries = np.linspace(min_id - 0.5, max_id + 0.5, n_zones + 1)
-                    norm_boundaries = (boundaries - boundaries.min()) / (boundaries.max() - boundaries.min())
+                    id_range = max(1, max_id - min_id) # Evitar división por cero
 
-                    for i, zone_id in enumerate(present_zone_ids):
+                    # Ordenar IDs para construir la escala correctamente
+                    sorted_zone_ids = sorted(zone_color_map.keys())
+
+                    for i, zone_id in enumerate(sorted_zone_ids):
                         color = zone_color_map[zone_id]
-                        color_scale_discrete.append([norm_boundaries[i], color])
-                        color_scale_discrete.append([norm_boundaries[i+1], color])
+                        # Posición normalizada del ID actual
+                        norm_pos = (zone_id - min_id) / id_range if id_range > 0 else 0.5
+                        
+                        # Definir un pequeño intervalo alrededor de la posición normalizada
+                        # Esto ayuda a Plotly a asignar el color al valor entero exacto
+                        epsilon = 0.5 / (id_range + 1e-6) # Pequeño offset relativo
+                        norm_start = max(0.0, norm_pos - epsilon)
+                        norm_end   = min(1.0, norm_pos + epsilon)
+
+                        # Asegurar que el inicio sea estrictamente menor que el final
+                        if norm_start >= norm_end:
+                             norm_start = max(0.0, norm_val - 1e-6) # Ajuste mínimo si coinciden
+                             norm_end = min(1.0, norm_val + 1e-6)
+
+                        # Si es el primer color, empieza desde 0.0
+                        if i == 0:
+                            # Asegurar que el punto 0.0 tenga el primer color si min_id no es 0
+                            if norm_start > 0.0:
+                                color_scale_discrete.append([0.0, color])
+                            color_scale_discrete.append([norm_start, color])
+                        # Si no es el primero, conectar desde el punto final anterior
+                        elif i > 0:
+                            prev_norm_end = color_scale_discrete[-1][0]
+                            # Añadir el color anterior hasta justo antes del inicio actual
+                            color_scale_discrete.append([max(prev_norm_end, norm_start - epsilon), zone_color_map[sorted_zone_ids[i-1]]])
+                            # Añadir el nuevo color desde su inicio
+                            color_scale_discrete.append([norm_start, color])
+
+                        # Añadir el nuevo color hasta su final
+                        color_scale_discrete.append([norm_end, color])
+
+                    # Asegurar que el último color llegue hasta 1.0
+                    if color_scale_discrete and color_scale_discrete[-1][0] < 1.0:
+                         color_scale_discrete.append([1.0, color_scale_discrete[-1][1]])
+                    elif not color_scale_discrete and sorted_zone_ids: # Caso de una sola zona
+                         color_scale_discrete = [[0.0, zone_color_map[sorted_zone_ids[0]]], [1.0, zone_color_map[sorted_zone_ids[0]]]]
+
+                    # Simplificar escala eliminando puntos redundantes consecutivos en la misma posición
+                    simplified_colorscale = []
+                    if color_scale_discrete:
+                        last_val = -1.0
+                        for val, col in color_scale_discrete:
+                            if val > last_val: # Solo añadir si la posición normalizada avanza
+                                simplified_colorscale.append([val, col])
+                                last_val = val
+                        color_scale_discrete = simplified_colorscale
                     # --- FIN NUEVA LÓGICA LEYENDA/COLOR ---
 
                     # --- ASEGURAR DEFINICIÓN DE classified_raster_display ---
-                    # Ajustar y_coords si el transform indica que el origen es superior-izquierda
-                    if transform.e < 0: # Si la resolución Y es negativa
-                        y_coords = y_coords_raw[::-1] # Invertir eje Y para Plotly
-                        classified_raster_display = np.flipud(classified_raster) # Voltear datos verticalmente
+                    # (Esta parte permanece igual)
+                    if transform.e < 0:
+                        y_coords = y_coords_raw[::-1]
+                        classified_raster_display = np.flipud(classified_raster)
                     else:
                         y_coords = y_coords_raw
                         classified_raster_display = classified_raster
                     # --- FIN ASEGURAR ---
 
-                    # --- Creación del Heatmap (Usa la nueva escala y leyenda) ---
+                    # --- Creación del Heatmap (Usa la nueva escala y leyenda NUMÉRICA) ---
                     fig = go.Figure(data=go.Heatmap(
                         z=classified_raster_display,
                         x=x_coords,
                         y=y_coords,
-                        colorscale=color_scale_discrete, # Usar NUEVA escala discreta
-                        zmin=min_id, # Asegurar que el rango de color cubra los IDs presentes
-                        zmax=max_id,
+                        colorscale=color_scale_discrete, # Usar NUEVA escala explícita
+                        zmin=min(present_zone_ids) - 0.5, # Rango para cubrir IDs enteros
+                        zmax=max(present_zone_ids) + 0.5,
                         showscale=True,
                         colorbar=dict(
-                            title="Zona de Vida",
-                            tickvals=tick_values, # Solo IDs presentes
-                            ticktext=tick_texts, # Solo Nombres presentes
+                            title="ID Zona de Vida", # Título cambiado
+                            tickvals=tick_values, # IDs presentes
+                            ticktext=tick_texts, # IDs presentes como texto
                             tickmode='array'
                         ),
                         hoverinfo='skip',
@@ -4391,6 +4420,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
