@@ -91,7 +91,7 @@ def classify_life_zone_alt_ppt(altitude, ppt):
     elif altitude >= 1000: # 1000 <= Alt < 2000
         if ppt >= 4000: zone_id = 13 # bp-PM
         elif ppt >= 2000: zone_id = 14 # bmh-PM
-        elif ppt >= 1000: zone_id = 15 # bh-PM
+        elif ppt >= 1500: zone_id = 15 # bh-PM
         elif ppt >= 500: zone_id = 16 # bs-PM
         else: zone_id = 17 # me-PM (PPT < 500)
             
@@ -99,7 +99,7 @@ def classify_life_zone_alt_ppt(altitude, ppt):
     else: # altitude < 1000
         if ppt >= 4000: zone_id = 18 # bp-T
         elif ppt >= 2000: zone_id = 19 # bmh-T
-        elif ppt >= 1000: zone_id = 20 # bh-T
+        elif ppt >= 1500: zone_id = 20 # bh-T
         elif ppt >= 500: zone_id = 21 # bs-T
         else: zone_id = 22 # me-T (PPT < 500)
 
