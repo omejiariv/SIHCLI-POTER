@@ -4003,7 +4003,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     projected_crs = "EPSG:3116"
     # --- Fin Configuración ---
 
-    st.info(f"Se utilizará el archivo de coberturas: '{os.path.basename(land_cover_zip_path)}'. Asegúrate de que la columna de descripción sea '{cover_column_name}'.")
+    st.info(f"Se utilizará el archivo raster de coberturas: '{os.path.basename(land_cover_raster_path)}'.")
 
     # Obtener la cuenca unificada de la sesión (generada en la pestaña de interpolación)
     unified_basin_gdf = st.session_state.get('unified_basin_gdf')
@@ -4435,6 +4435,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
