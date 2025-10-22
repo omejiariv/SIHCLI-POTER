@@ -128,16 +128,20 @@ def classify_holdridge_zone_antioquia(bat, ppt):
 
 # --- Función generate_life_zone_map (Sin cambios) ---
 @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...")
-def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, mask_geometry=None, downscale_factor=4):
+# Añadir guion bajo a _mask_geometry en la definición
+def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, _mask_geometry=None, downscale_factor=4):
     """
     Genera un mapa raster clasificado de Zonas de Vida de Holdridge,
     con opción de máscara por geometría y resolución ajustable.
-    mask_geometry: Una serie de geometrías de GeoPandas (ej. unified_basin_gdf.geometry).
+    _mask_geometry: Una serie de geometrías de GeoPandas (se ignora para caché).
     downscale_factor: 1 = original, 2 = mitad res, 4 = cuarto res, etc.
     """
     try:
-        # Factor de reescalado
+        # --- Factor de reescalado ---
         if downscale_factor <= 0: downscale_factor = 1
+
+        # 1. Abrir DEM y remuestrear (sin cambios)
+        # ... (código igual que antes para leer/remuestrear DEM) ...
         with rasterio.open(dem_path) as dem_src:
             src_profile=dem_src.profile; src_crs=dem_src.crs; src_transform=dem_src.transform; nodata_dem=dem_src.nodata
             dst_height=src_profile['height']//downscale_factor; dst_width=src_profile['width']//downscale_factor
@@ -147,14 +151,12 @@ def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, mask_geo
             reproject(source=rasterio.band(dem_src,1),destination=dem_data,src_transform=src_transform,src_crs=src_crs,src_nodata=nodata_dem,dst_transform=dst_transform,dst_crs=src_crs,dst_nodata=np.nan,resampling=Resampling.average)
             dem_mask=np.isnan(dem_data)
 
-
         # 2. Abrir Precipitación y alinear/remuestrear (sin cambios)
-        # ... (código igual que antes para leer/remuestrear Precipitación a precip_data_aligned) ...
+        # ... (código igual que antes para leer/remuestrear Precipitación) ...
         with rasterio.open(precip_raster_path) as precip_src:
             precip_data_aligned=np.empty((dst_height,dst_width),dtype=rasterio.float32)
             reproject(source=rasterio.band(precip_src,1),destination=precip_data_aligned,src_transform=precip_src.transform,src_crs=precip_src.crs,src_nodata=precip_src.nodata,dst_transform=dst_transform,dst_crs=src_crs,dst_nodata=np.nan,resampling=Resampling.bilinear)
             precip_mask=np.isnan(precip_data_aligned)
-
 
         # 3. Cálculos biofísicos (sin cambios)
         # ... (código igual que antes para TMA y BAT) ...
@@ -164,24 +166,23 @@ def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, mask_geo
             bat_raster = calculate_biotemperature(tma_raster, mean_latitude)
         st.write("Cálculos completados.")
 
+
         # 4. Clasificar píxeles (sin cambios)
         # ... (código igual que antes para clasificar y obtener classified_raster) ...
         st.write("Clasificando Zonas de Vida (Antioquia)...")
         classified_raster = np.full((dst_height, dst_width), 0, dtype=np.int16)
         valid_pixels = ~dem_mask & ~precip_mask & ~np.isnan(bat_raster) & ~np.isnan(precip_data_aligned)
-        bat_values = bat_raster[valid_pixels]
-        ppt_values = precip_data_aligned[valid_pixels]
-        vectorized_classify = np.vectorize(classify_holdridge_zone_antioquia)
-        zone_ints = vectorized_classify(bat_values, ppt_values)
+        bat_values = bat_raster[valid_pixels]; ppt_values = precip_data_aligned[valid_pixels]
+        vectorized_classify = np.vectorize(classify_holdridge_zone_antioquia); zone_ints = vectorized_classify(bat_values, ppt_values)
         classified_raster[valid_pixels] = zone_ints.astype(np.int16)
         st.write("Clasificación completada.")
 
-        # --- APLICAR MÁSCARA POR GEOMETRÍA (SI SE PROPORCIONA) ---
-        if mask_geometry is not None and not mask_geometry.empty:
+        # --- APLICAR MÁSCARA (Usar _mask_geometry ahora) ---
+        if _mask_geometry is not None and not _mask_geometry.empty: # <-- Usar _mask_geometry
             st.write("Aplicando máscara de geometría...")
             try:
-                # Asegurar que la geometría esté en el CRS correcto (el del raster remuestreado)
-                mask_geometry_reproj = mask_geometry.to_crs(dst_profile['crs'])
+                # Usar _mask_geometry para reproyectar
+                mask_geometry_reproj = _mask_geometry.to_crs(dst_profile['crs']) # <-- Usar _mask_geometry
 
                 # Guardar temporalmente el raster clasificado para poder enmascararlo
                 temp_classified_path = "temp_classified_raster_mask.tif"
@@ -192,19 +193,17 @@ def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, mask_geo
 
                 # Abrir el temporal y aplicar la máscara
                 with rasterio.open(temp_classified_path) as src:
-                    # Usar las geometrías directamente
-                    masked_data, masked_transform = mask(src, mask_geometry_reproj, crop=False, nodata=0) 
+                    # Usar las geometrías reproyectadas
+                    masked_data, masked_transform = mask(src, mask_geometry_reproj, crop=False, nodata=0) # <-- Usar mask_geometry_reproj
 
                 os.remove(temp_classified_path)
-                
-                # Usar los datos enmascarados
-                classified_raster = masked_data[0] 
+                classified_raster = masked_data[0]
                 st.write("Máscara aplicada.")
             except Exception as e_mask:
                 st.warning(f"No se pudo aplicar la máscara de geometría: {e_mask}")
         # --- FIN BLOQUE MÁSCARA ---
 
-        # 5. Preparar salida (usando el perfil reescalado)
+        # 5. Preparar salida (sin cambios)
         output_profile = dst_profile.copy()
         output_profile.update({'dtype': rasterio.int16, 'nodata': 0, 'count': 1})
 
