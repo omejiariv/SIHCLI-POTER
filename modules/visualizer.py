@@ -4643,7 +4643,7 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
         if dem_path and os.path.exists(dem_path):
             with st.spinner(f"Calculando tendencias y proyectando precipitación para +{years_future} años..."):
                 # Indent 'try' correctly under 'with st.spinner'
-try:
+                try:
                         # --- DEFINE TARGET GRID PROFILE FIRST ---
                         # Indented one level under 'try:'
                         st.write("Definiendo grilla de destino...")
@@ -4734,4 +4734,5 @@ try:
             # 'elif' aligns with the 'if dem_path...' above
             elif not dem_path:
                 st.warning("No se pudo preparar el DEM.")
+
 
