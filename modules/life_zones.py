@@ -120,7 +120,7 @@ def classify_holdridge_zone_antioquia(bat, ppt):
 
 # --- Función Principal para Generar el Mapa (CON GUION BAJO EN DEFINICIÓN Y USO INTERNO) ---
 # @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...")
-def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, _mask_geometry=None, downscale_factor=4): # <-- GUION BAJO AÑADIDO AQUÍ
+def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, _mask_geometry=None, downscale_factor=4):
     """
     Genera un mapa raster clasificado de Zonas de Vida de Holdridge,
     con opción de máscara por geometría y resolución ajustable.
