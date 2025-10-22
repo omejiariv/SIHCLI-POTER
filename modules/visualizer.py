@@ -4000,12 +4000,30 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     }
     # --- FIN LEYENDA ---
     
-    projected_crs = "EPSG:3116"
+# Inside display_land_cover_analysis_tab
+
+    # --- Configuración ---
+    # !! Ajusta el nombre si es necesario !!
+    land_cover_raster_filename = "Cob25m_WGS84.tif" 
+    # !! LEYENDA !!
+    land_cover_legend = { 
+        1: "Zonas urbanizadas", 
+        # ...(resto de la leyenda)...
+    }
+    projected_crs = "EPSG:3116" 
     # --- Fin Configuración ---
 
-    st.info(f"Se utilizará el archivo raster de coberturas: '{os.path.basename(land_cover_raster_path)}'.")
+    # --- DEFINIR RUTA PRIMERO ---
+    # Construir ruta al raster
+    _THIS_FILE_DIR = os.path.dirname(__file__)
+    land_cover_raster_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', land_cover_raster_filename))
+    # --- FIN DEFINIR RUTA ---
 
-    # Obtener la cuenca unificada de la sesión (generada en la pestaña de interpolación)
+    # --- AHORA USAR LA RUTA EN st.info ---
+    st.info(f"Se utilizará el archivo raster de coberturas: '{os.path.basename(land_cover_raster_path)}'.")
+    # --- FIN st.info ---
+
+    # Obtener la cuenca unificada de la sesión
     unified_basin_gdf = st.session_state.get('unified_basin_gdf')
     basin_name = st.session_state.get('selected_basins_title', 'Cuenca Seleccionada')
 
@@ -4435,6 +4453,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
