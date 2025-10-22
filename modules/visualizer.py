@@ -4031,7 +4031,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         st.warning("Primero debes generar un mapa para una cuenca específica en la pestaña 'Mapas Avanzados -> Superficies de Interpolación'.")
         return
 
-    if not os.path.exists(land_cover_zip_path):
+    if not os.path.exists(land_cover_raster_path):
         st.error(f"No se encontró el archivo de coberturas en la ruta: {land_cover_zip_path}")
         return
 
@@ -4453,6 +4453,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
