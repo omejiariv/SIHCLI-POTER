@@ -3978,14 +3978,28 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     st.header("Análisis de Cobertura del Suelo por Cuenca")
 
     # --- Configuración ---
-    # !! IMPORTANTE: Ajusta esta ruta si es necesario !!
-    # Construir ruta absoluta al archivo zip relativa a ESTE archivo (visualizer.py)
-    _THIS_FILE_DIR = os.path.dirname(__file__)
-    land_cover_zip_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', 'coberturasCV.zip'))
-    # !! IMPORTANTE: Cambia 'COBERTURA_TIPO' al nombre real de la columna
-    #    que contiene la descripción de la cobertura en tu shapefile !!
-    cover_column_name = 'nivel_2'
-    # Define el CRS proyectado para cálculos de área (ej. MAGNA-SIRGAS Colombia Bogota)
+    land_cover_raster_filename = "Cob25m_WGS84.tif"
+    
+    # --- LEYENDA ACTUALIZADA ---
+    land_cover_legend = {
+        1: "Zonas urbanizadas",
+        2: "Zonas industriales/comerciales/comunicación", # Nombre abreviado
+        3: "Zonas de extracción minera/escombreras", # Nombre abreviado
+        4: "Zonas verdes artificializadas", # Nombre abreviado
+        5: "Cultivos transitorios",
+        6: "Cultivos permanentes",
+        7: "Pastos",
+        8: "Áreas Agrícolas Heterogéneas",
+        9: "Bosques",
+        10: "Áreas con vegetación herbácea/arbustiva", # Nombre abreviado
+        11: "Áreas abiertas/poca vegetación", # Nombre abreviado
+        12: "Áreas húmedas continentales",
+        13: "Aguas continentales",
+        # Asegúrate de saber cuál es el valor NoData de tu raster y añádelo si es necesario
+        # 0: "Sin Datos / Fuera de Área" # Ejemplo si 0 es NoData
+    }
+    # --- FIN LEYENDA ---
+    
     projected_crs = "EPSG:3116"
     # --- Fin Configuración ---
 
@@ -4464,6 +4478,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
