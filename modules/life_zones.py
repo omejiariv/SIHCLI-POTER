@@ -118,16 +118,14 @@ def classify_holdridge_zone_antioquia(bat, ppt):
 
     return zone_id
 
-# --- Función Principal para Generar el Mapa (CON GUION BAJO EN DEFINICIÓN Y USO INTERNO) ---
-# @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...")
-def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, _mask_geometry=None, downscale_factor=4):
+# @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...") # Mantener comentado
+# ELIMINADO _mask_geometry=None de aquí:
+def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, downscale_factor=4): 
     """
-    Genera un mapa raster clasificado de Zonas de Vida de Holdridge,
-    con opción de máscara por geometría y resolución ajustable.
-    _mask_geometry: Una serie de geometrías de GeoPandas (se ignora para caché).
-    downscale_factor: 1 = original, 2 = mitad res, 4 = cuarto res, etc.
+    Genera un mapa raster clasificado... (Máscara desactivada temporalmente)
     """
     try:
+        # ... (código reescalado, lectura DEM/Precip) ...
         # Factor de reescalado
         if downscale_factor <= 0: downscale_factor = 1
 
@@ -163,22 +161,15 @@ def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, _mask_ge
         classified_raster[valid_pixels] = zone_ints.astype(np.int16)
         st.write("Clasificación completada.")
 
-        # --- APLICAR MÁSCARA (Usando _mask_geometry) ---
-        if _mask_geometry is not None and not _mask_geometry.empty: # <-- GUION BAJO AÑADIDO AQUÍ
-            st.write("Aplicando máscara de geometría...")
-            try:
-                mask_geometry_reproj = _mask_geometry.to_crs(dst_profile['crs']) # <-- GUION BAJO AÑADIDO AQUÍ
-                temp_classified_path = "temp_classified_raster_mask.tif"
-                output_profile_mask = dst_profile.copy(); output_profile_mask.update({'dtype': rasterio.int16, 'nodata': 0, 'count': 1})
-                with rasterio.open(temp_classified_path, 'w', **output_profile_mask) as dst: dst.write(classified_raster, 1)
-                with rasterio.open(temp_classified_path) as src:
-                    masked_data, masked_transform = mask(src, mask_geometry_reproj, crop=False, nodata=0)
-                os.remove(temp_classified_path)
-                classified_raster = masked_data[0]
-                st.write("Máscara aplicada.")
-            except Exception as e_mask:
-                st.warning(f"No se pudo aplicar la máscara de geometría: {e_mask}")
-        # --- FIN BLOQUE MÁSCARA ---
+# --- BLOQUE DE MÁSCARA COMENTADO TEMPORALMENTE ---
+        # if _mask_geometry is not None and not _mask_geometry.empty: 
+        #     st.write("Aplicando máscara de geometría...")
+        #     try:
+        #         mask_geometry_reproj = _mask_geometry.to_crs(dst_profile['crs']) 
+        #         # ... (resto del bloque comentado) ...
+        #     except Exception as e_mask:
+        #         st.warning(f"No se pudo aplicar la máscara de geometría: {e_mask}")
+        # --- FIN BLOQUE COMENTADO ---
 
         # 5. Preparar salida
         output_profile = dst_profile.copy()
