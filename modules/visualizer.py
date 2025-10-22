@@ -4454,11 +4454,18 @@ def display_life_zones_tab(**kwargs):
 
                     # --- Calcular Área en Hectáreas por Proporción ---
                     # Obtener el área total de la cuenca (calculada previamente, en km²)
-                    # Puede venir de 'total_basin_area_km2' (calculada en land cover tab)
-                    # o de 'balance_results' (calculada en interp tab)
                     total_area_km2 = st.session_state.get('total_basin_area_km2')
-                    if total_area_km2 is None and st.session_state.get('balance_results'):
-                        total_area_km2 = st.session_state['balance_results'].get('Area_km2')
+                    balance_results_check = st.session_state.get('balance_results') # Check if balance results exist
+                    if total_area_km2 is None and balance_results_check:
+                        total_area_km2 = balance_results_check.get('Area_km2')
+
+                    # --- DEBUGGING LINES ---
+                    st.write(f"DEBUG: Retrieved total_area_km2 = {total_area_km2}")
+                    st.write(f"DEBUG: Session state balance_results exists = {balance_results_check is not None}")
+                    if balance_results_check:
+                        st.write(f"DEBUG: Area_km2 in balance_results = {balance_results_check.get('Area_km2')}")
+                    st.write(f"DEBUG: Session state total_basin_area_km2 = {st.session_state.get('total_basin_area_km2')}")
+                    # --- END DEBUGGING ---
 
                     area_hectares = []
                     pixel_counts = [] # Guardar counts para calcular porcentaje
@@ -4534,6 +4541,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
