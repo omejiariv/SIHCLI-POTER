@@ -4646,14 +4646,45 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
                 # --- MANTENER CÁLCULOS PESADOS COMENTADOS POR AHORA ---
                 """
                 try:
-                    # --- DEFINE TARGET GRID PROFILE FIRST ---
+                    # --- DEFINE TARGET GRID PROFILE FIRST --- (DESCOMENTADO)
                     st.write("Definiendo grilla de destino...")
-                    # ... (código para dst_profile) ...
-                    
-                    # --- 1. Calculate Trends ---
-                    st.write("Calculando tendencias de precipitación...")
-                    # ... (código para gdf_trends) ...
+                    dst_profile = None # Initialize
+                    dst_crs = None
+                    dst_transform = None
+                    dst_h = 0
+                    dst_w = 0
+                    with rasterio.open(dem_path) as dem_src: # Use DEM as spatial reference
+                         src_profile = dem_src.profile
+                         src_crs = dem_src.crs
+                         src_transform = dem_src.transform
+                         src_h, src_w = dem_src.height, dem_src.width
+                         # Calculate downscaled dimensions and transform
+                         dst_h = src_h // downscale_factor
+                         dst_w = src_w // downscale_factor
+                         dst_transform = src_transform * src_transform.scale((src_w / dst_w), (src_h / dst_h))
+                         dst_crs = src_crs # Keep original CRS for now
+                         # Create the target profile
+                         dst_profile = src_profile.copy()
+                         dst_profile.update({
+                             'height': dst_h, 'width': dst_w, 'transform': dst_transform,
+                             'dtype': rasterio.float32, 'nodata': np.nan # Use float32 for calculations
+                         })
+                    st.write(f"Grilla destino definida: {dst_w}x{dst_h} píxeles, CRS={dst_crs}")
+                    # --- FIN DEFINE TARGET GRID --- (DESCOMENTADO)
 
+                    # --- 1. Calculate Trends --- (DESCOMENTADO)
+                    st.write("Calculando tendencias de precipitación...")
+                    gdf_stations_geo = gdf_filtered[gdf_filtered.geometry.notna()]
+                    gdf_trends = calculate_all_station_trends(df_anual_melted, gdf_stations_geo)
+                    st.write(f"Tendencias calculadas para {len(gdf_trends)} estaciones.")
+
+                    if gdf_trends.empty or gdf_trends['slope_sen'].isnull().all() or len(gdf_trends) < 4:
+                         st.error("No hay suficientes datos de tendencia (>10 años en estaciones) para generar la proyección.")
+                         st.stop()
+                    # --- FIN Calculate Trends --- (DESCOMENTADO)
+
+                    # --- MANTENER COMENTADO POR AHORA ---
+                    """
                     # --- 2. Interpolate Trend Raster ---
                     st.write("Interpolando raster de tendencia...")
                     # ... (código para griddata -> trend_raster_aligned) ...
@@ -4672,6 +4703,8 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
                          # ... (código de visualización) ...
                     else:
                         st.error("Falló la generación del mapa...")
+                    """
+                    st.success("Paso 1 y 2 completados (Cálculos posteriores omitidos).") # Mensaje de prueba actualizado
 
                 except Exception as e_future:
                     st.error(f"Error durante el proceso de proyección futura: {e_future}")
@@ -4679,9 +4712,15 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
                     st.error(traceback.format_exc())
 
                 finally:
-                    # ... (código de limpieza) ...
-                """
-                st.success("Paso 1 completado (Cálculos pesados omitidos).") # Mensaje de prueba
+                    # Limpieza DEM (DESCOMENTADO)
+                    if temp_dem_filename and os.path.exists(dem_path):
+                        try: os.remove(dem_path); st.session_state['last_dem_used_for_flz'] = None
+                        except Exception as e_del: st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
+                    # Limpieza PPT futuro (Mantener comentado, aún no se crea)
+                    # if 'temp_ppt_future_path' in locals() and os.path.exists(temp_ppt_future_path):
+                    #      try: os.remove(temp_ppt_future_path)
+                    #      except: pass
 
         elif not dem_path:
              st.warning("No se pudo preparar el DEM.")
+
