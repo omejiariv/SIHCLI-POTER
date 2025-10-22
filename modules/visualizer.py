@@ -4479,33 +4479,59 @@ def display_life_zones_tab(**kwargs):
                     total_valid_pixels_in_map = np.count_nonzero(valid_pixel_mask)
 
                     # Check both conditions *before* the loop
-                    if total_valid_pixels_in_map > 0 and total_area_km2 is not None and total_area_km2 > 0: 
-                        # ... (the loop 'for zone_id in present_zone_ids:' goes here) ...
-                        for zone_id in present_zone_ids: 
+                    if total_valid_pixels_in_map > 0 and total_area_km2 is not None and total_area_km2 > 0:
+                        # ----- Start Calculations -----
+                        area_hectares = []
+                        pixel_counts = []
+                        for zone_id in present_zone_ids:
                             count = np.count_nonzero(classified_raster == zone_id)
                             pixel_counts.append(count)
                             proportion = count / total_valid_pixels_in_map
                             area_ha = proportion * (total_area_km2 * 100.0)
                             area_hectares.append(area_ha)
-                        
-                        # ... (code to create and display legend_df goes here) ...
-                        legend_data = { #... create legend_data ... }
-                        legend_df = pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False)
-                        st.dataframe( #... display legend_df ... )
-                        st.caption(f"Área total clasificada: {total_area_km2:.2f} km² ({total_valid_pixels_in_map} píxeles)")
+                        # ----- End Calculations -----
 
-                    elif total_area_km2 is None or total_area_km2 <= 0: # Check if area is missing or zero
+                        # ----- Create DataFrame -----
+                        legend_data = {
+                            "ID": present_zone_ids,
+                            "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids],
+                            "Área (ha)": area_hectares,
+                            "% del Área": [(c / total_valid_pixels_in_map) * 100.0 for c in pixel_counts]
+                        }
+                        legend_df = pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False)
+                        # ----- End DataFrame Creation -----
+
+                        # ----- Display DataFrame -----
+                        st.dataframe(
+                            legend_df.set_index('ID').style.format({
+                                'Área (ha)': '{:,.1f}',
+                                '% del Área': '{:.1f}%'
+                            }),
+                            use_container_width=True
+                        )
+                        st.caption(f"Área total clasificada: {total_area_km2:.2f} km² ({total_valid_pixels_in_map} píxeles)")
+                        # ----- End Display DataFrame -----
+
+                    elif total_area_km2 is None or total_area_km2 <= 0:
                          st.warning("No se pudo obtener un área total válida de la cuenca desde otras pestañas para calcular las hectáreas.")
-                         # ... (code to display legend without areas) ...
+                         # Display legend without areas
                          legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
-                         legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
-                         st.dataframe(legend_df.set_index('ID'), use_container_width=True)
+                         if present_zone_ids: # Check if list is not empty before creating DF
+                             legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
+                             st.dataframe(legend_df.set_index('ID'), use_container_width=True)
+                         else:
+                              st.info("No hay zonas de vida presentes para mostrar en la leyenda.")
+
+
                     else: # total_valid_pixels_in_map is 0
                          st.warning("No hay píxeles válidos clasificados para calcular áreas.")
-                         # Optionally display legend without areas here too
+                         # Display legend without areas
                          legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
-                         legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
-                         st.dataframe(legend_df.set_index('ID'), use_container_width=True)
+                         if present_zone_ids: # Check if list is not empty before creating DF
+                             legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
+                             st.dataframe(legend_df.set_index('ID'), use_container_width=True)
+                         else:
+                              st.info("No hay zonas de vida presentes para mostrar en la leyenda.")
 
                     # --- FIN LEYENDA DETALLADA ---
                     # --- EXPANDER INFO (sin cambios) ---
@@ -4531,6 +4557,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
