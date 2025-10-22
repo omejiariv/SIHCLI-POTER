@@ -4237,225 +4237,182 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         para obtener la precipitación y escorrentía actuales.
         """)
 
-def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos todos
+def display_life_zones_tab(**kwargs):
     st.header("Clasificación de Zonas de Vida (Holdridge)")
     st.info("""
-    Esta sección genera un mapa de Zonas de Vida de Holdridge basado en la precipitación
-    media anual y la biotemperatura estimada a partir de un Modelo Digital de Elevación (DEM).
+    Genera un mapa de Zonas de Vida basado en precipitación media anual y biotemperatura 
+    estimada (desde DEM). Puedes ajustar la resolución y aplicar una máscara de cuenca.
     """)
 
     # --- Configuración ---
-    # !! Ajusta el nombre si tu archivo de precipitación se llama diferente !!
     precip_raster_filename = "PPAMAnt.tif"
     # --- Fin Configuración ---
 
-    # Construir rutas a los archivos necesarios
+    # Rutas y DEM
     _THIS_FILE_DIR = os.path.dirname(__file__)
     precip_raster_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', precip_raster_filename))
-    
-    # Obtener la ruta del DEM cargado desde el sidebar
-    dem_file_info = st.session_state.get('dem_file') # Obtiene el objeto UploadedFile
+    dem_file_info = st.session_state.get('dem_file')
+
+    # --- NUEVOS CONTROLES ---
+    col_ctrl1, col_ctrl2 = st.columns(2)
+    with col_ctrl1:
+        # Selector de Resolución
+        resolution_options = {
+            "Baja (Rápido)": 8,
+            "Media": 4, # Default
+            "Alta (Lento)": 2,
+            "Original (Muy Lento)": 1
+        }
+        selected_resolution = st.select_slider(
+            "Seleccionar Resolución del Mapa:",
+            options=list(resolution_options.keys()),
+            value="Media", # Default
+            key="lifezone_resolution"
+        )
+        downscale_factor = resolution_options[selected_resolution]
+
+    with col_ctrl2:
+        # Opción de Máscara de Cuenca
+        apply_basin_mask = st.toggle("Aplicar Máscara de Cuenca", value=True, key="lifezone_mask_toggle")
+        basin_to_mask = None
+        mask_geometry_to_use = None
+        if apply_basin_mask:
+            basin_to_mask = st.session_state.get('unified_basin_gdf')
+            basin_name_mask = st.session_state.get('selected_basins_title')
+            if basin_to_mask is not None and not basin_to_mask.empty:
+                st.success(f"Se usará la máscara: {basin_name_mask}")
+                mask_geometry_to_use = basin_to_mask.geometry # Pasar la geometría
+            else:
+                st.warning("No hay cuenca seleccionada en 'Mapas Avanzados' para usar como máscara.")
+                apply_basin_mask = False # Desactivar si no hay cuenca
+    # --- FIN CONTROLES ---
 
     dem_path = None
+    temp_dem_filename = None # Guardar nombre para eliminar después
     if dem_file_info:
-         # Necesitamos guardar el DEM temporalmente para que rasterio lo lea
-         # Usaremos un nombre temporal predecible dentro del directorio actual
          temp_dem_filename = f"temp_dem_for_lifezones_{dem_file_info.name}"
          dem_path = os.path.join(os.getcwd(), temp_dem_filename)
          try:
-             with open(dem_path, "wb") as f:
-                 f.write(dem_file_info.getbuffer())
-             st.success(f"DEM '{dem_file_info.name}' listo para usar.")
+             # Escribir solo si el archivo no existe o si cambió (simple check por nombre)
+             # Una mejor opción sería hashear el contenido, pero esto es más simple
+             if not os.path.exists(dem_path) or st.session_state.get('last_dem_used_for_lz') != dem_file_info.name:
+                 with open(dem_path, "wb") as f:
+                     f.write(dem_file_info.getbuffer())
+                 st.session_state['last_dem_used_for_lz'] = dem_file_info.name
+             # st.success(f"DEM '{dem_file_info.name}' listo.") # Mensaje menos intrusivo
          except Exception as e_write:
              st.error(f"No se pudo escribir el archivo DEM temporal: {e_write}")
-             dem_path = None # Asegurar que no se use si falla la escritura
+             dem_path = None
     else:
-        st.warning("Sube un archivo DEM en el panel lateral izquierdo para generar el mapa de zonas de vida.")
+        st.warning("Sube un archivo DEM en el panel lateral izquierdo para generar el mapa.")
 
-    # Verificar existencia del raster de precipitación
     if not os.path.exists(precip_raster_path):
-        st.error(f"No se encontró el archivo raster de precipitación media anual en: {precip_raster_path}")
-        # Limpiar DEM temporal si existe y salimos
+        st.error(f"No se encontró el archivo raster de precipitación: {precip_raster_path}")
         if dem_path and os.path.exists(dem_path): os.remove(dem_path)
         return
 
-    # Botón para generar el mapa
-    if dem_path and os.path.exists(precip_raster_path): # Solo mostrar si tenemos ambos archivos
+    # Botón para generar
+    if dem_path and os.path.exists(precip_raster_path):
         if st.button("Generar Mapa de Zonas de Vida", key="gen_life_zone_map"):
             
-            mean_latitude = 6.5
-            # Llamar a la función de cálculo del módulo life_zones
+            # Determinar qué máscara pasar (geometría de cuenca o nada)
+            mask_arg = mask_geometry_to_use if apply_basin_mask else None
+            
+            # Calcular latitud promedio (o usar fija)
+            mean_latitude = 6.5 # Fijo para Antioquia
+            # Opcional: Calcular de la cuenca si se usa máscara
+            # if apply_basin_mask and basin_to_mask is not None:
+            #     try:
+            #          mean_latitude = basin_to_mask.to_crs("EPSG:4326").geometry.centroid.y.iloc[0]
+            #     except: pass # Mantener valor fijo si falla
+
+            # Llamar a la función de cálculo pasando resolución y máscara
             classified_raster, output_profile, name_map = generate_life_zone_map(
-                dem_path, 
-                precip_raster_path, 
+                dem_path,
+                precip_raster_path,
                 mean_latitude,
-                downscale_factor=8
-            )    
+                mask_geometry=mask_arg, # Pasar la geometría de la cuenca o None
+                downscale_factor=downscale_factor # Pasar el factor elegido
+            )
 
-            # Limpiar el archivo DEM temporal DESPUÉS de usarlo
-            if os.path.exists(dem_path):
-                 try:
-                      os.remove(dem_path)
-                 except Exception as e_del:
-                      st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
+            # Limpiar DEM temporal (AHORA se hace aquí, después de la llamada)
+            if temp_dem_filename and os.path.exists(dem_path):
+                 try: os.remove(dem_path); st.session_state['last_dem_used_for_lz'] = None
+                 except Exception as e_del: st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
 
-
+            # --- Visualización (Código anterior con correcciones de leyenda/color) ---
             if classified_raster is not None and output_profile is not None and name_map is not None:
                 st.subheader("Mapa de Zonas de Vida Generado")
                 
                 # --- Visualización con Plotly Heatmap ---
-                # Obtener metadatos del perfil
                 height, width = classified_raster.shape
-                crs = output_profile.get('crs', 'EPSG:???') # Obtener CRS si está disponible
-                nodata_val = output_profile.get('nodata', 0) # Obtener nodata
-
-                # --- ASEGURAR DEFINICIÓN DE TRANSFORM ---
-                # Define transform using the profile information
+                crs = output_profile.get('crs', 'EPSG:???')
+                nodata_val = output_profile.get('nodata', 0)
                 transform = rasterio.transform.Affine(*output_profile['transform'][:6])
-                # --- FIN ASEGURAR ---
-
-                # --- NUEVA GENERACIÓN DE COORDENADAS ---
-                # Calcular extensión usando el transform
-                x_start, y_start = transform.c, transform.f # Coords esquina superior-izquierda
-                x_end = x_start + transform.a * width
-                y_end = y_start + transform.e * height
-
-                # Generar coordenadas para los centros de píxel de los ejes del heatmap
+                x_start, y_start = transform.c, transform.f
+                x_end = x_start + transform.a * width; y_end = y_start + transform.e * height
                 x_coords = np.linspace(x_start + transform.a / 2, x_end - transform.a / 2, width)
                 y_coords_raw = np.linspace(y_start + transform.e / 2, y_end - transform.e / 2, height)
-                # --- FIN NUEVA GENERACIÓN DE COORDENADAS ---
 
-                # --- NUEVA LÓGICA PARA LEYENDA Y COLORES (ENFOCADA EN IDs) ---
-                # 1. Encontrar Zonas Únicas PRESENTES (excluyendo nodata)
+                # --- LÓGICA PARA LEYENDA Y COLORES (IDs) ---
                 unique_zones_present = np.unique(classified_raster)
                 present_zone_ids = sorted([zone_id for zone_id in unique_zones_present if zone_id != nodata_val])
-
-                fig = None # Initialize fig to None
+                fig = None
                 if not present_zone_ids:
                     st.warning("No se encontraron zonas de vida clasificadas en el área.")
-                    # Skip plotting by leaving fig as None
                 else:
-                    # 2. Crear Leyenda NUMÉRICA (IDs presentes)
-                    tick_values = present_zone_ids # Usar los IDs como valores
-                    tick_texts = [str(val) for val in tick_values] # Usar los IDs como texto
-
-                    # 3. Crear Mapeo ID -> Color Único
-                    color_palette1 = px.colors.qualitative.Plotly
-                    color_palette2 = px.colors.qualitative.Alphabet
-                    color_palette_combined = color_palette1 + color_palette2
-                    if len(present_zone_ids) > len(color_palette_combined):
-                        color_palette_combined = color_palette_combined * (len(present_zone_ids) // len(color_palette_combined) + 1)
-                    zone_color_map = {zone_id: color_palette_combined[i] for i, zone_id in enumerate(present_zone_ids)}
-
-                    # 4. Crear colorscale EXPLÍCITA para Plotly Heatmap
-                    color_scale_discrete = []
-                    min_id, max_id = min(present_zone_ids), max(present_zone_ids)
-                    id_range = max(1, max_id - min_id) # Evitar división por cero
-                    sorted_zone_ids = sorted(zone_color_map.keys())
-
+                    tick_values = present_zone_ids
+                    tick_texts = [str(val) for val in tick_values] # Leyenda con IDs
+                    color_palette1=px.colors.qualitative.Plotly; color_palette2=px.colors.qualitative.Alphabet
+                    color_palette_combined=color_palette1 + color_palette2
+                    if len(present_zone_ids)>len(color_palette_combined): color_palette_combined=color_palette_combined*(len(present_zone_ids)//len(color_palette_combined)+1)
+                    zone_color_map={zone_id: color_palette_combined[i] for i, zone_id in enumerate(present_zone_ids)}
+                    color_scale_discrete=[]; min_id, max_id=min(present_zone_ids), max(present_zone_ids)
+                    id_range=max(1, max_id - min_id); sorted_zone_ids=sorted(zone_color_map.keys())
                     for i, zone_id in enumerate(sorted_zone_ids):
-                        color = zone_color_map[zone_id]
-                        norm_pos = (zone_id - min_id) / id_range if id_range > 0 else 0.5
-                        epsilon = 0.5 / (id_range + 1e-6)
-                        norm_start = max(0.0, norm_pos - epsilon)
-                        norm_end   = min(1.0, norm_pos + epsilon)
-                        if norm_start >= norm_end:
-                             norm_start = max(0.0, norm_pos - 1e-6)
-                             norm_end = min(1.0, norm_pos + 1e-6)
+                        color=zone_color_map[zone_id]; norm_pos=(zone_id - min_id)/id_range if id_range>0 else 0.5
+                        epsilon=0.5/(id_range + 1e-6); norm_start=max(0.0, norm_pos - epsilon); norm_end=min(1.0, norm_pos + epsilon)
+                        if norm_start>=norm_end: norm_start=max(0.0, norm_pos - 1e-6); norm_end=min(1.0, norm_pos + 1e-6)
                         if i == 0:
-                            if norm_start > 0.0: color_scale_discrete.append([0.0, color])
+                            if norm_start>0.0: color_scale_discrete.append([0.0, color])
                             color_scale_discrete.append([norm_start, color])
-                        elif i > 0:
-                            prev_norm_end = color_scale_discrete[-1][0]
+                        elif i>0:
+                            prev_norm_end=color_scale_discrete[-1][0]
                             color_scale_discrete.append([max(prev_norm_end, norm_start - epsilon), zone_color_map[sorted_zone_ids[i-1]]])
                             color_scale_discrete.append([norm_start, color])
                         color_scale_discrete.append([norm_end, color])
-
-                    if color_scale_discrete and color_scale_discrete[-1][0] < 1.0:
-                         color_scale_discrete.append([1.0, color_scale_discrete[-1][1]])
-                    elif not color_scale_discrete and sorted_zone_ids:
-                         color_scale_discrete = [[0.0, zone_color_map[sorted_zone_ids[0]]], [1.0, zone_color_map[sorted_zone_ids[0]]]]
-
-                    simplified_colorscale = []
+                    if color_scale_discrete and color_scale_discrete[-1][0]<1.0: color_scale_discrete.append([1.0, color_scale_discrete[-1][1]])
+                    elif not color_scale_discrete and sorted_zone_ids: color_scale_discrete=[[0.0, zone_color_map[sorted_zone_ids[0]]], [1.0, zone_color_map[sorted_zone_ids[0]]]]
+                    simplified_colorscale=[];
                     if color_scale_discrete:
-                        last_val = -1.0
+                        last_val=-1.0
                         for val, col in color_scale_discrete:
-                            if val > last_val:
-                                simplified_colorscale.append([val, col])
-                                last_val = val
-                        color_scale_discrete = simplified_colorscale
-                    # --- FIN NUEVA LÓGICA LEYENDA/COLOR ---
+                            if val>last_val: simplified_colorscale.append([val, col]); last_val=val
+                        color_scale_discrete=simplified_colorscale
+                    if transform.e<0: y_coords=y_coords_raw[::-1]; classified_raster_display=np.flipud(classified_raster)
+                    else: y_coords=y_coords_raw; classified_raster_display=classified_raster
 
-                    # --- ASEGURAR DEFINICIÓN DE classified_raster_display ---
-                    # Ahora sí 'transform' está definido antes de usarse aquí
-                    if transform.e < 0:
-                        y_coords = y_coords_raw[::-1]
-                        classified_raster_display = np.flipud(classified_raster)
-                    else:
-                        y_coords = y_coords_raw
-                        classified_raster_display = classified_raster
-                    # --- FIN ASEGURAR ---
+                    # --- Creación del Heatmap (con Hover) ---
+                    get_zone_name=np.vectorize(lambda zid: name_map.get(zid, "NoData" if zid==nodata_val else f"ID {zid}?"))
+                    hover_names_raster=get_zone_name(classified_raster_display)
+                    fig=go.Figure(data=go.Heatmap(z=classified_raster_display, x=x_coords, y=y_coords, colorscale=color_scale_discrete,
+                                                 zmin=min(present_zone_ids)-0.5, zmax=max(present_zone_ids)+0.5, showscale=True,
+                                                 colorbar=dict(title="ID Zona de Vida", tickvals=tick_values, ticktext=tick_texts, tickmode='array'),
+                                                 hovertext=hover_names_raster, hoverinfo='text', hovertemplate='<b>Zona:</b> %{hovertext}<extra></extra>'))
 
-                    # --- Creación del Heatmap
-
-                    # --- 1. Crear matriz de nombres para hover ---
-                    # Vectorizar la función get de name_map para aplicarla al raster
-                    # Usar "NoData" o "" para el ID 0 (nodata_val)
-                    get_zone_name = np.vectorize(lambda zid: name_map.get(zid, "NoData" if zid == nodata_val else f"ID {zid}?"))
-                    hover_names_raster = get_zone_name(classified_raster_display)
-                    # --- Fin matriz de nombres ---
-
-                    fig = go.Figure(data=go.Heatmap(
-                        z=classified_raster_display,
-                        x=x_coords,
-                        y=y_coords,
-                        colorscale=color_scale_discrete,
-                        zmin=min(present_zone_ids) - 0.5,
-                        zmax=max(present_zone_ids) + 0.5,
-                        showscale=True,
-                        colorbar=dict(
-                            title="ID Zona de Vida",
-                            tickvals=tick_values,
-                            ticktext=tick_texts, # IDs numéricos
-                            tickmode='array'
-                        ),
-                        # --- Añadir configuración de Hover ---
-                        hovertext=hover_names_raster, # Matriz con nombres
-                        hoverinfo='text', # Indicar que use hovertext
-                        hovertemplate='<b>Zona:</b> %{hovertext}<extra></extra>' # Formato del popup
-                        # --- Fin Hover ---
-                    ))
-                # (Fin del else después de 'if not present_zone_ids:')
-
-                # Mostrar figura solo si se creó (es decir, si había zonas presentes)
+                # Mostrar figura si se creó
                 if fig is not None:
-                    fig.update_layout(
-                        title="Mapa de Zonas de Vida de Holdridge",
-                        xaxis_title=f"Coordenada X ({crs})",
-                        yaxis_title=f"Coordenada Y ({crs})",
-                        yaxis_scaleanchor="x",
-                        height=700
-                    )
+                    fig.update_layout(title="Mapa de Zonas de Vida de Holdridge", xaxis_title=f"Coordenada X ({crs})", yaxis_title=f"Coordenada Y ({crs})", yaxis_scaleanchor="x", height=700)
                     st.plotly_chart(fig, use_container_width=True)
-                    # --- AÑADIR LEYENDA DETALLADA ---
-                    st.markdown("---")
-                    st.subheader("Leyenda de Zonas de Vida Presentes")
 
-                    # Crear DataFrame para la leyenda
-                    # Asegurarse de usar los nombres correctos de name_map
-                    legend_data = {
-                        # Usar los IDs presentes como clave
-                        "ID": present_zone_ids, 
-                        # Obtener los nombres correspondientes usando name_map
-                        "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids] 
-                    }
-                    legend_df = pd.DataFrame(legend_data).sort_values(by="ID") # Ordenar por ID
-
-                    # Mostrar la tabla de leyenda
+                    # --- LEYENDA DETALLADA ID -> Nombre ---
+                    st.markdown("---"); st.subheader("Leyenda de Zonas de Vida Presentes")
+                    legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
+                    legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
                     st.dataframe(legend_df.set_index('ID'), use_container_width=True)
-                # --- FIN LEYENDA DETALLADA ---
+                    # --- FIN LEYENDA ---
 
-                # --- AÑADIR EXPANDER CON INFORMACIÓN ---
+                    # --- EXPANDER INFO (sin cambios) ---
                 st.markdown("---")
                 with st.expander("Sobre la Clasificación de Zonas de Vida de Holdridge"):
                     st.markdown("""
@@ -4478,6 +4435,7 @@ def display_life_zones_tab(**kwargs): # Aceptamos **kwargs aunque no los usemos 
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
