@@ -4684,18 +4684,19 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
                         # --- FIN Calculate Trends ---
 
                         # --- KEEP COMMENTED FOR NOW (Ensure indentation within comment is consistent) ---
+                        # Make sure this """ block starts at the same level as the st.write lines above it
                         """
                         # --- 2. Interpolate Trend Raster ---
-                        st.write("Interpolando raster de tendencia...")
+                        st.write("Interpolando raster de tendencia...") # Check indent here
                         # ... (code for griddata -> trend_raster_aligned) ...
 
                         # --- 3. Project Precipitation Raster ---
-                        st.write("Proyectando precipitación...")
+                        st.write("Proyectando precipitación...") # Check indent here
                         # ... (code for reproject -> ppt_actual_aligned) ...
                         # ... (code for ppt_future_raster) ...
-                        
+
                         # --- 4. Generate Future Life Zone Map ---
-                        st.write("Generando mapa de Zonas de Vida futuras...")
+                        st.write("Generando mapa de Zonas de Vida futuras...") # Check indent here
                         # ... (code call to generate_life_zone_map) ...
 
                         # --- 5. Display Future Map ---
@@ -4715,13 +4716,16 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
                     finally:
                         # Limpieza DEM
                         if temp_dem_filename and os.path.exists(dem_path):
-                            try: os.remove(dem_path); st.session_state['last_dem_used_for_flz'] = None
-                            except Exception as e_del: st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
+                            try:
+                                os.remove(dem_path)
+                                st.session_state['last_dem_used_for_flz'] = None
+                            except Exception as e_del:
+                                st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
                         # Limpieza PPT futuro (Mantener comentado, aún no se crea)
                         # if 'temp_ppt_future_path' in locals() and os.path.exists(temp_ppt_future_path):
                         #      try: os.remove(temp_ppt_future_path)
-                        #      except: pass
-        elif not dem_path:
+                        #      except: pass        elif not dem_path:
              st.warning("No se pudo preparar el DEM.")
+
 
 
