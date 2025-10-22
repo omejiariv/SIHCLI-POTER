@@ -30,7 +30,7 @@ from modules.analysis import calculate_all_station_trends
 from modules.analysis import calculate_hydrological_balance
 from modules.interpolation import create_kriging_by_basin
 import rasterio
-from modules.life_zones import generate_life_zone_map, holdridge_zone_map, holdridge_int_to_name
+from modules.life_zones import generate_life_zone_map, holdridge_zone_map_simplified, holdridge_int_to_name_simplified
 from rasterio.transform import from_origin
 from rasterio.mask import mask
 from scipy.interpolate import griddata
@@ -4557,6 +4557,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
