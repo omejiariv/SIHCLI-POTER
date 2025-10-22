@@ -4040,66 +4040,72 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     with col1:
         st.subheader(f"Cobertura del Suelo en: {basin_name}")
         try:
-            with st.spinner("Cargando y procesando coberturas..."):
-                # Cargar shapefile desde el zip
-                # Asumiendo que el .shp dentro del zip se llama igual que el zip sin la extensión
-                shp_name_inside_zip = os.path.splitext(os.path.basename(land_cover_zip_path))[0] + ".shp"
-                # Construir la ruta de acceso especial para geopandas
-                full_zip_path = f"zip://{land_cover_zip_path}!{shp_name_inside_zip}"
-                
-                gdf_land_cover = gpd.read_file(full_zip_path)
-                if gdf_land_cover.crs is None:
-                    st.warning("Advertencia: El shapefile de coberturas no tiene CRS definido. Asumiendo EPSG:XXXX...") # Inform the user
-                    try:
-                        # !! Reemplaza "EPSG:XXXX" con el código EPSG original correcto !!
-                        # Ejemplos: "EPSG:4686", "EPSG:3116", "EPSG:4326"
-                        gdf_land_cover.set_crs("EPSG:9377", inplace=True)
-                    except Exception as e_crs:
-                        st.error(f"Error al asignar CRS inicial al shapefile de coberturas: {e_crs}")
-                        return # Stop if CRS cannot be set
-                
-                # Verificar que la columna de cobertura exista
-                if cover_column_name not in gdf_land_cover.columns:
-                    st.error(f"La columna '{cover_column_name}' no se encontró en el archivo de coberturas. Columnas disponibles: {', '.join(gdf_land_cover.columns)}")
-                    return
+            with st.spinner("Cargando y procesando raster de coberturas..."):
+                # --- CORRECTED CODE using rasterio ---
+                # Abrir el raster de cobertura (Uses land_cover_raster_path defined earlier)
+                with rasterio.open(land_cover_raster_path) as cover_src:
+                    cover_crs = cover_src.crs
+                    cover_transform = cover_src.transform
+                    nodata_val = cover_src.nodata # Obtener valor nodata si existe
 
-                # Reproyectar a CRS proyectado para cálculos de área
-                basin_proj = unified_basin_gdf.to_crs(projected_crs)
-                land_cover_proj = gdf_land_cover.to_crs(projected_crs)
+                    # Reproyectar la geometría de la cuenca al CRS del raster de cobertura
+                    basin_reproj = unified_basin_gdf.to_crs(cover_crs)
 
-                # Recortar coberturas con la geometría de la cuenca
-                gdf_clipped = gpd.clip(land_cover_proj, basin_proj)
+                    # Recortar (enmascarar) el raster con la geometría de la cuenca
+                    out_image, out_transform = mask(cover_src, basin_reproj.geometry, crop=True, nodata=nodata_val, all_touched=True)
+                    
+                    if out_image.ndim > 2:
+                        out_image = out_image[0] 
 
-                if gdf_clipped.empty:
-                    st.warning("No se encontraron coberturas dentro del área de la cuenca seleccionada.")
-                    return
+                    # Calcular estadísticas de píxeles
+                    unique_values, counts = np.unique(out_image[out_image != nodata_val], return_counts=True) # Excluir nodata
 
-                # Calcular área por tipo de cobertura
-                gdf_clipped['area_m2'] = gdf_clipped.geometry.area
-                coverage_stats = gdf_clipped.groupby(cover_column_name)['area_m2'].sum().reset_index()
+                    if unique_values.size == 0:
+                        st.warning("No se encontraron píxeles de cobertura válidos dentro del área de la cuenca.")
+                        # Need to clear previous stats if we return here
+                        st.session_state['current_coverage_stats'] = None 
+                        return # Stop processing if no valid pixels
 
-                # Calcular área total y porcentajes
-                total_area_m2 = basin_proj.geometry.area.iloc[0] # Área total de la cuenca
-                coverage_stats['area_km2'] = coverage_stats['area_m2'] / 1_000_000
-                coverage_stats['percentage'] = (coverage_stats['area_m2'] / total_area_m2) * 100
+                    # Calcular área por clase
+                    pixel_size_x = abs(out_transform.a)
+                    pixel_size_y = abs(out_transform.e)
+                    pixel_area_m2 = pixel_size_x * pixel_size_y
 
-                # Guardar resultados para posible uso posterior (ej. escenarios)
+                    coverage_stats_list = []
+                    total_valid_pixels = counts.sum()
+                    total_area_m2_calc = total_valid_pixels * pixel_area_m2
+
+                    for value, count in zip(unique_values, counts):
+                        class_name = land_cover_legend.get(value, f"Código Desconocido ({value})")
+                        area_m2 = count * pixel_area_m2
+                        percentage = (count / total_valid_pixels) * 100 if total_valid_pixels > 0 else 0 # Avoid division by zero
+                        coverage_stats_list.append({
+                            "ID_Clase": value,
+                            "Tipo de Cobertura": class_name,
+                            "area_m2": area_m2,
+                            "area_km2": area_m2 / 1_000_000,
+                            "percentage": percentage
+                        })
+                    
+                    coverage_stats = pd.DataFrame(coverage_stats_list).sort_values(by="percentage", ascending=False)
+                # --- END CORRECTED CODE ---
+
+                # Guardar resultados (Remains the same)
                 st.session_state['current_coverage_stats'] = coverage_stats
-                st.session_state['total_basin_area_km2'] = total_area_m2 / 1_000_000
+                st.session_state['total_basin_area_km2'] = total_area_m2_calc / 1_000_000 
 
-                # Mostrar tabla de resultados
-                st.dataframe(coverage_stats[[cover_column_name, 'area_km2', 'percentage']]
-                             .rename(columns={cover_column_name: 'Tipo de Cobertura',
-                                              'area_km2': 'Área (km²)',
-                                              'percentage': 'Porcentaje (%)'})
+                # Mostrar tabla (Remains the same)
+                st.dataframe(coverage_stats[['Tipo de Cobertura', 'area_km2', 'percentage']]
+                             .rename(columns={'area_km2': 'Área (km²)', 'percentage': 'Porcentaje (%)'})
                              .style.format({'Área (km²)': '{:.2f}', 'Porcentaje (%)': '{:.1f}%'}),
                              use_container_width=True)
 
         except Exception as e:
-            st.error(f"Error al procesar el archivo de coberturas: {e}")
+            st.error(f"Error al procesar el raster de coberturas: {e}") # Updated error message
             import traceback
-            st.error(traceback.format_exc()) # Más detalles del error
-            return # Detener si hay error aquí
+            st.error(traceback.format_exc())
+            st.session_state['current_coverage_stats'] = None # Clear stats on error
+            return
 
     with col2:
         st.subheader("Visualización y Relación con Escorrentía")
@@ -4453,6 +4459,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
