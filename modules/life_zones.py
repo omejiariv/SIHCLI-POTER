@@ -128,13 +128,10 @@ def classify_holdridge_zone_antioquia(bat, ppt):
 
 # --- Función generate_life_zone_map (Sin cambios) ---
 @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...")
-# Añadir guion bajo a _mask_geometry en la definición
 def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, _mask_geometry=None, downscale_factor=4):
     """
-    Genera un mapa raster clasificado de Zonas de Vida de Holdridge,
-    con opción de máscara por geometría y resolución ajustable.
-    _mask_geometry: Una serie de geometrías de GeoPandas (se ignora para caché).
-    downscale_factor: 1 = original, 2 = mitad res, 4 = cuarto res, etc.
+    Genera un mapa raster clasificado...
+    _mask_geometry: Una serie de geometrías... (se ignora para caché).
     """
     try:
         # --- Factor de reescalado ---
@@ -177,12 +174,11 @@ def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, _mask_ge
         classified_raster[valid_pixels] = zone_ints.astype(np.int16)
         st.write("Clasificación completada.")
 
-        # --- APLICAR MÁSCARA (Usar _mask_geometry ahora) ---
+        # --- APLICAR MÁSCARA ---
         if _mask_geometry is not None and not _mask_geometry.empty:
             st.write("Aplicando máscara de geometría...")
             try:
-                # Usar _mask_geometry para reproyectar
-                mask_geometry_reproj = _mask_geometry.to_crs(dst_profile['crs'])
+                mask_geometry_reproj = _mask_geometry.to_crs(dst_profile['crs']) # <--- GUION BAJO AQUÍ
                 # Guardar temporalmente el raster clasificado para poder enmascararlo
                 temp_classified_path = "temp_classified_raster_mask.tif"
                 output_profile_mask = dst_profile.copy()
