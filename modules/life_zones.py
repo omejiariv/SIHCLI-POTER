@@ -150,16 +150,16 @@ def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, downscal
         with np.errstate(invalid='ignore'):
             tma_raster = estimate_mean_annual_temp(dem_data)
             bat_raster = calculate_biotemperature(tma_raster, mean_latitude)
-        st.write("Cálculos completados.")
+        # st.write("Cálculos completados.")
 
         # 4. Clasificar píxeles
-        st.write("Clasificando Zonas de Vida (Antioquia)...")
+        # st.write("Clasificando Zonas de Vida (Antioquia)...")
         classified_raster = np.full((dst_height, dst_width), 0, dtype=np.int16) # 0 para NoData
         valid_pixels = ~dem_mask & ~precip_mask & ~np.isnan(bat_raster) & ~np.isnan(precip_data_aligned)
         bat_values = bat_raster[valid_pixels]; ppt_values = precip_data_aligned[valid_pixels]
         vectorized_classify = np.vectorize(classify_holdridge_zone_antioquia); zone_ints = vectorized_classify(bat_values, ppt_values)
         classified_raster[valid_pixels] = zone_ints.astype(np.int16)
-        st.write("Clasificación completada.")
+        # st.write("Clasificación completada.")
 
 # --- BLOQUE DE MÁSCARA COMENTADO TEMPORALMENTE ---
         # if _mask_geometry is not None and not _mask_geometry.empty: 
