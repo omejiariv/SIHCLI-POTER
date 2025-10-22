@@ -4561,36 +4561,127 @@ def display_life_zones_tab(**kwargs):
 
 def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
     st.header("Proyección de Zonas de Vida Futuras (Basado en Tendencias)")
-    st.info("Esta sección está temporalmente simplificada para diagnóstico.")
-    st.warning("El código original está comentado.")
-
-    # --- TEMPORARILY COMMENT OUT ALL ORIGINAL CODE BELOW ---
-    """ 
-    st.info( " ""
+    st.info("""
     Esta sección estima cómo podrían cambiar las Zonas de Vida en el futuro,
     asumiendo que las tendencias de precipitación observadas continúan linealmente.
     Se requiere un DEM y el ráster de precipitación media anual base.
-    " "" )
+    """)
 
     # --- Configuration ---
-    # ... (Original code commented out) ...
+    precip_raster_filename = "PPAMAnt.tif" # Base precipitation raster
+    # --- End Configuration ---
 
     # --- Get Required Data Paths ---
-    # ... (Original code commented out) ...
-    
-    # --- User Interface ---
-    # ... (Original code commented out) ...
+    _THIS_FILE_DIR = os.path.dirname(__file__)
+    precip_raster_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', precip_raster_filename))
+    dem_file_info = st.session_state.get('dem_file')
+    dem_path = None
+    temp_dem_filename = None
 
-    # Button to trigger calculation
-    # if st.button(f"Generar Mapa...", key="gen_future_lz_map", disabled=(not dem_file_info)):
-        # ... (Original code commented out) ...
-            # try:
-                # ... (ALL the calculation and plotting logic commented out) ...
-            # except Exception as e_future:
-                # ...
-            # finally:
-                # ...
-    """
-    # --- END OF COMMENTED OUT BLOCK ---
+    # Check if base files exist
+    if not os.path.exists(precip_raster_path):
+        st.error(f"No se encontró el archivo base de precipitación: {precip_raster_path}")
+        return
+    if not dem_file_info:
+        st.warning("Sube un archivo DEM en el panel lateral izquierdo para generar mapas futuros.")
+        # Allow proceeding without DEM initially, but disable button
 
-# ... (Rest of the file, if any) ...
+    # --- User Interface (DESCOMENTADO) ---
+    col1, col2 = st.columns(2)
+    with col1:
+        years_future = st.slider(
+            "Seleccionar Años Futuros para Proyectar:",
+            min_value=1,
+            max_value=20, # Or adjust max years
+            value=10,
+            step=1,
+            key="future_years_slider"
+        )
+    with col2:
+        # Get resolution setting (copied from display_life_zones_tab)
+        resolution_options = {"Baja (Rápido)": 8, "Media": 4, "Alta (Lento)": 2, "Original (Muy Lento)": 1}
+        selected_resolution = st.select_slider(
+            "Seleccionar Resolución del Mapa:",
+            options=list(resolution_options.keys()),
+            value="Media",
+            key="future_lifezone_resolution"
+        )
+        downscale_factor = resolution_options[selected_resolution]
+
+    apply_basin_mask_future = st.toggle("Aplicar Máscara de Cuenca Actual", value=True, key="future_lifezone_mask_toggle")
+    mask_geometry_to_use = None
+    basin_to_mask = st.session_state.get('unified_basin_gdf')
+    if apply_basin_mask_future:
+        if basin_to_mask is not None and not basin_to_mask.empty:
+            mask_geometry_to_use = basin_to_mask.geometry
+            st.info(f"Se aplicará la máscara de cuenca: {st.session_state.get('selected_basins_title', '')}")
+        else:
+            st.warning("No hay cuenca seleccionada en 'Mapas Avanzados' para usar como máscara.")
+            apply_basin_mask_future = False
+    # --- FIN UI ---
+
+    # Button to trigger calculation (DESCOMENTADO)
+    if st.button(f"Generar Mapa de Zonas de Vida para +{years_future} años", key="gen_future_lz_map", disabled=(not dem_file_info)):
+
+        # --- Prepare DEM Path (DESCOMENTADO) ---
+        if dem_file_info:
+            temp_dem_filename = f"temp_dem_for_future_lz_{dem_file_info.name}"
+            dem_path = os.path.join(os.getcwd(), temp_dem_filename)
+            try:
+                if not os.path.exists(dem_path) or st.session_state.get('last_dem_used_for_flz') != dem_file_info.name:
+                    with open(dem_path, "wb") as f: f.write(dem_file_info.getbuffer())
+                    st.session_state['last_dem_used_for_flz'] = dem_file_info.name
+            except Exception as e_write:
+                st.error(f"No se pudo escribir el archivo DEM temporal: {e_write}")
+                dem_path = None
+        else:
+            st.error("Error interno: Se intentó generar sin DEM.")
+            dem_path = None
+
+        # Proceed only if DEM path is valid
+        if dem_path and os.path.exists(dem_path):
+            with st.spinner(f"Calculando tendencias y proyectando precipitación para +{years_future} años..."):
+                st.info("Paso 1: Iniciando proceso...") # Mensaje de prueba
+                
+                # --- MANTENER CÁLCULOS PESADOS COMENTADOS POR AHORA ---
+                """
+                try:
+                    # --- DEFINE TARGET GRID PROFILE FIRST ---
+                    st.write("Definiendo grilla de destino...")
+                    # ... (código para dst_profile) ...
+                    
+                    # --- 1. Calculate Trends ---
+                    st.write("Calculando tendencias de precipitación...")
+                    # ... (código para gdf_trends) ...
+
+                    # --- 2. Interpolate Trend Raster ---
+                    st.write("Interpolando raster de tendencia...")
+                    # ... (código para griddata -> trend_raster_aligned) ...
+
+                    # --- 3. Project Precipitation Raster ---
+                    st.write("Proyectando precipitación...")
+                    # ... (código para reproject -> ppt_actual_aligned) ...
+                    # ... (código para ppt_future_raster) ...
+                    
+                    # --- 4. Generate Future Life Zone Map ---
+                    st.write("Generando mapa de Zonas de Vida futuras...")
+                    # ... (código llamada a generate_life_zone_map) ...
+
+                    # --- 5. Display Future Map ---
+                    if classified_raster_future is not None:
+                         # ... (código de visualización) ...
+                    else:
+                        st.error("Falló la generación del mapa...")
+
+                except Exception as e_future:
+                    st.error(f"Error durante el proceso de proyección futura: {e_future}")
+                    import traceback
+                    st.error(traceback.format_exc())
+
+                finally:
+                    # ... (código de limpieza) ...
+                """
+                st.success("Paso 1 completado (Cálculos pesados omitidos).") # Mensaje de prueba
+
+        elif not dem_path:
+             st.warning("No se pudo preparar el DEM.")
