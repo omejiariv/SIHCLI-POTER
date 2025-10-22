@@ -21,7 +21,8 @@ from modules.visualizer import (
     display_additional_climate_maps_tab, 
     display_satellite_imagery_tab,
     display_land_cover_analysis_tab,
-    display_life_zones_tab
+    display_life_zones_tab,
+    display_future_life_zones_tab
 )
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
@@ -102,6 +103,7 @@ def main():
         "Variables Climáticas", "Imágenes Satelitales",
         "Análisis Cobertura Suelo",
         "Zonas de Vida",
+        "Zonas de Vida Futuras",
         "Análisis de Anomalías", "Análisis de Extremos", "Estadísticas",
         "Correlación", "Análisis ENSO", "Tendencias y Pronósticos",
         "Pronóstico Semanal",
@@ -471,6 +473,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
