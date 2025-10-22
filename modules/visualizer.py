@@ -4354,8 +4354,8 @@ def display_life_zones_tab(**kwargs):
             classified_raster, output_profile, name_map = generate_life_zone_map(
                 dem_path,
                 precip_raster_path,
-                mean_latitude, # <-- QUITAR ESTE
-                mask_geometry=mask_arg,
+                # mean_latitude, # <-- ARGUMENTO ELIMINADO
+                _mask_geometry=mask_arg, # <-- USAR _mask_geometry aquí también para consistencia con caché
                 downscale_factor=downscale_factor
             )
 
@@ -4557,6 +4557,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
