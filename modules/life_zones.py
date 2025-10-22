@@ -178,7 +178,7 @@ def generate_life_zone_map(dem_path, precip_raster_path, mean_latitude, _mask_ge
         if _mask_geometry is not None and not _mask_geometry.empty:
             st.write("Aplicando máscara de geometría...")
             try:
-                mask_geometry_reproj = _mask_geometry.to_crs(dst_profile['crs']) # <--- GUION BAJO AQUÍ
+                mask_geometry_reproj = _mask_geometry.to_crs(dst_profile['crs'])
                 # Guardar temporalmente el raster clasificado para poder enmascararlo
                 temp_classified_path = "temp_classified_raster_mask.tif"
                 output_profile_mask = dst_profile.copy()
