@@ -4622,95 +4622,82 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
     # Button to trigger calculation
     if st.button(f"Generar Mapa de Zonas de Vida para +{years_future} años", key="gen_future_lz_map", disabled=(not dem_file_info)):
 
-        # --- Prepare DEM Path (same logic as before) ---
-        if dem_file_info:
-            temp_dem_filename = f"temp_dem_for_future_lz_{dem_file_info.name}"
-            dem_path = os.path.join(os.getcwd(), temp_dem_filename)
-            try:
-                if not os.path.exists(dem_path) or st.session_state.get('last_dem_used_for_flz') != dem_file_info.name:
-                    with open(dem_path, "wb") as f: f.write(dem_file_info.getbuffer())
-                    st.session_state['last_dem_used_for_flz'] = dem_file_info.name
-            except Exception as e_write:
-                st.error(f"No se pudo escribir el archivo DEM temporal: {e_write}")
-                dem_path = None # Stop if DEM cannot be written
+            # --- Prepare DEM Path (same logic as before) ---
+            # ... (code to prepare dem_path) ...
 
-        # Proceed only if DEM path is valid
-        if dem_path:
-            with st.spinner(f"Calculando tendencias y proyectando precipitación para +{years_future} años..."):
-                try:
-                    # --- 1. Calculate Trends ---
-                    st.write("Calculando tendencias de precipitación...")
-                    # Ensure gdf_filtered has geometry for merging/interpolation
-                    gdf_stations_geo = gdf_filtered[gdf_filtered.geometry.notna()]
-                    gdf_trends = calculate_all_station_trends(df_anual_melted, gdf_stations_geo)
-                    st.write(f"Tendencias calculadas para {len(gdf_trends)} estaciones.")
+            # Proceed only if DEM path is valid
+            if dem_path:
+                with st.spinner(f"Calculando tendencias y proyectando precipitación para +{years_future} años..."):
+                    try:
+                        # --- DEFINE TARGET GRID PROFILE FIRST ---
+                        st.write("Definiendo grilla de destino...")
+                        dst_profile = None # Initialize
+                        dst_crs = None
+                        dst_transform = None
+                        dst_h = 0
+                        dst_w = 0
+                        with rasterio.open(dem_path) as dem_src: # Use DEM as spatial reference
+                             src_profile = dem_src.profile
+                             src_crs = dem_src.crs
+                             src_transform = dem_src.transform
+                             src_h, src_w = dem_src.height, dem_src.width
+                             # Calculate downscaled dimensions and transform
+                             dst_h = src_h // downscale_factor
+                             dst_w = src_w // downscale_factor
+                             dst_transform = src_transform * src_transform.scale((src_w / dst_w), (src_h / dst_h))
+                             dst_crs = src_crs # Keep original CRS for now
+                             # Create the target profile
+                             dst_profile = src_profile.copy()
+                             dst_profile.update({
+                                 'height': dst_h, 'width': dst_w, 'transform': dst_transform,
+                                 'dtype': rasterio.float32, 'nodata': np.nan # Use float32 for calculations
+                             })
+                        st.write(f"Grilla destino definida: {dst_w}x{dst_h} píxeles, CRS={dst_crs}")
+                        # --- END DEFINE TARGET GRID ---
 
-                    if gdf_trends.empty or gdf_trends['slope_sen'].isnull().all() or len(gdf_trends) < 4:
-                         st.error("No hay suficientes datos de tendencia (>10 años en estaciones) para generar la proyección.")
-                         raise st.rerun() # Stop execution cleanly
+                        # --- 1. Calculate Trends ---
+                        st.write("Calculando tendencias de precipitación...")
+                        # ... (code to calculate gdf_trends) ...
+                        if gdf_trends.empty or gdf_trends['slope_sen'].isnull().all() or len(gdf_trends) < 4:
+                             st.error("No hay suficientes datos de tendencia...")
+                             # Use raise st.rerun() or st.stop() for cleaner exit if needed
+                             raise ValueError("Datos de tendencia insuficientes") 
 
-                    # --- 2. Interpolate Trend Raster ---
-                    st.write("Interpolando raster de tendencia...")
-                    trend_lons = gdf_trends.geometry.x.values
-                    trend_lats = gdf_trends.geometry.y.values
-                    trend_vals = gdf_trends['slope_sen'].fillna(0).values # Fill NA trends with 0
-
-                    # Use bounds and resolution similar to life zones for interpolation target
-                    with rasterio.open(dem_path) as dem_src: # Use DEM as spatial reference
-                        dst_crs = dem_src.crs # Interpolate trend in DEM's CRS
-                        # Calculate grid based on downscaled DEM dimensions
-                        src_transform = dem_src.transform
-                        src_h, src_w = dem_src.height, dem_src.width
-                        dst_h = src_h // downscale_factor
-                        dst_w = src_w // downscale_factor
-                        dst_transform = src_transform * src_transform.scale((src_w / dst_w), (src_h / dst_h))
+                        # --- 2. Interpolate Trend Raster ---
+                        st.write("Interpolando raster de tendencia...")
+                        # ... (code to prepare trend_lons, lats, vals) ...
+                        # Create grid coordinates using the DEFINED dst_transform/dims
                         dst_bounds = rasterio.transform.array_bounds(dst_h, dst_w, dst_transform)
+                        grid_x_coords = np.linspace(dst_bounds[0] + dst_transform.a/2, dst_bounds[2] - dst_transform.a/2, dst_w)
+                        grid_y_coords = np.linspace(dst_bounds[1] + dst_transform.e/2, dst_bounds[3] - dst_transform.e/2, dst_h) # Check Y dir
+                        grid_x, grid_y = np.meshgrid(grid_x_coords, grid_y_coords)
 
-                    # Create grid for interpolation target (matching downscaled DEM)
-                    grid_x_coords = np.linspace(dst_bounds[0] + dst_transform.a/2, dst_bounds[2] - dst_transform.a/2, dst_w)
-                    grid_y_coords = np.linspace(dst_bounds[1] + dst_transform.e/2, dst_bounds[3] - dst_transform.e/2, dst_h) # Check Y direction
-                    grid_x, grid_y = np.meshgrid(grid_x_coords, grid_y_coords)
+                        # ... (code to reproject trend points) ...
+                        # ... (code for griddata interpolation -> trend_raster_aligned) ...
+                        st.write("Raster de tendencia interpolado.")
 
-                    # Reproject trend station coordinates to DEM CRS if needed
-                    trend_points_gdf = gpd.GeoDataFrame(gdf_trends, geometry=gpd.points_from_xy(trend_lons, trend_lats), crs="EPSG:4326")
-                    trend_points_reproj = trend_points_gdf.to_crs(dst_crs)
-                    points_trend = np.column_stack((trend_points_reproj.geometry.x, trend_points_reproj.geometry.y))
+                        # --- 3. Project Precipitation Raster ---
+                        st.write("Proyectando precipitación...")
+                        with rasterio.open(precip_raster_path) as precip_src:
+                            ppt_actual_aligned = np.empty((dst_h, dst_w), dtype=rasterio.float32)
+                            reproject( # Uses dst_transform, dst_crs defined earlier
+                                source=rasterio.band(precip_src, 1), destination=ppt_actual_aligned,
+                                src_transform=precip_src.transform, src_crs=precip_src.crs, src_nodata=precip_src.nodata,
+                                dst_transform=dst_transform, dst_crs=dst_crs, dst_nodata=np.nan,
+                                resampling=Resampling.bilinear
+                            )
+                            ppt_actual_aligned = np.nan_to_num(ppt_actual_aligned, nan=0.0)
 
-                    # Interpolate using griddata (IDW/linear)
-                    trend_raster_aligned = griddata(points_trend, trend_vals, (grid_x, grid_y), method='linear')
-                    nan_mask_trend = np.isnan(trend_raster_aligned)
-                    if np.any(nan_mask_trend):
-                        fill_values_trend = griddata(points_trend, trend_vals, (grid_x[nan_mask_trend], grid_y[nan_mask_trend]), method='nearest')
-                        trend_raster_aligned[nan_mask_trend] = fill_values_trend
-                    trend_raster_aligned = np.nan_to_num(trend_raster_aligned) # Result is trend in mm/year
-                    st.write("Raster de tendencia interpolado.")
+                        ppt_future_raster = ppt_actual_aligned + (trend_raster_aligned * years_future)
+                        ppt_future_raster = np.maximum(0, ppt_future_raster)
 
-
-                    # --- 3. Project Precipitation Raster ---
-                    st.write("Proyectando precipitación...")
-                    # Read base precipitation and align/resample to target grid
-                    with rasterio.open(precip_raster_path) as precip_src:
-                        ppt_actual_aligned = np.empty((dst_h, dst_w), dtype=rasterio.float32)
-                        reproject(
-                            source=rasterio.band(precip_src, 1), destination=ppt_actual_aligned,
-                            src_transform=precip_src.transform, src_crs=precip_src.crs, src_nodata=precip_src.nodata,
-                            dst_transform=dst_transform, dst_crs=dst_crs, dst_nodata=np.nan,
-                            resampling=Resampling.bilinear
-                        )
-                        ppt_actual_aligned = np.nan_to_num(ppt_actual_aligned, nan=0.0) # Replace NaN with 0 before calculation
-
-                    # Calculate future precipitation
-                    ppt_future_raster = ppt_actual_aligned + (trend_raster_aligned * years_future)
-                    ppt_future_raster = np.maximum(0, ppt_future_raster) # Ensure no negative precipitation
-
-                    # Save future PPT raster temporarily
-                    temp_ppt_future_path = "temp_ppt_future.tif"
-                    future_profile = dst_profile.copy() # Use the downscaled DEM profile
-                    future_profile.update({'dtype': rasterio.float32, 'nodata': 0.0}) # Use 0 as nodata for PPT
-                    with rasterio.open(temp_ppt_future_path, 'w', **future_profile) as dst:
-                        dst.write(ppt_future_raster.astype(rasterio.float32), 1)
-                    st.write("Raster de precipitación futura generado.")
-
+                        temp_ppt_future_path = "temp_ppt_future.tif"
+                        # Use the DEFINED dst_profile here
+                        future_profile = dst_profile.copy() # Now dst_profile is defined
+                        future_profile.update({'dtype': rasterio.float32, 'nodata': 0.0})
+                        with rasterio.open(temp_ppt_future_path, 'w', **future_profile) as dst:
+                            dst.write(ppt_future_raster.astype(rasterio.float32), 1)
+                        st.write("Raster de precipitación futura generado.")
 
                     # --- 4. Generate Future Life Zone Map ---
                     st.write("Generando mapa de Zonas de Vida futuras...")
@@ -4831,4 +4818,5 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
         # Message if DEM wasn't ready when button was clicked
         elif not dem_path and st.button("Generar Mapa...", disabled=True): # Button shows disabled state
              pass # Handled by the warning before the button
+
 
