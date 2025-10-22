@@ -229,10 +229,8 @@ def main():
         display_land_cover_analysis_tab(**display_args)
     with tabs[7]: # Zonas de Vida
         display_life_zones_tab(**display_args)
-
     with tabs[8]: # Zonas de Vida Futuras (new index 8)
-    display_future_life_zones_tab(**display_args)
-    
+        display_future_life_zones_tab(**display_args)
     with tabs[9]:
         display_anomalies_tab(df_long=st.session_state.df_long, **display_args)
     with tabs[10]:
@@ -477,6 +475,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
