@@ -4448,18 +4448,67 @@ def display_life_zones_tab(**kwargs):
                     )
                     st.plotly_chart(fig, use_container_width=True) # <-- Muestra el Heatmap
 
-                    # --- LEYENDA DETALLADA ID -> Nombre + Hectáreas ---
-                    # (El código que calcula y muestra la tabla va aquí)
+                    # --- AÑADIR LEYENDA DETALLADA (Área por Proporción) ---
                     st.markdown("---")
                     st.subheader("Leyenda y Área por Zona de Vida Presente")
-                    pixel_size_x_rescaled=abs(output_profile['transform'].a); pixel_size_y_rescaled=abs(output_profile['transform'].e)
-                    pixel_area_m2_rescaled=pixel_size_x_rescaled*pixel_size_y_rescaled; area_hectares=[]
-                    for zone_id in present_zone_ids:
-                        count=np.count_nonzero(classified_raster==zone_id); area_ha=(count*pixel_area_m2_rescaled)/10000
-                        area_hectares.append(area_ha)
-                    legend_data={"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids], "Área (ha)": area_hectares}
-                    legend_df=pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False)
-                    st.dataframe(legend_df.set_index('ID').style.format({'Área (ha)': '{:,.1f}'}), use_container_width=True)
+
+                    # --- Calcular Área en Hectáreas por Proporción ---
+                    # Obtener el área total de la cuenca (calculada previamente, en km²)
+                    # Puede venir de 'total_basin_area_km2' (calculada en land cover tab)
+                    # o de 'balance_results' (calculada en interp tab)
+                    total_area_km2 = st.session_state.get('total_basin_area_km2')
+                    if total_area_km2 is None and st.session_state.get('balance_results'):
+                        total_area_km2 = st.session_state['balance_results'].get('Area_km2')
+
+                    area_hectares = []
+                    pixel_counts = [] # Guardar counts para calcular porcentaje
+                    total_valid_pixels_in_map = 0
+
+                    # Contar píxeles totales válidos (excluyendo nodata) en el raster clasificado
+                    nodata_val = output_profile.get('nodata', 0)
+                    valid_pixel_mask = (classified_raster != nodata_val)
+                    total_valid_pixels_in_map = np.count_nonzero(valid_pixel_mask)
+
+                    if total_valid_pixels_in_map > 0 and total_area_km2 is not None:
+                        # Iterar sobre los IDs presentes en la leyenda
+                        for zone_id in present_zone_ids: # present_zone_ids ya excluye nodata
+                            # Contar píxeles para este ID específico
+                            count = np.count_nonzero(classified_raster == zone_id)
+                            pixel_counts.append(count)
+                            # Calcular proporción de píxeles
+                            proportion = count / total_valid_pixels_in_map
+                            # Calcular área en hectáreas (Total Area km² * 100 ha/km²)
+                            area_ha = proportion * (total_area_km2 * 100.0)
+                            area_hectares.append(area_ha)
+                        
+                        # Crear DataFrame para la leyenda con Hectáreas
+                        legend_data = {
+                            "ID": present_zone_ids,
+                            "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids],
+                            "Área (ha)": area_hectares,
+                            "% del Área": [(c / total_valid_pixels_in_map) * 100.0 for c in pixel_counts] # Calcular %
+                        }
+                        legend_df = pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False)
+
+                        # Mostrar la tabla de leyenda formateada
+                        st.dataframe(
+                            legend_df.set_index('ID').style.format({
+                                'Área (ha)': '{:,.1f}',
+                                '% del Área': '{:.1f}%' # Formato para porcentaje
+                            }),
+                            use_container_width=True
+                        )
+                        st.caption(f"Área total clasificada: {total_area_km2:.2f} km² ({total_valid_pixels_in_map} píxeles)")
+
+                    elif total_area_km2 is None:
+                         st.warning("No se pudo obtener el área total de la cuenca desde otras pestañas para calcular las hectáreas.")
+                         # Mostrar leyenda sin áreas
+                         legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
+                         legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
+                         st.dataframe(legend_df.set_index('ID'), use_container_width=True)
+                    else: # total_valid_pixels_in_map es 0
+                         st.warning("No hay píxeles válidos clasificados para calcular áreas.")
+
                     # --- FIN LEYENDA DETALLADA ---
 
                     # --- EXPANDER INFO (sin cambios) ---
@@ -4485,5 +4534,6 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
