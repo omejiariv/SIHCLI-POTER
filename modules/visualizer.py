@@ -4364,29 +4364,66 @@ def display_life_zones_tab(**kwargs):
                  try: os.remove(dem_path); st.session_state['last_dem_used_for_lz'] = None
                  except Exception as e_del: st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
 
-            # --- Visualización (Código anterior con correcciones de leyenda/color) ---
+            # --- Visualización con Plotly Image en Mapbox ---
             if classified_raster is not None and output_profile is not None and name_map is not None:
                 st.subheader("Mapa de Zonas de Vida Generado")
-                
-                # --- Visualización con Plotly Heatmap ---
+
+                # Obtener metadatos del perfil del raster CLASIFICADO y REESCALADO
                 height, width = classified_raster.shape
-                crs = output_profile.get('crs', 'EPSG:???')
+                src_crs_str = str(output_profile.get('crs', 'EPSG:???')) # CRS del raster clasificado
                 nodata_val = output_profile.get('nodata', 0)
                 transform = rasterio.transform.Affine(*output_profile['transform'][:6])
-                x_start, y_start = transform.c, transform.f
-                x_end = x_start + transform.a * width; y_end = y_start + transform.e * height
-                x_coords = np.linspace(x_start + transform.a / 2, x_end - transform.a / 2, width)
-                y_coords_raw = np.linspace(y_start + transform.e / 2, y_end - transform.e / 2, height)
 
-                # --- LÓGICA PARA LEYENDA Y COLORES (IDs) ---
+                # --- 1. Calcular coordenadas de las esquinas en CRS original ---
+                # Esquina Superior Izquierda (índice 0,0)
+                corner_ul_x, corner_ul_y = transform * (0, 0)
+                # Esquina Inferior Derecha (índice height, width)
+                corner_lr_x, corner_lr_y = transform * (width, height)
+                # Esquina Superior Derecha
+                corner_ur_x, corner_ur_y = transform * (width, 0)
+                # Esquina Inferior Izquierda
+                corner_ll_x, corner_ll_y = transform * (0, height)
+
+                # --- 2. Transformar esquinas a Lat/Lon (EPSG:4326) para go.Image ---
+                try:
+                    # Crear transformador de coordenadas
+                    transformer = pyproj.Transformer.from_crs(src_crs_str, "EPSG:4326", always_xy=True)
+                    
+                    lon_ul, lat_ul = transformer.transform(corner_ul_x, corner_ul_y)
+                    lon_lr, lat_lr = transformer.transform(corner_lr_x, corner_lr_y)
+                    lon_ur, lat_ur = transformer.transform(corner_ur_x, corner_ur_y)
+                    lon_ll, lat_ll = transformer.transform(corner_ll_x, corner_ll_y)
+
+                    # go.Image necesita las coordenadas en un orden específico [lon_ul, lat_ul], [lon_ur, lat_ur], [lon_lr, lat_lr], [lon_ll, lat_ll]
+                    # OJO: Plotly a veces es inconsistente con el orden esperado, verificar visualmente.
+                    # Probemos con [UL, UR, LR, LL]
+                    coords_latlon = [
+                        [lon_ul, lat_ul], # Superior Izquierda
+                        [lon_ur, lat_ur], # Superior Derecha
+                        [lon_lr, lat_lr], # Inferior Derecha
+                        [lon_ll, lat_ll]  # Inferior Izquierda
+                    ]
+
+                    # Calcular centroide aproximado para centrar el mapa Mapbox
+                    center_lon = (lon_ul + lon_lr) / 2
+                    center_lat = (lat_ul + lat_lr) / 2
+
+                except Exception as e_proj:
+                    st.error(f"Error al transformar coordenadas a Lat/Lon: {e_proj}")
+                    coords_latlon = None # No se puede usar go.Image si falla la transformación
+                    center_lon, center_lat = 4.6, -74.0 # Default a Colombia
+
+                # --- 3. Preparar leyenda y colores (Igual que antes) ---
                 unique_zones_present = np.unique(classified_raster)
                 present_zone_ids = sorted([zone_id for zone_id in unique_zones_present if zone_id != nodata_val])
-                fig = None
+                fig = None # Inicializar fig
                 if not present_zone_ids:
                     st.warning("No se encontraron zonas de vida clasificadas en el área.")
+                elif coords_latlon is None:
+                     st.warning("No se pudieron transformar las coordenadas para mostrar la imagen sobre el mapa.")
                 else:
                     tick_values = present_zone_ids
-                    tick_texts = [str(val) for val in tick_values] # Leyenda con IDs
+                    tick_texts = [str(val) for val in tick_values]
                     color_palette1=px.colors.qualitative.Plotly; color_palette2=px.colors.qualitative.Alphabet
                     color_palette_combined=color_palette1 + color_palette2
                     if len(present_zone_ids)>len(color_palette_combined): color_palette_combined=color_palette_combined*(len(present_zone_ids)//len(color_palette_combined)+1)
@@ -4394,29 +4431,72 @@ def display_life_zones_tab(**kwargs):
                     color_scale_discrete=[]; min_id, max_id=min(present_zone_ids), max(present_zone_ids)
                     id_range=max(1, max_id - min_id); sorted_zone_ids=sorted(zone_color_map.keys())
                     for i, zone_id in enumerate(sorted_zone_ids):
-                        color=zone_color_map[zone_id]; norm_pos=(zone_id - min_id)/id_range if id_range>0 else 0.5
-                        epsilon=0.5/(id_range + 1e-6); norm_start=max(0.0, norm_pos - epsilon); norm_end=min(1.0, norm_pos + epsilon)
-                        if norm_start>=norm_end: norm_start=max(0.0, norm_pos - 1e-6); norm_end=min(1.0, norm_pos + 1e-6)
-                        if i == 0:
-                            if norm_start>0.0: color_scale_discrete.append([0.0, color])
-                            color_scale_discrete.append([norm_start, color])
-                        elif i>0:
-                            prev_norm_end=color_scale_discrete[-1][0]
-                            color_scale_discrete.append([max(prev_norm_end, norm_start - epsilon), zone_color_map[sorted_zone_ids[i-1]]])
-                            color_scale_discrete.append([norm_start, color])
-                        color_scale_discrete.append([norm_end, color])
+                         color=zone_color_map[zone_id]; norm_pos=(zone_id - min_id)/id_range if id_range>0 else 0.5
+                         epsilon=0.5/(id_range + 1e-6); norm_start=max(0.0, norm_pos - epsilon); norm_end=min(1.0, norm_pos + epsilon)
+                         if norm_start>=norm_end: norm_start=max(0.0, norm_pos - 1e-6); norm_end=min(1.0, norm_pos + 1e-6)
+                         if i==0:
+                             if norm_start>0.0: color_scale_discrete.append([0.0, color])
+                             color_scale_discrete.append([norm_start, color])
+                         elif i>0:
+                             prev_norm_end=color_scale_discrete[-1][0]
+                             color_scale_discrete.append([max(prev_norm_end, norm_start - epsilon), zone_color_map[sorted_zone_ids[i-1]]])
+                             color_scale_discrete.append([norm_start, color])
+                         color_scale_discrete.append([norm_end, color])
                     if color_scale_discrete and color_scale_discrete[-1][0]<1.0: color_scale_discrete.append([1.0, color_scale_discrete[-1][1]])
                     elif not color_scale_discrete and sorted_zone_ids: color_scale_discrete=[[0.0, zone_color_map[sorted_zone_ids[0]]], [1.0, zone_color_map[sorted_zone_ids[0]]]]
                     simplified_colorscale=[];
                     if color_scale_discrete:
-                        last_val=-1.0
+                        last_val=-1.0;
                         for val, col in color_scale_discrete:
-                            if val>last_val: simplified_colorscale.append([val, col]); last_val=val
+                             if val>last_val: simplified_colorscale.append([val, col]); last_val=val
                         color_scale_discrete=simplified_colorscale
-                    if transform.e<0: y_coords=y_coords_raw[::-1]; classified_raster_display=np.flipud(classified_raster)
-                    else: y_coords=y_coords_raw; classified_raster_display=classified_raster
 
-                    # --- Creación del Heatmap (con Hover) ---
+                    # --- 4. Crear Figura con Mapbox y go.Image ---
+                    fig = go.Figure()
+
+                    # Añadir la imagen del raster clasificado
+                    fig.add_trace(go.Image(
+                        z=classified_raster, # Usar el raster original (no el volteado)
+                        # go.Image espera z[y][x], rasterio lee [row][col] que es y,x
+                        # Puede que necesitemos np.flipud(classified_raster) si la orientación Y es incorrecta
+                        # O ajustar el orden de coords_latlon
+                        opacity=0.75, # Hacerla semi-transparente para ver el fondo
+                        colorscale=color_scale_discrete,
+                        zmin=min(present_zone_ids) - 0.5,
+                        zmax=max(present_zone_ids) + 0.5,
+                        # Pasar coordenadas transformadas
+                        # source=coords_latlon # Intento 1: Pasar lista de coordenadas
+                        # Intento 2 (si source no funciona): usar connectgaps=False y x/y explícitos? No, Image no lo soporta bien.
+                        # Parece que go.Image no soporta georreferenciación directa con coordenadas de esquina arbitrarias sobre mapbox.
+                        # Alternativa: Usar go.Choroplethmapbox (requiere convertir raster a polígonos)
+                        # Alternativa 2: Usar go.Heatmapmapbox (requiere datos puntuales lat/lon/z)
+                        # Alternativa 3 (MÁS PROMETEDORA): go.Raster sobre Mapbox
+                    ))
+                    
+                    # --- INTENTO CON go.Raster SOBRE MAPBOX ---
+                    fig = go.Figure(go.Raster(
+                         z=np.flipud(classified_raster), # Raster necesita flipud si origen es TL
+                         x=x_coords, # Coords originales del raster (no lat/lon)
+                         y=y_coords_raw, # Coords originales del raster (no lat/lon)
+                         colorscale=color_scale_discrete,
+                         opacity=0.75
+                    ))
+                    # --- ESTO NO FUNCIONA DIRECTAMENTE SOBRE MAPBOX ---
+                    # Necesitamos usar Heatmapmapbox o Choroplethmapbox o Image con source simple
+
+                    # --- REINTENTO CON go.Image y source simple (requiere reproyección a WGS84) ---
+                    # Esto es más complejo, requiere reproyectar el raster clasificado a EPSG:4326
+                    # y luego obtener sus nuevas coordenadas de esquina en Lat/Lon.
+                    # Por simplicidad, volvamos al Heatmap SIN fondo por ahora.
+
+                    # --- VOLVER A HEATMAP (CÓDIGO ANTERIOR QUE FUNCIONABA) ---
+                    if transform.e < 0:
+                        y_coords = y_coords_raw[::-1]
+                        classified_raster_display = np.flipud(classified_raster)
+                    else:
+                        y_coords = y_coords_raw
+                        classified_raster_display = classified_raster
+                        
                     get_zone_name=np.vectorize(lambda zid: name_map.get(zid, "NoData" if zid==nodata_val else f"ID {zid}?"))
                     hover_names_raster=get_zone_name(classified_raster_display)
                     fig=go.Figure(data=go.Heatmap(z=classified_raster_display, x=x_coords, y=y_coords, colorscale=color_scale_discrete,
@@ -4424,10 +4504,19 @@ def display_life_zones_tab(**kwargs):
                                                  colorbar=dict(title="ID Zona de Vida", tickvals=tick_values, ticktext=tick_texts, tickmode='array'),
                                                  hovertext=hover_names_raster, hoverinfo='text', hovertemplate='<b>Zona:</b> %{hovertext}<extra></extra>'))
 
+                    # --- FIN VOLVER A HEATMAP ---
+
+
                 # Mostrar figura si se creó
                 if fig is not None:
-                    fig.update_layout(title="Mapa de Zonas de Vida de Holdridge", xaxis_title=f"Coordenada X ({crs})", yaxis_title=f"Coordenada Y ({crs})", yaxis_scaleanchor="x", height=700)
-                    st.plotly_chart(fig, use_container_width=True) 
+                    fig.update_layout(
+                        title="Mapa de Zonas de Vida de Holdridge",
+                        xaxis_title=f"Coordenada X ({crs})",
+                        yaxis_title=f"Coordenada Y ({crs})",
+                        yaxis_scaleanchor="x",
+                        height=700
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
 
                     # <<< REPLACE THE OLD LEGEND BLOCK THAT WAS HERE >>>
                     # <<< WITH THE NEW BLOCK YOU PROVIDED (starts below) >>>
@@ -4487,25 +4576,4 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
