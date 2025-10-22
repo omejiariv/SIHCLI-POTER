@@ -4113,7 +4113,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
             stats_df = st.session_state['current_coverage_stats']
             if not stats_df.empty:
                 # Gráfico de Pastel
-                fig_pie = px.pie(stats_df, names=cover_column_name, values='percentage',
+                fig_pie = px.pie(stats_df, names='Tipo de Cobertura', values='percentage', # Use the correct column name from stats_df
                                  title=f"Distribución de Coberturas (%)",
                                  hole=0.3) # Gráfico de dona
                 fig_pie.update_traces(textposition='inside', textinfo='percent+label')
@@ -4459,6 +4459,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
