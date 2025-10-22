@@ -4427,14 +4427,42 @@ def display_life_zones_tab(**kwargs):
                 # Mostrar figura si se creó
                 if fig is not None:
                     fig.update_layout(title="Mapa de Zonas de Vida de Holdridge", xaxis_title=f"Coordenada X ({crs})", yaxis_title=f"Coordenada Y ({crs})", yaxis_scaleanchor="x", height=700)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True) 
 
-                    # --- LEYENDA DETALLADA ID -> Nombre ---
-                    st.markdown("---"); st.subheader("Leyenda de Zonas de Vida Presentes")
-                    legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
-                    legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
-                    st.dataframe(legend_df.set_index('ID'), use_container_width=True)
-                    # --- FIN LEYENDA ---
+                    # <<< REPLACE THE OLD LEGEND BLOCK THAT WAS HERE >>>
+                    # <<< WITH THE NEW BLOCK YOU PROVIDED (starts below) >>>
+
+                    # --- AÑADIR LEYENDA DETALLADA ---
+                    st.markdown("---")
+                    st.subheader("Leyenda y Área por Zona de Vida Presente")
+                    # --- Calcular Área en Hectáreas ---
+                    # Necesitamos los counts por ID (ya los tenemos implícitos si tenemos classified_raster)
+                    # Y el área por píxel del raster REMUESTREADO
+                    pixel_size_x_rescaled = abs(output_profile['transform'].a)
+                    pixel_size_y_rescaled = abs(output_profile['transform'].e)
+                    # Asumiendo que el CRS del output_profile es métrico (como EPSG:3116)
+                    pixel_area_m2_rescaled = pixel_size_x_rescaled * pixel_size_y_rescaled
+
+                    area_hectares = []
+                    # Iterar sobre los IDs presentes en la leyenda
+                    for zone_id in present_zone_ids: # present_zone_ids ya excluye nodata
+                        # Contar píxeles para este ID específico
+                        count = np.count_nonzero(classified_raster == zone_id)
+                        area_ha = (count * pixel_area_m2_rescaled) / 10000 # 1 ha = 10000 m²
+                        area_hectares.append(area_ha)
+                    # --- Fin Cálculo Hectáreas ---
+                    # Crear DataFrame para la leyenda con Hectáreas
+                    legend_data = {
+                        "ID": present_zone_ids,
+                        "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids],
+                        "Área (ha)": area_hectares # Añadir la nueva columna
+                    }
+                    legend_df = pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False) # Ordenar por área descendente
+                    # Mostrar la tabla de leyenda formateada
+                    st.dataframe(
+                        legend_df.set_index('ID').style.format({'Área (ha)': '{:,.1f}'}), # Formato con separador de miles
+                        use_container_width=True
+                    )
 
                     # --- EXPANDER INFO (sin cambios) ---
                 st.markdown("---")
@@ -4459,6 +4487,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
