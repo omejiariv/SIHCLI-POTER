@@ -4042,53 +4042,65 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         st.subheader(f"Cobertura del Suelo en: {basin_name}")
         try:
             with st.spinner("Cargando y procesando raster de coberturas..."):
-                # --- CORRECTED CODE using rasterio ---
-                # Abrir el raster de cobertura (Uses land_cover_raster_path defined earlier)
+                # Abrir el raster de cobertura
                 with rasterio.open(land_cover_raster_path) as cover_src:
                     cover_crs = cover_src.crs
                     cover_transform = cover_src.transform
-                    nodata_val = cover_src.nodata # Obtener valor nodata si existe
+                    # --- REVISED NODATA HANDLING ---
+                    # Get NoData value directly from the raster's metadata
+                    nodata_val = cover_src.nodata 
+                    st.write(f"DEBUG: Raster NoData value = {nodata_val}") # Add debug
+                    # --- END REVISED NODATA HANDLING ---
 
-                    # Reproyectar la geometría de la cuenca al CRS del raster de cobertura
+                    # Reproyectar la geometría de la cuenca al CRS del raster
                     basin_reproj = unified_basin_gdf.to_crs(cover_crs)
 
-                    # Recortar (enmascarar) el raster con la geometría de la cuenca
+                    # Recortar (enmascarar) el raster
+                    # Pass the ACTUAL nodata_val (could be None) to the mask function
                     out_image, out_transform = mask(cover_src, basin_reproj.geometry, crop=True, nodata=nodata_val, all_touched=True)
-                    
-                    if out_image.ndim > 2:
-                        out_image = out_image[0] 
 
-                    # Calcular estadísticas de píxeles
-                    unique_values, counts = np.unique(out_image[out_image != nodata_val], return_counts=True) # Excluir nodata
+                    if out_image.ndim > 2:
+                        out_image = out_image[0]
+
+                    # --- REVISED STATISTICS CALCULATION ---
+                    # Create a mask for valid pixels (pixels that are NOT the nodata value)
+                    # Handle the case where nodata_val is None (meaning all values are valid)
+                    if nodata_val is not None:
+                        valid_pixel_mask = (out_image != nodata_val)
+                    else:
+                        # If no nodata value is defined in the raster, assume all pixels are valid data
+                        valid_pixel_mask = np.ones(out_image.shape, dtype=bool) 
+                        
+                    # Get unique values and counts ONLY from valid pixels
+                    unique_values, counts = np.unique(out_image[valid_pixel_mask], return_counts=True)
+                    # --- END REVISED STATISTICS ---
 
                     if unique_values.size == 0:
-                        st.warning("No se encontraron píxeles de cobertura válidos dentro del área de la cuenca.")
-                        # Need to clear previous stats if we return here
-                        st.session_state['current_coverage_stats'] = None 
-                        return # Stop processing if no valid pixels
+                        st.warning("No se encontraron píxeles de cobertura válidos dentro del área de la cuenca (después de excluir NoData).")
+                        st.session_state['current_coverage_stats'] = None
+                        return
 
-                    # Calcular área por clase
+                    # Calcular área por clase (code remains the same)
                     pixel_size_x = abs(out_transform.a)
                     pixel_size_y = abs(out_transform.e)
                     pixel_area_m2 = pixel_size_x * pixel_size_y
-
                     coverage_stats_list = []
-                    total_valid_pixels = counts.sum()
+                    total_valid_pixels = counts.sum() # Sum counts of ONLY valid pixels
                     total_area_m2_calc = total_valid_pixels * pixel_area_m2
 
                     for value, count in zip(unique_values, counts):
+                        # Use the dictionary without 0 or 16
                         class_name = land_cover_legend.get(value, f"Código Desconocido ({value})")
                         area_m2 = count * pixel_area_m2
-                        percentage = (count / total_valid_pixels) * 100 if total_valid_pixels > 0 else 0 # Avoid division by zero
+                        percentage = (count / total_valid_pixels) * 100 if total_valid_pixels > 0 else 0
                         coverage_stats_list.append({
-                            "ID_Clase": value,
-                            "Tipo de Cobertura": class_name,
-                            "area_m2": area_m2,
-                            "area_km2": area_m2 / 1_000_000,
+                            "ID_Clase": value, "Tipo de Cobertura": class_name,
+                            "area_m2": area_m2, "area_km2": area_m2 / 1_000_000,
                             "percentage": percentage
                         })
-                    
+
                     coverage_stats = pd.DataFrame(coverage_stats_list).sort_values(by="percentage", ascending=False)
+                    
                 # --- END CORRECTED CODE ---
 
                 # Guardar resultados (Remains the same)
@@ -4558,4 +4570,5 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
