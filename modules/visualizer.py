@@ -4725,6 +4725,7 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
                             st.session_state['last_dem_used_for_flz'] = None
                         except Exception as e_del:
                             st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
+                            
                     # Cleanup Future PPT if it exists (in case of error before normal deletion)
                     if 'temp_ppt_future_path' in locals() and os.path.exists(temp_ppt_future_path):
                         try: os.remove(temp_ppt_future_path)
@@ -4733,4 +4734,5 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
         # 'elif' aligns with the 'if dem_path...' above
         elif not dem_path:
              st.warning("No se pudo preparar el DEM.")
+
 
