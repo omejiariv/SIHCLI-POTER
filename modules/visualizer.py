@@ -4445,9 +4445,12 @@ def display_life_zones_tab(**kwargs):
                     get_zone_name=np.vectorize(lambda zid: name_map.get(zid, "NoData" if zid==nodata_val else f"ID {zid}?"))
                     hover_names_raster=get_zone_name(classified_raster_display)
                     fig=go.Figure(data=go.Heatmap(z=classified_raster_display, x=x_coords, y=y_coords, colorscale=color_scale_discrete,
-                                                 zmin=min(present_zone_ids)-0.5, zmax=max(present_zone_ids)+0.5, showscale=True,
-                                                 colorbar=dict(title="ID Zona de Vida", tickvals=tick_values, ticktext=tick_texts, tickmode='array'),
-                                                 hovertext=hover_names_raster, hoverinfo='text', hovertemplate='<b>Zona:</b> %{hovertext}<extra></extra>'))
+                                             zmin=min(present_zone_ids)-0.5, zmax=max(present_zone_ids)+0.5, showscale=True,
+                                             colorbar=dict(title="ID Zona de Vida", tickvals=tick_values, ticktext=tick_texts, tickmode='array'),
+                                             # hovertext=hover_names_raster, # MANTENER COMENTADO
+                                             hoverinfo='skip', # <-- ASEGURAR 'skip' AQUÍ
+                                             # hovertemplate='<b>Zona:</b> %{hovertext}<extra></extra>' # MANTENER COMENTADO
+                                             ))
                 # (Fin del else después de 'if not present_zone_ids:')
 
                 # Mostrar figura si se creó
@@ -4570,5 +4573,6 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
