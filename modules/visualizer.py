@@ -4291,7 +4291,7 @@ def display_life_zones_tab(**kwargs):
         selected_resolution = st.select_slider(
             "Seleccionar Resolución del Mapa:",
             options=list(resolution_options.keys()),
-            value="Media", # Default
+            value="Baja (Rápido)", # Default
             key="lifezone_resolution"
         )
         downscale_factor = resolution_options[selected_resolution]
@@ -4558,3 +4558,4 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
