@@ -104,7 +104,6 @@ def create_sidebar(gdf_stations, df_long):
         # Usar session state para persistencia de meses
         default_meses = st.session_state.get('meses_nombres_multiselect', list(meses_dict.keys()))
         meses_nombres = st.multiselect("Meses", list(meses_dict.keys()), default=default_meses, key='meses_nombres_multiselect')
-        st.session_state['meses_nombres_multiselect'] = meses_nombres # Guardar selección actual
         meses_numeros = [meses_dict[m] for m in meses_nombres]
         st.session_state['meses_numeros'] = meses_numeros # Guardar números también
 
@@ -169,4 +168,5 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
     if celdas and Config.CELL_COL in stations_filtered.columns:
         stations_filtered = stations_filtered[stations_filtered[Config.CELL_COL].isin(celdas)]
     return stations_filtered
+
 
