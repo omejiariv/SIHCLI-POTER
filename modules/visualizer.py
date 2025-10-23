@@ -4713,7 +4713,11 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
 
                 # 'except' aligns with 'try'
                 except Exception as e_future:
-                   # ... (exception handling) ...
+                    # --- ADD INDENTATION HERE ---
+                    st.error(f"Error durante el proceso de proyección futura: {e_future}")
+                    import traceback
+                    st.error(traceback.format_exc())
+                    # --- END INDENTATION ---
 
                 # 'finally' aligns with 'try' and 'except'
                 finally:
@@ -4734,5 +4738,6 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
         # 'elif' aligns with the 'if dem_path...' above
         elif not dem_path:
              st.warning("No se pudo preparar el DEM.")
+
 
 
