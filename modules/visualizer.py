@@ -4643,24 +4643,46 @@ def display_future_life_zones_tab(df_anual_melted, gdf_filtered, **kwargs):
         if dem_path and os.path.exists(dem_path):
             with st.spinner(f"Calculando tendencias y proyectando precipitación para +{years_future} años..."):
                 # Indent 'try' correctly under 'with st.spinner'
-try:
+                try:
                     # --- DEFINE TARGET GRID PROFILE FIRST ---
-                    # Indented under 'try'
+                    # Indent under 'try'
                     st.write("Definiendo grilla de destino...")
-                    # ... (code to define dst_profile, dst_crs, etc.) ...
+                    dst_profile = None
+                    dst_crs = None
+                    dst_transform = None
+                    dst_h = 0
+                    dst_w = 0
+                    # Indent 'with' under 'try'
+                    with rasterio.open(dem_path) as dem_src:
+                         # Indent under 'with'
+                         src_profile = dem_src.profile
+                         src_crs = dem_src.crs
+                         src_transform = dem_src.transform
+                         src_h, src_w = dem_src.height, dem_src.width
+                         dst_h = src_h // downscale_factor
+                         dst_w = src_w // downscale_factor
+                         dst_transform = src_transform * src_transform.scale((src_w / dst_w), (src_h / dst_h))
+                         dst_crs = src_crs
+                         dst_profile = src_profile.copy()
+                         dst_profile.update({
+                             'height': dst_h, 'width': dst_w, 'transform': dst_transform,
+                             'dtype': rasterio.float32, 'nodata': np.nan
+                         })
+                    # Back to same level as 'with rasterio...'
                     st.write(f"Grilla destino definida: {dst_w}x{dst_h} píxeles, CRS={dst_crs}")
                     # --- END DEFINE TARGET GRID ---
 
                     # --- 1. Calculate Trends ---
-                    # Indented under 'try'
+                    # Same level as previous st.write
                     st.write("Calculando tendencias de precipitación...")
-                    # ... (code to calculate gdf_trends) ...
+                    gdf_stations_geo = gdf_filtered[gdf_filtered.geometry.notna()]
+                    gdf_trends = calculate_all_station_trends(df_anual_melted, gdf_stations_geo)
                     st.write(f"Tendencias calculadas para {len(gdf_trends)} estaciones.")
 
-                    # Indented under 'try'
+                    # Same level
                     if gdf_trends.empty or gdf_trends['slope_sen'].isnull().all() or len(gdf_trends) < 4:
                          # Indented under 'if'
-                         st.error("No hay suficientes datos de tendencia...")
+                         st.error("No hay suficientes datos de tendencia (>10 años en estaciones) para generar la proyección.")
                          st.stop()
                     # --- FIN Calculate Trends ---
 
@@ -4670,21 +4692,36 @@ try:
                     # --- 2. Interpolate Trend Raster ---
                     # Indent lines inside """ block
                     st.write("Interpolando raster de tendencia...")
-                    # ... (rest of commented code) ...
-                    """
+                    # ... (code for griddata -> trend_raster_aligned) ...
+
+                    # --- 3. Project Precipitation Raster ---
+                    st.write("Proyectando precipitación...")
+                    # ... (code for reproject -> ppt_actual_aligned) ...
+                    # ... (code for ppt_future_raster) ...
+
+                    # --- 4. Generate Future Life Zone Map ---
+                    st.write("Generando mapa de Zonas de Vida futuras...")
+                    # ... (code call to generate_life_zone_map) ...
+
+                    # --- 5. Display Future Map ---
+                    if classified_raster_future is not None:
+                         # ... (code for visualization) ...
+                    else:
+                        st.error("Falló la generación del mapa...")
+                    """ # <-- Closing triple quotes were missing or misplaced, ensure they are here and aligned
                     # --- END KEEP COMMENTED ---
 
-                    # Indent under 'try'
+                    # Indent at 'try' level
                     st.success("Paso 1 y 2 completados (Cálculos posteriores omitidos).")
 
-                # 'except' MUST ALIGN vertically with 'try'
+                # 'except' aligns with 'try'
                 except Exception as e_future:
                     # Indented under 'except'
                     st.error(f"Error durante el proceso de proyección futura: {e_future}")
                     import traceback
                     st.error(traceback.format_exc())
 
-                # 'finally' MUST ALIGN vertically with 'try' and 'except'
+                # 'finally' aligns with 'try' and 'except'
                 finally:
                     # Indented under 'finally'
                     if temp_dem_filename and os.path.exists(dem_path):
@@ -4693,7 +4730,6 @@ try:
                             st.session_state['last_dem_used_for_flz'] = None
                         except Exception as e_del:
                             st.warning(f"No se pudo eliminar el DEM temporal: {e_del}")
-                            
                     # Limpieza PPT futuro (Mantener comentado)
                     # if 'temp_ppt_future_path' in locals() and os.path.exists(temp_ppt_future_path):
                     #      try: os.remove(temp_ppt_future_path)
@@ -4701,7 +4737,4 @@ try:
 
         # 'elif' aligns with the 'if dem_path...' above
         elif not dem_path:
-            st.warning("No se pudo preparar el DEM.")
-
-
-
+             st.warning("No se pudo preparar el DEM.")
