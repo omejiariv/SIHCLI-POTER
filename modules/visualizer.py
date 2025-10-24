@@ -1354,8 +1354,22 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                               df_monthly_filtered, analysis_mode, selected_regions, selected_municipios,
                               selected_altitudes, **kwargs):
     st.header("Mapas Avanzados")
-    # Mostrar resumen de filtros (asumiendo que esta función existe y está definida correctamente en visualizer.py)
-    # display_filter_summary(...) # Puedes descomentar si la tienes definida
+    
+    # Asumiendo que display_filter_summary está definida en otra parte de visualizer.py
+    # Si no, coméntala o defínela.
+    try:
+        display_filter_summary(
+            total_stations_count=len(st.session_state.get('gdf_stations', [])),
+            selected_stations_count=len(stations_for_analysis),
+            year_range=st.session_state.get('year_range', (2000, 2020)),
+            selected_months_count=len(st.session_state.get('meses_numeros', [])),
+            analysis_mode=analysis_mode,
+            selected_regions=selected_regions,
+            selected_municipios=selected_municipios,
+            selected_altitudes=selected_altitudes
+        )
+    except NameError:
+        st.info("Resumen de filtros no disponible.") # Fallback si la función no existe
 
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
@@ -1414,25 +1428,23 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 st.markdown("#### Controles de Cuenca")
                 
                 # --- LÓGICA CORREGIDA PARA OBTENER NOMBRES DE CUENCAS ---
-                basin_names = [] # Inicializar lista vacía
-                # 'selected_regions' se pasa a la función principal display_advanced_maps_tab
+                basin_names = [] 
+                regions_from_sidebar = selected_regions
                 
                 if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None:
-                    # Filtrar gdf_subcuencas BASADO EN LAS REGIONES SELECCIONADAS en el sidebar
-                    if selected_regions: # Si el usuario seleccionó alguna región
+                    if regions_from_sidebar: 
                         if Config.REGION_COL in st.session_state.gdf_subcuencas.columns:
                             relevant_basins_by_region = st.session_state.gdf_subcuencas[
-                                st.session_state.gdf_subcuencas[Config.REGION_COL].isin(selected_regions)
+                                st.session_state.gdf_subcuencas[Config.REGION_COL].isin(regions_from_sidebar)
                             ]
                             if not relevant_basins_by_region.empty:
                                  basin_names = sorted(relevant_basins_by_region[BASIN_NAME_COLUMN].dropna().unique())
                             else:
-                                 # Mostrar info si las regiones seleccionadas no tienen cuencas
                                  st.info("Ninguna cuenca encontrada en las regiones seleccionadas.")
                         else:
                              st.warning(f"El archivo de cuencas no tiene la columna '{Config.REGION_COL}' para filtrar por región. Mostrando todas.")
                              basin_names = sorted(st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN].dropna().unique())
-                    else: # Si no se seleccionó ninguna región, mostrar todas las cuencas
+                    else: 
                          basin_names = sorted(st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN].dropna().unique())
                 else:
                     st.warning("Datos de subcuencas no disponibles.")
@@ -1448,11 +1460,10 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 else:
                     selected_year = st.selectbox("Seleccione un año:", options=years, index=len(years) - 1, key="year_select_basin")
                     method = st.selectbox("Método de interpolación:", options=["IDW (Lineal)", "Spline (Cúbico)"], key="interp_method_basin")
-                    run_balance = st.toggle("Calcular Balance Hídrico", value=True)
-                    show_dem_background = st.toggle("Visualizar DEM de fondo", value=True)
+                    run_balance = st.toggle("Calcular Balance Hídrico", value=True, key="run_balance_toggle_cuenca") # Key única
+                    show_dem_background = st.toggle("Visualizar DEM de fondo", value=True, key="show_dem_toggle_cuenca") # Key única
                     
-                    # El DEM se carga desde el panel lateral
-                    dem_file = st.session_state.get('dem_file')
+                    dem_file = st.session_state.get('dem_file') # Obtener DEM cargado en sidebar
 
                     if st.button("Generar Mapa para Cuenca(s)", disabled=not selected_basins, key="generate_basin_map_button"):
                         st.session_state['run_balance'] = run_balance
@@ -1460,9 +1471,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         st.session_state['error_msg'] = None
                         st.session_state['mean_precip'] = None
                         st.session_state['morph_results'] = None
-                        st.session_state['balance_results'] = None # Limpiar balance previo
-                        st.session_state['unified_basin_gdf'] = None # Limpiar cuenca previa
-                        st.session_state['selected_basins_title'] = "" # Limpiar título
+                        st.session_state['balance_results'] = None 
+                        st.session_state['unified_basin_gdf'] = None
+                        st.session_state['selected_basins_title'] = "" 
                         
                         try:
                             with st.spinner("Preparando datos y realizando interpolación..."):
@@ -1470,6 +1481,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 unified_basin_gdf = gpd.GeoDataFrame(geometry=[target_basins_gdf.unary_union], crs=target_basins_gdf.crs)
                                 target_basin_metric = unified_basin_gdf.to_crs("EPSG:3116")
                                 basin_buffer_metric = target_basin_metric.buffer(buffer_km * 1000)
+                                
+                                if 'gdf_stations' not in st.session_state or st.session_state.gdf_stations is None:
+                                     raise ValueError("Datos de estaciones no cargados en session_state.")
+                                if st.session_state.gdf_stations.crs is None:
+                                     st.session_state.gdf_stations.set_crs("EPSG:4326", inplace=True) # Asumir WGS84 si falta
+                                     
                                 stations_metric = st.session_state.gdf_stations.to_crs("EPSG:3116")
                                 stations_in_buffer = stations_metric[stations_metric.intersects(basin_buffer_metric.unary_union)]
                                 station_names = stations_in_buffer[Config.STATION_NAME_COL].unique()
@@ -1492,26 +1509,27 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
 
                                 bounds = basin_buffer_metric.unary_union.bounds
                                 grid_resolution = 500
-                                grid_lon, grid_lat = np.arange(bounds[0], bounds[2], grid_resolution), np.arange(bounds[1], bounds[3], grid_resolution)
+                                grid_lon = np.arange(bounds[0], bounds[2], grid_resolution)
+                                grid_lat = np.arange(bounds[1], bounds[3], grid_resolution)
+                                
+                                if grid_lon.size == 0 or grid_lat.size == 0:
+                                     raise ValueError("Buffer o grilla inválida, dimensiones 0.")
+                                     
                                 grid_z = None
-
-                                if len(points_data) > 2: # Esta comprobación es redundante con la de len < 3, pero la mantenemos
-                                    points = np.column_stack((points_data.geometry.x, points_data.geometry.y))
-                                    values = points_data['Valor'].values
-                                    grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
-                                    interp_method_call = 'linear' if method == "IDW (Lineal)" else 'cubic'
-                                    grid_z = griddata(points, values, (grid_x, grid_y), method=interp_method_call)
-                                    nan_mask = np.isnan(grid_z)
-                                    if np.any(nan_mask):
-                                        fill_values = griddata(points, values, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
-                                        grid_z[nan_mask] = fill_values
-                                    grid_z = np.nan_to_num(grid_z)
-                                else:
-                                    st.session_state['error_msg'] = "Se necesitan al menos 3 estaciones para la interpolación."
+                                
+                                points = np.column_stack((points_data.geometry.x, points_data.geometry.y))
+                                values = points_data['Valor'].values
+                                grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
+                                interp_method_call = 'linear' if method == "IDW (Lineal)" else 'cubic'
+                                grid_z = griddata(points, values, (grid_x, grid_y), method=interp_method_call)
+                                nan_mask = np.isnan(grid_z)
+                                if np.any(nan_mask):
+                                    fill_values = griddata(points, values, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
+                                    grid_z[nan_mask] = fill_values
+                                grid_z = np.nan_to_num(grid_z)
                                 
                                 if grid_z is not None:
                                     grid_z[grid_z < 0] = 0
-                                    # Corregido: Usar max() para el origen Y
                                     transform = from_origin(grid_lon[0], grid_lat.max(), grid_resolution, grid_resolution)
                                     
                                     with rasterio.io.MemoryFile() as memfile:
@@ -1521,23 +1539,19 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                             'transform': transform, 'nodata': np.nan
                                         }
                                         with memfile.open(**profile) as dataset:
-                                            # Escribir volteando (flipud) ya que el origen Y es max()
                                             dataset.write(np.flipud(grid_z), 1)
                                         with memfile.open() as dataset:
                                             masked_data, masked_transform = mask(dataset, target_basin_metric.geometry, crop=True, nodata=np.nan, all_touched=True)
                                     
                                     masked_data = masked_data[0].astype(np.float32)
-                                    # Usar 0.0 como NoData para la visualización (o np.nan si se prefiere)
                                     masked_data_cleaned = np.nan_to_num(masked_data, nan=0.0) 
                                     
-                                    # Calcular media solo de píxeles válidos (no NaN y no 0 si 0 es nodata)
                                     mean_precip_values = masked_data[~np.isnan(masked_data)]
                                     mean_precip = np.mean(mean_precip_values) if mean_precip_values.size > 0 else 0.0
 
                                     map_traces = []
                                     dem_trace = None
                                     
-                                    # Calcular coordenadas para el RASTER ENMASCARADO
                                     x_coords = np.linspace(masked_transform.c + masked_transform.a / 2, 
                                                            masked_transform.c + masked_transform.a / 2 + masked_transform.a * (masked_data.shape[1] - 1), 
                                                            masked_data.shape[1])
@@ -1545,13 +1559,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                                               masked_transform.f + masked_transform.e / 2 + masked_transform.e * (masked_data.shape[0] - 1), 
                                                               masked_data.shape[0])
 
-                                    # Voltear si necesario para Plotly
                                     if masked_transform.e < 0:
                                          y_coords = y_coords_raw[::-1]
-                                         masked_data_viz = np.flipud(masked_data) # Usar el que tiene NaN
+                                         masked_data_viz = np.flipud(masked_data)
                                     else:
                                          y_coords = y_coords_raw
-                                         masked_data_viz = masked_data # Usar el que tiene NaN
+                                         masked_data_viz = masked_data
 
                                     if show_dem_background and dem_file is not None:
                                         temp_dem_path_viz = os.path.join(os.getcwd(), f"temp_dem_viz_{dem_file.name}")
@@ -1568,19 +1581,18 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                                 if masked_transform.e < 0: dem_reprojected = np.flipud(dem_reprojected)
                                                 dem_trace = go.Heatmap(z=dem_reprojected, x=x_coords, y=y_coords, colorscale='gray', showscale=False, name='Elevación')
                                                 map_traces.append(dem_trace)
-                                        except Exception as e:
-                                            st.warning(f"No se pudo procesar el DEM: {e}")
+                                        except Exception as e_dem_viz:
+                                            st.warning(f"No se pudo procesar/reproyectar el DEM para visualización: {e_dem_viz}")
                                         finally:
                                             if os.path.exists(temp_dem_path_viz): os.remove(temp_dem_path_viz)
 
-                                    # Usar Heatmap con z=masked_data_viz (que tiene NaN) para transparencia
                                     precip_trace = go.Heatmap(
                                         z=masked_data_viz, 
                                         x=x_coords, y=y_coords, colorscale='viridis',
                                         colorbar=dict(title='Precipitación (mm)'),
                                         opacity=0.7 if dem_trace is not None else 1.0, 
                                         name='Precipitación',
-                                        hoverinfo='skip' # Opcional: 'z' para ver valor
+                                        hoverinfo='skip'
                                     )
                                     map_traces.append(precip_trace)
                                     fig_basin = go.Figure(data=map_traces)
@@ -1598,7 +1610,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                     )
                                     st.session_state['fig_basin'] = fig_basin
                                     st.session_state['mean_precip'] = mean_precip if mean_precip is not None and not np.isnan(mean_precip) else None
-                                    st.session_state['unified_basin_gdf'] = unified_basin_gdf # Cuenca original (WGS84?)
+                                    st.session_state['unified_basin_gdf'] = unified_basin_gdf
                                     st.session_state['selected_basins_title'] = ", ".join(selected_basins)
                                     
                                     if dem_file:
@@ -1667,12 +1679,21 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         st.error(balance_results_to_show["error"])
                     else:
                         c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Precipitación Media (P)", f"{balance_results_to_show.get('P_media_anual_mm', 'N/A'):.0f} mm/año")
-                        c2.metric("Altitud Media", f"{balance_results_to_show.get('Altitud_media_m', 'N/A'):.0f} m")
-                        c3.metric("ET Media Estimada (ET)", f"{balance_results_to_show.get('ET_media_anual_mm', 'N/A'):.0f} mm/año")
-                        c4.metric("Escorrentía (Q=P-ET)", f"{balance_results_to_show.get('Q_mm', 'N/A'):.0f} mm/año")
-                        if balance_results_to_show.get('Q_m3_año') is not None and balance_results_to_show.get('Area_km2') is not None:
-                             st.success(f"Volumen de escorrentía anual estimado: **{balance_results_to_show['Q_m3_año']/1e6:.2f} millones de m³** sobre un área de **{balance_results_to_show['Area_km2']:.2f} km²**.")
+                        # Usar .get con default 'N/A' o 0 para evitar errores si falta la clave
+                        p_val = balance_results_to_show.get('P_media_anual_mm', 0)
+                        alt_val = balance_results_to_show.get('Altitud_media_m') # Puede ser None
+                        et_val = balance_results_to_show.get('ET_media_anual_mm')
+                        q_val = balance_results_to_show.get('Q_mm')
+                        
+                        c1.metric("Precipitación Media (P)", f"{p_val:.0f} mm/año")
+                        c2.metric("Altitud Media", f"{alt_val:.0f} m" if alt_val is not None else "N/A")
+                        c3.metric("ET Media Estimada (ET)", f"{et_val:.0f} mm/año" if et_val is not None else "N/A")
+                        c4.metric("Escorrentía (Q=P-ET)", f"{q_val:.0f} mm/año" if q_val is not None else "N/A")
+                        
+                        q_vol = balance_results_to_show.get('Q_m3_año')
+                        area_km2 = balance_results_to_show.get('Area_km2')
+                        if q_vol is not None and area_km2 is not None:
+                             st.success(f"Volumen de escorrentía anual estimado: **{q_vol/1e6:.2f} millones de m³** sobre un área de **{area_km2:.2f} km²**.")
                 elif run_balance_display:
                      st.warning("No se pudieron obtener los resultados del balance hídrico (cálculo pendiente o fallido).")
 
@@ -1693,7 +1714,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         c4m.metric("Altitud Máxima", f"{alt_max:.0f} m" if alt_max is not None else "N/A")
                         c5m.metric("Altitud Mínima", f"{alt_min:.0f} m" if alt_min is not None else "N/A")
                         c6m.metric("Altitud Promedio", f"{alt_prom:.1f} m" if alt_prom is not None else "N/A")
-                elif run_balance_display: # Si se pidió balance (requiere DEM) pero no hay morfometría
+                elif run_balance_display: 
                      st.info("Para ver la Morfometría, asegúrate de haber subido un archivo DEM válido.")
 
         # --- Fin Sección 'Por Cuenca Específica' ---
@@ -1711,7 +1732,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 with control_col_reg:
                     st.markdown("#### Controles de los Mapas")
                     interpolation_methods_reg = ["Kriging Ordinario", "IDW", "Spline (Thin Plate)"]
-                    if Config.ALTITUDE_COL in gdf_filtered.columns and not gdf_filtered[Config.ALTITUDE_COL].isnull().all():
+                    # KED solo si 'elevation_dem' está en gdf_filtered (ver Petición 1)
+                    if Config.ELEVATION_COL in gdf_filtered.columns and not gdf_filtered[Config.ELEVATION_COL].isnull().all():
                          interpolation_methods_reg.insert(1, "Kriging con Deriva Externa (KED)")
 
                     st.markdown("**Mapa 1**")
@@ -1732,6 +1754,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         variogram_model2_reg = st.selectbox("Modelo de Variograma para Mapa 2", variogram_options, key="var_model_2_reg")
 
                 gdf_bounds_reg = gdf_filtered.total_bounds
+                # Asegurarse de pasar todas las columnas necesarias para KED
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
@@ -4675,6 +4698,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
