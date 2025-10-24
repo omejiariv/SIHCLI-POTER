@@ -4014,11 +4014,9 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     # Construir ruta al raster
     _THIS_FILE_DIR = os.path.dirname(__file__)
     land_cover_raster_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', land_cover_raster_filename))
-    # --- FIN DEFINIR RUTA ---
 
-    # --- AHORA USAR LA RUTA EN st.info ---
+    # Mensaje informativo
     st.info(f"Se utilizará el archivo raster de coberturas: '{os.path.basename(land_cover_raster_path)}'.")
-    # --- FIN st.info ---
 
     # Obtener la cuenca unificada de la sesión
     unified_basin_gdf = st.session_state.get('unified_basin_gdf')
@@ -4028,8 +4026,9 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         st.warning("Primero debes generar un mapa para una cuenca específica en la pestaña 'Mapas Avanzados -> Superficies de Interpolación'.")
         return
 
+    # Verificar existencia del raster de cobertura (CORREGIDO)
     if not os.path.exists(land_cover_raster_path):
-        st.error(f"No se encontró el archivo de coberturas en la ruta: {land_cover_zip_path}")
+        st.error(f"No se encontró el archivo raster de coberturas en la ruta: {land_cover_raster_path}")
         return
 
     col1, col2 = st.columns([1, 1])
@@ -4042,51 +4041,52 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
                 with rasterio.open(land_cover_raster_path) as cover_src:
                     cover_crs = cover_src.crs
                     cover_transform = cover_src.transform
-                    # --- REVISED NODATA HANDLING ---
-                    # Get NoData value directly from the raster's metadata
-                    nodata_val = cover_src.nodata 
-                    st.write(f"DEBUG: Raster NoData value = {nodata_val}") # Add debug
-                    # --- END REVISED NODATA HANDLING ---
+                    # Leer NoData del archivo
+                    nodata_val = cover_src.nodata
+                    # Usar 0 como default interno si no hay NoData definido en el archivo
+                    internal_nodata = nodata_val if nodata_val is not None else 0
+                    # Asegurar que la leyenda tenga entrada para el nodata interno
+                    if internal_nodata not in land_cover_legend:
+                        land_cover_legend[internal_nodata] = "Sin Datos / NoData"
 
                     # Reproyectar la geometría de la cuenca al CRS del raster
                     basin_reproj = unified_basin_gdf.to_crs(cover_crs)
 
                     # Recortar (enmascarar) el raster
-                    # Pass the ACTUAL nodata_val (could be None) to the mask function
-                    out_image, out_transform = mask(cover_src, basin_reproj.geometry, crop=True, nodata=nodata_val, all_touched=True)
+                    out_image, out_transform = mask(cover_src, basin_reproj.geometry, crop=True, nodata=internal_nodata, all_touched=True)
 
                     if out_image.ndim > 2:
                         out_image = out_image[0]
 
-                    # --- REVISED STATISTICS CALCULATION ---
-                    # Create a mask for valid pixels (pixels that are NOT the nodata value)
-                    # Handle the case where nodata_val is None (meaning all values are valid)
-                    if nodata_val is not None:
-                        valid_pixel_mask = (out_image != nodata_val)
-                    else:
-                        # If no nodata value is defined in the raster, assume all pixels are valid data
-                        valid_pixel_mask = np.ones(out_image.shape, dtype=bool) 
-                        
-                    # Get unique values and counts ONLY from valid pixels
+                    # Calcular estadísticas (excluyendo nodata INTERNO)
+                    valid_pixel_mask = (out_image != internal_nodata)
                     unique_values, counts = np.unique(out_image[valid_pixel_mask], return_counts=True)
-                    # --- END REVISED STATISTICS ---
 
                     if unique_values.size == 0:
                         st.warning("No se encontraron píxeles de cobertura válidos dentro del área de la cuenca (después de excluir NoData).")
                         st.session_state['current_coverage_stats'] = None
                         return
 
-                    # Calcular área por clase (code remains the same)
+                    # Calcular área por clase
                     pixel_size_x = abs(out_transform.a)
                     pixel_size_y = abs(out_transform.e)
-                    pixel_area_m2 = pixel_size_x * pixel_size_y
+                    # Verificar si CRS es geográfico (grados) para advertir sobre cálculo de área
+                    is_geographic = cover_src.crs.is_geographic
+                    if is_geographic:
+                         st.warning("El CRS del raster de coberturas está en grados. El cálculo de área puede ser impreciso. Se recomienda usar un raster en CRS proyectado (métrico).")
+                         # Usar área de píxel aproximada en m² (muy impreciso)
+                         # Asumir ~111km por grado en el ecuador -> ~111000m
+                         # Esto es solo un PALIATIVO, lo ideal es reproyectar el raster de entrada
+                         pixel_area_m2 = (pixel_size_x * 111000) * (pixel_size_y * 111000)
+                    else:
+                         pixel_area_m2 = pixel_size_x * pixel_size_y # Área en unidades cuadradas del CRS (metros^2)
+
                     coverage_stats_list = []
-                    total_valid_pixels = counts.sum() # Sum counts of ONLY valid pixels
+                    total_valid_pixels = counts.sum()
                     total_area_m2_calc = total_valid_pixels * pixel_area_m2
 
                     for value, count in zip(unique_values, counts):
-                        # Use the dictionary without 0 or 16
-                        class_name = land_cover_legend.get(value, f"Código Desconocido ({value})")
+                        class_name = land_cover_legend.get(value, f"Código Desconocido ({value})") # <-- Aquí se usa la leyenda
                         area_m2 = count * pixel_area_m2
                         percentage = (count / total_valid_pixels) * 100 if total_valid_pixels > 0 else 0
                         coverage_stats_list.append({
@@ -4096,65 +4096,57 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
                         })
 
                     coverage_stats = pd.DataFrame(coverage_stats_list).sort_values(by="percentage", ascending=False)
-                    
-                # --- END CORRECTED CODE ---
 
-                # Guardar resultados (Remains the same)
+                # Guardar resultados
                 st.session_state['current_coverage_stats'] = coverage_stats
-                st.session_state['total_basin_area_km2'] = total_area_m2_calc / 1_000_000 
+                st.session_state['total_basin_area_km2'] = total_area_m2_calc / 1_000_000
 
-                # Mostrar tabla (Remains the same)
+                # Mostrar tabla
                 st.dataframe(coverage_stats[['Tipo de Cobertura', 'area_km2', 'percentage']]
                              .rename(columns={'area_km2': 'Área (km²)', 'percentage': 'Porcentaje (%)'})
                              .style.format({'Área (km²)': '{:.2f}', 'Porcentaje (%)': '{:.1f}%'}),
                              use_container_width=True)
 
         except Exception as e:
-            st.error(f"Error al procesar el raster de coberturas: {e}") # Updated error message
+            st.error(f"Error al procesar el raster de coberturas: {e}")
             import traceback
             st.error(traceback.format_exc())
-            st.session_state['current_coverage_stats'] = None # Clear stats on error
+            st.session_state['current_coverage_stats'] = None
             return
 
     with col2:
         st.subheader("Visualización y Relación con Escorrentía")
-        if 'current_coverage_stats' in st.session_state:
+        # --- Esta sección no necesita cambios ---
+        if 'current_coverage_stats' in st.session_state and st.session_state['current_coverage_stats'] is not None:
             stats_df = st.session_state['current_coverage_stats']
+            # Asegurarse que stats_df no esté vacío antes de graficar
             if not stats_df.empty:
-                # Gráfico de Pastel
-                fig_pie = px.pie(stats_df, names='Tipo de Cobertura', values='percentage', # Use the correct column name from stats_df
-                                 title=f"Distribución de Coberturas (%)",
-                                 hole=0.3) # Gráfico de dona
-                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                # Comprobar si hay códigos desconocidos ANTES de graficar
+                if any("Código Desconocido" in name for name in stats_df["Tipo de Cobertura"]):
+                     st.warning("Hay códigos de cobertura desconocidos en la cuenca. Revisa la leyenda `land_cover_legend` en el código.")
+                
+                fig_pie = px.pie(stats_df, names='Tipo de Cobertura', values='percentage',
+                                 title=f"Distribución de Coberturas (%)", hole=0.3)
+                fig_pie.update_traces(textposition='inside', textinfo='percent+label', sort=False)
                 st.plotly_chart(fig_pie, use_container_width=True)
 
-                # Mostrar Escorrentía (si está disponible del balance)
-                balance_results = st.session_state.get('balance_results') # Asumiendo que guardaste los resultados del balance aquí
+                # Mostrar Escorrentía (Código sin cambios)
+                # ... (resto del código para mostrar Q) ...
+                balance_results = st.session_state.get('balance_results')
                 if balance_results and not balance_results.get("error"):
-                    q_mm = balance_results.get('Q_mm')
-                    q_m3 = balance_results.get('Q_m3_año')
-                    if q_mm is not None and q_m3 is not None:
-                         st.metric("Escorrentía Media Anual Estimada (Q)",
-                                   f"{q_mm:.0f} mm/año",
-                                   f"Volumen: {q_m3 / 1e6:.2f} Millones m³/año")
-                    else:
-                         st.info("La escorrentía no se calculó previamente.")
+                    q_mm = balance_results.get('Q_mm'); q_m3 = balance_results.get('Q_m3_año')
+                    if q_mm is not None and q_m3 is not None: st.metric("Escorrentía Media Anual Estimada (Q)",f"{q_mm:.0f} mm/año", f"Volumen: {q_m3 / 1e6:.2f} Millones m³/año")
+                    else: st.info("La escorrentía no se calculó previamente.")
                 else:
-                    # Intentar obtener Q_mm directamente si balance_results no existe pero mean_precip sí
-                    mean_precip = st.session_state.get('mean_precip')
-                    morph_results = st.session_state.get('morph_results')
-                    if mean_precip and morph_results and morph_results.get('alt_prom_m'):
-                        # Recalcular solo para mostrar Q (asumiendo que P y Altitud están)
-                        temp_balance = calculate_hydrological_balance(mean_precip, morph_results.get('alt_prom_m'), unified_basin_gdf)
-                        if temp_balance and temp_balance.get('Q_mm') is not None:
-                             st.metric("Escorrentía Media Anual Estimada (Q)", f"{temp_balance['Q_mm']:.0f} mm/año")
-                        else:
-                             st.info("No se pudo recalcular la escorrentía. Ejecuta el Balance Hídrico primero.")
-                    else:
-                        st.info("Ejecuta el Balance Hídrico en la pestaña 'Superficies de Interpolación' para ver la escorrentía aquí.")
-
+                     mean_precip = st.session_state.get('mean_precip'); morph_results = st.session_state.get('morph_results')
+                     if mean_precip and morph_results and morph_results.get('alt_prom_m'):
+                          temp_balance = calculate_hydrological_balance(mean_precip, morph_results.get('alt_prom_m'), unified_basin_gdf)
+                          if temp_balance and temp_balance.get('Q_mm') is not None: st.metric("Escorrentía Media Anual Estimada (Q)", f"{temp_balance['Q_mm']:.0f} mm/año")
+                          else: st.info("No se pudo recalcular la escorrentía.")
+                     else: st.info("Ejecuta el Balance Hídrico para ver la escorrentía aquí.")
             else:
-                st.info("No hay estadísticas de cobertura para visualizar.")
+                # Esto puede ocurrir si todos los píxeles eran NoData
+                st.info("No hay estadísticas de cobertura válidas para visualizar.")
         else:
             st.info("Procesa las coberturas primero para ver la visualización.")
 
@@ -4569,6 +4561,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
