@@ -75,9 +75,26 @@ def create_sidebar(gdf_stations, df_long):
 
         # Rango de Años y Meses (sin cambios)
         years_with_data = sorted(df_long[Config.YEAR_COL].dropna().unique())
-        year_range_default = (min(years_with_data), max(years_with_data)) if years_with_data else (1970, 2025)
-        year_range = st.slider("Rango de Años", min_value=int(year_range_default[0]), max_value=int(year_range_default[1]),
-                               value=st.session_state.get('year_range', (int(year_range_default[0]), int(year_range_default[1]))), key='year_range')
+        
+        # 1. Definir el rango MIN y MAX.
+        # min_year: El año más bajo en los datos. Por defecto 1970 (según tu imagen).
+        # max_year: El año más alto en los datos (o 2025, si es más reciente, según tu solicitud).
+        min_year_data = min(years_with_data) if years_with_data else 1970
+        max_year_data = max(years_with_data) if years_with_data else 2025
+        
+        # 2. Establecer el valor MÁXIMO del slider a 2025 (o el máximo en los datos, si es mayor)
+        slider_max_year = max(max_year_data, 2025) 
+        
+        # 3. Definir el valor por defecto del slider: min_year_data al slider_max_year.
+        year_range_default = (min_year_data, slider_max_year)
+        
+        # 4. Crear el slider
+        year_range = st.slider("Rango de Años", 
+                               min_value=int(year_range_default[0]), 
+                               max_value=int(slider_max_year), # <-- CORREGIDO: LLEGA HASTA 2025 (O MÁS)
+                               value=st.session_state.get('year_range', year_range_default), 
+                               key='year_range')
+        
         meses_dict = {m: i + 1 for i, m in enumerate(['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'])}
         default_meses = st.session_state.get('meses_nombres_multiselect', list(meses_dict.keys()))
         meses_nombres = st.multiselect("Meses", list(meses_dict.keys()), default=default_meses, key='meses_nombres_multiselect')
@@ -143,6 +160,7 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
     if celdas and Config.CELL_COL in stations_filtered.columns:
         stations_filtered = stations_filtered[stations_filtered[Config.CELL_COL].isin(celdas)]
     return stations_filtered
+
 
 
 
