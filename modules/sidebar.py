@@ -18,7 +18,7 @@ def create_sidebar(gdf_stations, df_long):
     # --- Expander 1: Geographic and Data Filters ---
     with st.sidebar.expander("**1. Filtros Geográficos y de Datos**", expanded=True):
         min_data_perc = st.slider("Filtrar por % de datos mínimo:", 0, 100, st.session_state.get('min_data_perc_slider', 0), key="min_data_perc_slider")
-        altitude_ranges = ['0-500', '500-1000', '1000-2000', '2000-3000', '>3000']
+        altitude_ranges = ['0-500', '500-1000', '1000-1500', '1500-2000', '2000-3000', '>3000']
         selected_altitudes = st.multiselect('Filtrar por Altitud (m)', options=altitude_ranges, key='altitudes_multiselect')
 
         # Use full lists for geo options
@@ -84,7 +84,7 @@ def create_sidebar(gdf_stations, df_long):
 
         # Year Range (no changes needed)
         years_with_data = sorted(df_long[Config.YEAR_COL].dropna().unique())
-        year_range_default = (min(years_with_data), max(years_with_data)) if years_with_data else (1970, 2020)
+        year_range_default = (min(years_with_data), max(years_with_data)) if years_with_data else (1970, 2024)
         year_range = st.slider("Rango de Años", min_value=int(year_range_default[0]), max_value=int(year_range_default[1]),
                                value=st.session_state.get('year_range', (int(year_range_default[0]), int(year_range_default[1]))), key='year_range')
 
@@ -141,7 +141,8 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
         for r in altitudes:
             if r == '0-500': conditions.append((altitude_col_numeric >= 0) & (altitude_col_numeric <= 500))
             elif r == '500-1000': conditions.append((altitude_col_numeric > 500) & (altitude_col_numeric <= 1000))
-            elif r == '1000-2000': conditions.append((altitude_col_numeric > 1000) & (altitude_col_numeric <= 2000))
+            elif r == '1000-1500': conditions.append((altitude_col_numeric > 1000) & (altitude_col_numeric <= 1500))    
+            elif r == '1500-2000': conditions.append((altitude_col_numeric > 1500) & (altitude_col_numeric <= 2000))
             elif r == '2000-3000': conditions.append((altitude_col_numeric > 2000) & (altitude_col_numeric <= 3000))
             elif r == '>3000': conditions.append(altitude_col_numeric > 3000)
         if conditions:
@@ -153,4 +154,5 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
     if celdas and Config.CELL_COL in stations_filtered.columns:
         stations_filtered = stations_filtered[stations_filtered[Config.CELL_COL].isin(celdas)]
     return stations_filtered
+
 
