@@ -1754,17 +1754,20 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         variogram_model2_reg = st.selectbox("Modelo de Variograma para Mapa 2", variogram_options, key="var_model_2_reg")
 
                 gdf_bounds_reg = gdf_filtered.total_bounds
-                # Asegurarse de pasar todas las columnas necesarias para KED
+                # Asegurarse de pasar todas las columnas necesarias
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
+                # --- CORRECCIÓN: Eliminar argumento 'gdf_bounds' ---
                 fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
                     year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg, 
-                    gdf_bounds=gdf_bounds_reg, gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
+                    # gdf_bounds=gdf_bounds_reg, # <-- Argumento eliminado
+                    gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
                 )
                 fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
                     year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg, 
-                    gdf_bounds=gdf_bounds_reg, gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
+                    # gdf_bounds=gdf_bounds_reg, # <-- Argumento eliminado
+                    gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
                 )
 
                 with map_col1_reg:
@@ -4650,6 +4653,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
