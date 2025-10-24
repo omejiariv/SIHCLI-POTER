@@ -244,7 +244,7 @@ def generate_station_popup_html(row, df_anual_melted):
     station_name = row.get(Config.STATION_NAME_COL, 'N/A')
 
     try:
-        year_range_val = st.session_state.get('year_range', (2000, 2020))
+        year_range_val = st.session_state.get('year_range', (2000, 2025))
         year_min, year_max = year_range_val
 
         total_years_in_period = year_max - year_min + 1
@@ -4561,6 +4561,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
