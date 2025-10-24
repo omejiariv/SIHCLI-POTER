@@ -1,3 +1,5 @@
+# modules/visualizer.py
+
 import streamlit as st
 import pandas as pd
 import base64
@@ -3984,17 +3986,17 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     # --- LEYENDA ACTUALIZADA ---
     land_cover_legend = {
         1: "Zonas urbanizadas",
-        2: "Zonas industriales o comerciales y redes de comunicación", # Corregido comunicación
-        3: "Zonas de extracción minera, escombreras y vertederos", # Añadido "y vertederos"
-        4: "Zonas verdes artificializadas, no agrícolas",
+        2: "Zonas industriales o comerciales y redes de comunicacion",
+        3: "Zonas de extraccion minera, escombreras y vertederos",
+        4: "Zonas verdes artificializadas, no agricolas",
         5: "Cultivos transitorios",
         6: "Cultivos permanentes",
         7: "Pastos",
-        8: "Áreas Agrícolas Heterogéneas", # Mantenido acento correcto
+        8: "Areas Agricolas Heterogeneas",
         9: "Bosques",
-        10: "Áreas con vegetación herbácea y/o arbustiva", # Mantenido acento correcto
-        11: "Áreas abiertas, sin o con poca vegetación", # Mantenido acento correcto
-        12: "Áreas húmedas continentales", # Mantenido acento correcto
+        10: "Areas con vegetación herbácea y/o arbustiva",
+        11: "Areas abiertas, sin o con poca vegetacion",
+        12: "Areas húmedas continentales",
         13: "Aguas continentales",
         # Asegúrate de saber cuál es el valor NoData de tu raster y añádelo si es necesario
         # 0: "Sin Datos / Fuera de Área" # Ejemplo si 0 es NoData
@@ -4004,13 +4006,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
 # Inside display_land_cover_analysis_tab
 
     # --- Configuración ---
-    # !! Ajusta el nombre si es necesario !!
     land_cover_raster_filename = "Cob25m_WGS84.tif" 
-    # !! LEYENDA !!
-    land_cover_legend = { 
-        1: "Zonas urbanizadas", 
-        # ...(resto de la leyenda)...
-    }
     projected_crs = "EPSG:3116" 
     # --- Fin Configuración ---
 
@@ -4573,6 +4569,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
