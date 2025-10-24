@@ -254,51 +254,107 @@ def main():
             analysis_mode=st.session_state.analysis_mode
         )
 
-    with tabs[16]:
+    with tabs[16]: 
         st.header("Análisis Agregado por Cuenca Hidrográfica")
-        if st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
-            BASIN_NAME_COLUMN = 'SUBC_LBL'
+        # Verificar si gdf_subcuencas está cargado
+        if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
+            BASIN_NAME_COLUMN = 'SUBC_LBL' # Columna con nombres de cuenca
+            # Verificar si la columna de nombres existe
             if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns:
-                relevant_basins_gdf = gpd.sjoin(st.session_state.gdf_subcuencas, gdf_filtered, how="inner", predicate="intersects")
-                if not relevant_basins_gdf.empty:
-                    basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique())
-                else:
-                    basin_names = []
+
+                # --- LÓGICA CORREGIDA PARA OBTENER NOMBRES DE CUENCAS ---
+                basin_names = [] # Inicializar lista
                 
+                # 1. Filtrar cuencas por las regiones seleccionadas en el sidebar
+                #    'sidebar_filters' es el diccionario devuelto por create_sidebar
+                regions_from_sidebar = sidebar_filters.get("selected_regions", []) 
+                basins_in_selected_regions = st.session_state.gdf_subcuencas.copy() # Empezar con todas
+
+                if regions_from_sidebar: # Si el usuario seleccionó alguna región
+                    # Asumiendo que gdf_subcuencas tiene una columna que coincide con Config.REGION_COL
+                    if Config.REGION_COL in basins_in_selected_regions.columns:
+                         basins_in_selected_regions = basins_in_selected_regions[
+                             basins_in_selected_regions[Config.REGION_COL].isin(regions_from_sidebar)
+                         ]
+                         if basins_in_selected_regions.empty:
+                              st.info("Ninguna subcuenca encontrada en las regiones seleccionadas.")
+                    else:
+                         st.warning(f"El archivo de subcuencas no tiene la columna '{Config.REGION_COL}'. No se puede filtrar por región.")
+                # Si no hay regiones seleccionadas, 'basins_in_selected_regions' sigue conteniendo todas las cuencas.
+                
+                # 2. Hacer Sjoin entre las cuencas (filtradas por región o todas) y las estaciones filtradas
+                #    'gdf_filtered' viene del sidebar y ya respeta TODOS los filtros (incluida región, municipio, etc.)
+                if not basins_in_selected_regions.empty and 'gdf_filtered' in sidebar_filters and not sidebar_filters['gdf_filtered'].empty:
+                     # Asegurarse que ambos GeoDataFrames tengan CRS antes del sjoin
+                     if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(st.session_state.gdf_stations.crs, allow_override=True) # Asumir mismo CRS que estaciones
+                     if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(st.session_state.gdf_stations.crs, allow_override=True)
+
+                     # Reproyectar a un CRS común si son diferentes (ej. WGS84)
+                     target_crs_sjoin = "EPSG:4326"
+                     try:
+                          basins_for_sjoin = basins_in_selected_regions.to_crs(target_crs_sjoin)
+                          stations_for_sjoin = sidebar_filters['gdf_filtered'].to_crs(target_crs_sjoin)
+                          
+                          relevant_basins_gdf = gpd.sjoin(
+                              basins_for_sjoin,
+                              stations_for_sjoin,
+                              how="inner", 
+                              predicate="intersects" # O 'contains'
+                          )
+                          if not relevant_basins_gdf.empty:
+                              # Obtener nombres únicos de las cuencas resultantes del sjoin
+                              basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique())
+                          # Si relevant_basins_gdf está vacío, basin_names permanece []
+                     except Exception as e_sjoin:
+                          st.error(f"Error durante la unión espacial (sjoin): {e_sjoin}")
+                          basin_names = [] # Resetear en caso de error
+                          
+                # Si no hay estaciones filtradas o no hay cuencas en regiones, basin_names permanece []
+                # --- FIN LÓGICA CORREGIDA ---
+
+                # --- Mostrar resultados o mensajes ---
                 if not basin_names:
-                    st.info("Ninguna cuenca contiene estaciones que coincidan con los filtros actuales.")
+                    st.info("Ninguna cuenca (en las regiones/filtros seleccionados) contiene estaciones que coincidan con todos los filtros actuales.")
                 else:
                     selected_basin = st.selectbox(
                         "Seleccione una cuenca para analizar:",
                         options=basin_names,
-                        key="basin_selector"
+                        key="basin_selector" # Mantener la misma key
                     )
                     if selected_basin:
-                        stats_df, stations, error_msg = calculate_basin_stats(
-                            gdf_filtered,
-                            st.session_state.gdf_subcuencas,
-                            df_monthly_filtered,
+                        # Llamar a la función de análisis (asegúrate que esté importada)
+                        # from modules.analysis import calculate_basin_stats 
+                        stats_df, stations_in_selected_basin, error_msg = calculate_basin_stats(
+                            sidebar_filters['gdf_filtered'], # Pasar las estaciones ya filtradas
+                            st.session_state.gdf_subcuencas, # Pasar el GDF original de subcuencas
+                            df_monthly_filtered, # Pasar los datos mensuales filtrados por sidebar
                             selected_basin,
                             BASIN_NAME_COLUMN
                         )
-                        if error_msg: st.warning(error_msg)
-                        if stations:
+
+                        if error_msg: 
+                            st.warning(error_msg)
+                        
+                        if stations_in_selected_basin: # Verificar si se encontraron estaciones DENTRO de la cuenca seleccionada
                             st.subheader(f"Resultados para la cuenca: {selected_basin}")
-                            st.metric("Número de Estaciones en la Cuenca", len(stations))
-                            with st.expander("Ver estaciones incluidas"): st.write(", ".join(stations))
-                            if not stats_df.empty:
+                            st.metric("Número de Estaciones Filtradas en la Cuenca", len(stations_in_selected_basin))
+                            with st.expander("Ver estaciones incluidas"): 
+                                st.write(", ".join(stations_in_selected_basin))
+                            
+                            if stats_df is not None and not stats_df.empty:
                                 st.markdown("---")
-                                st.write("**Estadísticas de Precipitación Mensual (Agregada)**")
+                                st.write("**Estadísticas de Precipitación Mensual (Agregada para estaciones filtradas en la cuenca)**")
                                 st.dataframe(stats_df, use_container_width=True)
                             else:
-                                st.info("Aunque se encontraron estaciones, no hay datos de precipitación para el período seleccionado.")
-                        else:
-                            st.warning("No se encontraron estaciones dentro de la cuenca seleccionada.")
+                                # Este mensaje podría aparecer si las estaciones están en la cuenca pero no tienen datos en el periodo/meses seleccionados
+                                st.info("Aunque se encontraron estaciones filtradas en la cuenca, no hay datos de precipitación válidos para el período/meses seleccionados.")
+                        # else: # Este else ya no es necesario porque si no hay estaciones, basin_names estaría vacío
+                        #     st.warning("No se encontraron estaciones (que cumplan todos los filtros) dentro de la cuenca seleccionada.")
             else:
                 st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.")
         else:
-            st.warning("Los datos de las subcuencas no están cargados.")
-
+            st.warning("Los datos de las subcuencas no están cargados o el archivo está vacío.")
+            
     with tabs[17]:
         st.header("Comparación de Periodos de Tiempo")
         analysis_level = st.radio(
@@ -471,6 +527,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
