@@ -1468,8 +1468,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         try:
                             # --- 1. MANEJO DE ARCHIVO DEM (SI ESTÁ PRESENTE) ---
                             if dem_file is not None:
+                                # Re-escribir el archivo a una ruta conocida y temporal
                                 dem_path = os.path.join(os.getcwd(), dem_file.name)
-                                # Volver a escribir el archivo, por si ha cambiado o se ha perdido en ejecuciones anteriores
                                 with open(dem_path, "wb") as f: f.write(dem_file.getbuffer())
 
                             with st.spinner("Preparando datos y realizando interpolación..."):
@@ -1519,13 +1519,13 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                     masked_data = masked_data[0].astype(np.float32)
                                     mean_precip = np.nanmean(masked_data)
                                     
-                                    # --- 2. CÁLCULO DE MORFOMETRÍA (Requiere DEM) ---
+                                    # CÁLCULO DE MORFOMETRÍA (DEBE SER INMEDIATO AL TRATAMIENTO DEL DEM)
                                     if dem_path and os.path.exists(dem_path):
                                         st.session_state['morph_results'] = calculate_morphometry(unified_basin_gdf, dem_path)
                                     else:
-                                        # Si no hay DEM, se asegura que morph_results sea None, o con un error.
-                                        st.session_state['morph_results'] = {'error': "DEM no disponible o no cargado correctamente para morfometría."} if run_balance else None
-                                    
+                                        # Si el balance está activo pero no hay DEM
+                                        st.session_state['morph_results'] = {'error': "DEM no disponible para morfometría."} if run_balance else None
+
                                     map_traces = []
                                     dem_trace = None
                                     x_coords = np.arange(masked_transform.c, masked_transform.c + masked_data.shape[1] * masked_transform.a, masked_transform.a)
@@ -1545,7 +1545,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                                     dem_trace = go.Heatmap(z=dem_reprojected, x=x_coords, y=y_coords, colorscale='gray', showscale=False, name='Elevación')
                                                     map_traces.append(dem_trace)
                                             except Exception as e:
-                                                st.warning(f"No se pudo procesar el DEM: {e}")
+                                                st.warning(f"No se pudo procesar el DEM para visualización: {e}")
                                     
                                     precip_trace = go.Contour(
                                         z=masked_data, x=x_coords, y=y_coords, colorscale='viridis',
@@ -1602,7 +1602,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     st.subheader(f"Resultados para: {st.session_state.get('selected_basins_title', '')}")
                     st.plotly_chart(fig_basin, use_container_width=True)
 
-                # Mostramos el Balance Hídrico
+                # Mostramos el Balance Hídrico (FLUJO CORREGIDO)
                 if mean_precip is not None and unified_basin_gdf is not None and run_balance:
                     st.markdown("---")
                     st.subheader("Balance Hídrico Estimado")
@@ -1614,7 +1614,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     
                     if alt_prom is None:
                         # Error de altitud si se intentó calcular y falló, o si no hay DEM
-                        st.error("❌ **Error en Balance:** La altitud media es desconocida (N/A). Verifique que el DEM esté subido en el panel lateral y se haya podido calcular la Morfometría (posiblemente un error interno de CRS o procesamiento del DEM).")
+                        st.error("❌ **No se pudo calcular el balance:** La altitud media es desconocida (N/A). Verifique el DEM.")
+                        st.info("Para ver el Balance Hídrico completo y la Morfometría, suba un archivo DEM en el panel lateral y presione 'Generar Mapa para Cuenca(s)'.")
                     else:
                         with st.spinner("Calculando balance..."):
                             balance_results = calculate_hydrological_balance(mean_precip, alt_prom, unified_basin_gdf)
@@ -1630,20 +1631,18 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 st.success(f"Volumen de escorrentía anual estimado: **{balance_results['Q_m3_año']/1e6:.2f} millones de m³** sobre un área de **{balance_results['Area_km2']:.2f} km²**.")
                 
                 # Mostramos la Morfometría (si fue calculada)
-                if morph_results:
+                if morph_results and not morph_results.get('error'):
                     st.markdown("---")
                     st.subheader("Morfometría de la Cuenca (Calculada con DEM)")
-                    if morph_results.get("error"):
-                        st.error(morph_results["error"])
-                    else:
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("Área", f"{morph_results['area_km2']:.2f} km²")
-                        c2.metric("Perímetro", f"{morph_results['perimetro_km']:.2f} km")
-                        c3.metric("Índice de Forma", f"{morph_results['indice_forma']:.2f}")
-                        c4, c5, c6 = st.columns(3)
-                        c4.metric("Altitud Máxima", f"{morph_results.get('alt_max_m', 'N/A'):.0f} m")
-                        c5.metric("Altitud Mínima", f"{morph_results.get('alt_min_m', 'N/A'):.0f} m")
-                        c6.metric("Altitud Promedio", f"{morph_results.get('alt_prom_m', 'N/A'):.1f} m")
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Área", f"{morph_results['area_km2']:.2f} km²")
+                    c2.metric("Perímetro", f"{morph_results['perimetro_km']:.2f} km")
+                    c3.metric("Índice de Forma", f"{morph_results['indice_forma']:.2f}")
+                    c4, c5, c6 = st.columns(3)
+                    c4.metric("Altitud Máxima", f"{morph_results.get('alt_max_m', 'N/A'):.0f} m")
+                    c5.metric("Altitud Mínima", f"{morph_results.get('alt_min_m', 'N/A'):.0f} m")
+                    c6.metric("Altitud Promedio", f"{morph_results.get('alt_prom_m', 'N/A'):.1f} m")
                 
                 elif st.session_state.get('dem_file') is None and run_balance:
                     st.info("Para ver el Balance Hídrico completo y la Morfometría, suba un archivo DEM en el panel lateral.")
@@ -4609,6 +4608,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
