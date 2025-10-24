@@ -1461,13 +1461,15 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         st.session_state['error_msg'] = None
                         st.session_state['mean_precip'] = None
                         st.session_state['morph_results'] = None
+                        st.session_state['balance_results'] = None
                         
                         dem_path = None
                         
                         try:
-                            # --- MANEJO DE ARCHIVO DEM (SI ESTÁ PRESENTE) ---
-                            if show_dem_background and dem_file is not None:
+                            # --- 1. MANEJO DE ARCHIVO DEM (SI ESTÁ PRESENTE) ---
+                            if dem_file is not None:
                                 dem_path = os.path.join(os.getcwd(), dem_file.name)
+                                # Volver a escribir el archivo, por si ha cambiado o se ha perdido en ejecuciones anteriores
                                 with open(dem_path, "wb") as f: f.write(dem_file.getbuffer())
 
                             with st.spinner("Preparando datos y realizando interpolación..."):
@@ -1500,10 +1502,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                     grid_z = griddata(points, values, (grid_x, grid_y), method=interp_method_call)
                                     nan_mask = np.isnan(grid_z)
                                     if np.any(nan_mask):
-                                        # Usar el método 'nearest' para rellenar los valores NaN de la interpolación.
                                         fill_values = griddata(points, values, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
                                         grid_z[nan_mask] = fill_values
-                                    grid_z = np.nan_to_num(grid_z) # Convertir cualquier NaN restante a 0
+                                    grid_z = np.nan_to_num(grid_z)
                                 else:
                                     st.session_state['error_msg'] = "Se necesitan al menos 3 estaciones para la interpolación."
                                 
@@ -1517,6 +1518,13 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                             masked_data, masked_transform = mask(dataset, target_basin_metric.geometry, crop=True, nodata=np.nan)
                                     masked_data = masked_data[0].astype(np.float32)
                                     mean_precip = np.nanmean(masked_data)
+                                    
+                                    # --- 2. CÁLCULO DE MORFOMETRÍA (Requiere DEM) ---
+                                    if dem_path and os.path.exists(dem_path):
+                                        st.session_state['morph_results'] = calculate_morphometry(unified_basin_gdf, dem_path)
+                                    else:
+                                        # Si no hay DEM, se asegura que morph_results sea None, o con un error.
+                                        st.session_state['morph_results'] = {'error': "DEM no disponible o no cargado correctamente para morfometría."} if run_balance else None
                                     
                                     map_traces = []
                                     dem_trace = None
@@ -1562,10 +1570,6 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                     st.session_state['mean_precip'] = mean_precip
                                     st.session_state['unified_basin_gdf'] = unified_basin_gdf
                                     st.session_state['selected_basins_title'] = ", ".join(selected_basins)
-                                    
-                                    # CÁLCULO DE MORFOMETRÍA
-                                    if dem_path:
-                                        st.session_state['morph_results'] = calculate_morphometry(unified_basin_gdf, dem_path)
 
                                 else:
                                     if not st.session_state.get('error_msg'):
@@ -1576,7 +1580,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                             st.session_state['error_msg'] = f"Ocurrió un error crítico: {e}\n\n{traceback.format_exc()}"
                         
                         finally:
-                            # --- ELIMINACIÓN DE ARCHIVO DEM TEMPORAL ---
+                            # --- 3. ELIMINACIÓN DE ARCHIVO DEM TEMPORAL ---
+                            # Si el path existe y el archivo existe, lo eliminamos
                             if dem_path and os.path.exists(dem_path): 
                                 os.remove(dem_path)
                                 
@@ -1603,20 +1608,26 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     st.subheader("Balance Hídrico Estimado")
                     
                     # Extraemos la altitud promedio de los resultados de morfometría
-                    alt_prom = morph_results.get('alt_prom_m') if morph_results else None
+                    alt_prom = None
+                    if morph_results and not morph_results.get('error'):
+                         alt_prom = morph_results.get('alt_prom_m')
                     
-                    with st.spinner("Calculando balance..."):
-                        balance_results = calculate_hydrological_balance(mean_precip, alt_prom, unified_basin_gdf)
-                        st.session_state['balance_results'] = balance_results
-                        if balance_results.get("error"):
-                            st.error(balance_results["error"])
-                        else:
-                            c1, c2, c3, c4 = st.columns(4)
-                            c1.metric("Precipitación Media (P)", f"{balance_results['P_media_anual_mm']:.0f} mm/año")
-                            c2.metric("Altitud Media", f"{balance_results['Altitud_media_m']:.0f} m" if balance_results['Altitud_media_m'] is not None else "N/A")
-                            c3.metric("ET Media Estimada (ET)", f"{balance_results['ET_media_anual_mm']:.0f} mm/año" if balance_results['ET_media_anual_mm'] is not None else "N/A")
-                            c4.metric("Escorrentía (Q=P-ET)", f"{balance_results['Q_mm']:.0f} mm/año" if balance_results['Q_mm'] is not None else "N/A")
-                            st.success(f"Volumen de escorrentía anual estimado: **{balance_results['Q_m3_año']/1e6:.2f} millones de m³** sobre un área de **{balance_results['Area_km2']:.2f} km²**.")
+                    if alt_prom is None:
+                        # Error de altitud si se intentó calcular y falló, o si no hay DEM
+                        st.error("❌ **Error en Balance:** La altitud media es desconocida (N/A). Verifique que el DEM esté subido en el panel lateral y se haya podido calcular la Morfometría (posiblemente un error interno de CRS o procesamiento del DEM).")
+                    else:
+                        with st.spinner("Calculando balance..."):
+                            balance_results = calculate_hydrological_balance(mean_precip, alt_prom, unified_basin_gdf)
+                            st.session_state['balance_results'] = balance_results
+                            if balance_results.get("error"):
+                                st.error(balance_results["error"])
+                            else:
+                                c1, c2, c3, c4 = st.columns(4)
+                                c1.metric("Precipitación Media (P)", f"{balance_results['P_media_anual_mm']:.0f} mm/año")
+                                c2.metric("Altitud Media", f"{balance_results['Altitud_media_m']:.0f} m" if balance_results['Altitud_media_m'] is not None else "N/A")
+                                c3.metric("ET Media Estimada (ET)", f"{balance_results['ET_media_anual_mm']:.0f} mm/año" if balance_results['ET_media_anual_mm'] is not None else "N/A")
+                                c4.metric("Escorrentía (Q=P-ET)", f"{balance_results['Q_mm']:.0f} mm/año" if balance_results['Q_mm'] is not None else "N/A")
+                                st.success(f"Volumen de escorrentía anual estimado: **{balance_results['Q_m3_año']/1e6:.2f} millones de m³** sobre un área de **{balance_results['Area_km2']:.2f} km²**.")
                 
                 # Mostramos la Morfometría (si fue calculada)
                 if morph_results:
@@ -1710,7 +1721,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
         dem_file_from_sidebar = st.session_state.get('dem_file')
         
         # --- LÓGICA DE VISUALIZACIÓN SIMPLIFICADA (SOLO MUESTRA) ---
-        if unified_basin_gdf is not None and dem_file_from_sidebar is not None and morph_results is not None:
+        if unified_basin_gdf is not None and dem_file_from_sidebar is not None:
             
             st.markdown(f"### Resultados para: **{st.session_state.get('selected_basins_title', '')}**")
             
@@ -1719,13 +1730,10 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
             
             try:
                 # Escribir el archivo DEM si es necesario para el cálculo de la curva hipsométrica
-                # Se asume que morph_results se calculó exitosamente antes.
                 with open(dem_path, "wb") as f: f.write(dem_file_from_sidebar.getbuffer())
 
-                st.markdown("#### Parámetros Morfométricos")
-                if morph_results.get("error"):
-                    st.error(morph_results["error"])
-                else:
+                if morph_results and not morph_results.get("error"):
+                    st.markdown("#### Parámetros Morfométricos")
                     c1, c2, c3 = st.columns(3)
                     c1.metric("Área", f"{morph_results['area_km2']:.2f} km²")
                     c2.metric("Perímetro", f"{morph_results['perimetro_km']:.2f} km")
@@ -1734,6 +1742,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     c4.metric("Altitud Máxima", f"{morph_results.get('alt_max_m', 'N/A'):.0f} m")
                     c5.metric("Altitud Mínima", f"{morph_results.get('alt_min_m', 'N/A'):.0f} m")
                     c6.metric("Altitud Promedio", f"{morph_results.get('alt_prom_m', 'N/A'):.1f} m")
+                else:
+                    st.warning("Los parámetros morfométricos no están disponibles. Asegúrese de hacer clic en **'Generar Mapa para Cuenca(s)'** en la pestaña anterior para calcularlos, y de que el DEM sea válido.")
+
 
                 st.markdown("---")
                 st.markdown("#### Curva Hipsométrica")
@@ -1790,8 +1801,6 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 st.warning("Debe generar un mapa para una cuenca en 'Superficies de Interpolación' (Modo: Por Cuenca Específica) primero.")
             if dem_file_from_sidebar is None:
                 st.warning("Debe subir un archivo DEM (.tif) en el panel lateral para el análisis.")
-            if morph_results is None and unified_basin_gdf is not None and dem_file_from_sidebar is not None:
-                st.warning("Los parámetros morfométricos no se han calculado. Por favor, haga clic en **'Generar Mapa para Cuenca(s)'** en la pestaña anterior.")
 
     with risk_map_tab:
         st.subheader("Mapa de Vulnerabilidad por Tendencias de Precipitación a Largo Plazo")
@@ -2111,6 +2120,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
 
         else:
             st.warning("Se necesitan datos de al menos dos años diferentes para generar la Comparación de Mapas.")
+
 
 def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_analysis,
                                  df_anual_melted, gdf_filtered, analysis_mode, selected_regions,
@@ -4599,6 +4609,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
