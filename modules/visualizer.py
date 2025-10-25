@@ -4174,13 +4174,24 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         st.subheader(f"Cobertura del Suelo en: {basin_name}")
         try:
             with st.spinner("Cargando y procesando raster de coberturas..."):
+                # --- OBTENER ÁREA TOTAL PRIMERO ---
+                total_area_km2 = None
+                balance_results_check = st.session_state.get('balance_results')
+                
+                if balance_results_check and 'Area_km2' in balance_results_check:
+                    total_area_km2 = balance_results_check['Area_km2']
+                
+                if total_area_km2 is None or total_area_km2 <= 0:
+                    st.error("No se pudo obtener el Área Total de la cuenca (calculada en 'Mapas Avanzados -> Balance Hídrico').")
+                    st.warning("Por favor, genera primero el Balance Hídrico para la cuenca seleccionada.")
+                    st.session_state['current_coverage_stats'] = None
+                    return # Detener si no tenemos el área total
+                # --- FIN OBTENER ÁREA ---
+
                 # Abrir el raster de cobertura
                 with rasterio.open(land_cover_raster_path) as cover_src:
                     cover_crs = cover_src.crs
-                    cover_transform = cover_src.transform
                     nodata_val = cover_src.nodata
-                    
-                    # Usar 0 como NoData interno si el archivo no especifica uno
                     internal_nodata = nodata_val if nodata_val is not None else 0
                     if internal_nodata not in land_cover_legend:
                         land_cover_legend[internal_nodata] = "Sin Datos / NoData"
@@ -4199,43 +4210,38 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
                     unique_values, counts = np.unique(out_image[valid_pixel_mask], return_counts=True)
 
                     if unique_values.size == 0:
-                        st.warning("No se encontraron píxeles de cobertura válidos dentro del área de la cuenca (después de excluir NoData).")
+                        st.warning("No se encontraron píxeles de cobertura válidos dentro del área de la cuenca.")
                         st.session_state['current_coverage_stats'] = None
                         return
 
-                    # Calcular área por clase
-                    pixel_size_x = abs(out_transform.a)
-                    pixel_size_y = abs(out_transform.e)
-                    pixel_area_m2 = pixel_size_x * pixel_size_y # Área en unidades del CRS
-
-                    # Advertir si el CRS está en grados
-                    if cover_src.crs.is_geographic:
-                         st.warning("ADVERTENCIA: El CRS del raster de coberturas ('Cob25m_WGS84.tif') está en grados (WGS84). El cálculo de área en km² será INCORRECTO.")
-                         # Se usa el área del píxel en grados cuadrados (casi 0), lo que lleva a áreas 0.
-                         # Se necesita un raster de coberturas en un CRS proyectado (métrico) para calcular áreas.
-                         # Dejamos el cálculo (que dará 0s) pero la advertencia es clave.
-                    
+                    # --- CÁLCULO DE ÁREA POR PROPORCIÓN ---
                     coverage_stats_list = []
-                    total_valid_pixels = counts.sum()
-                    total_area_m2_calc = total_valid_pixels * pixel_area_m2
+                    total_valid_pixels = counts.sum() # Total de píxeles válidos
 
                     for value, count in zip(unique_values, counts):
-                        # Convertir valor a int para búsqueda en diccionario
                         value_int = int(value)
                         class_name = land_cover_legend.get(value_int, f"Código Desconocido ({value_int})")
-                        area_m2 = count * pixel_area_m2
+                        
+                        # Calcular porcentaje de píxeles
                         percentage = (count / total_valid_pixels) * 100 if total_valid_pixels > 0 else 0
+                        
+                        # Calcular área en km² basado en la proporción del área total
+                        area_km2 = (count / total_valid_pixels) * total_area_km2
+                        
                         coverage_stats_list.append({
-                            "ID_Clase": value_int, "Tipo de Cobertura": class_name,
-                            "area_m2": area_m2, "area_km2": area_m2 / 1_000_000,
+                            "ID_Clase": value_int, 
+                            "Tipo de Cobertura": class_name,
+                            "area_km2": area_km2, # Área en km² calculada por proporción
                             "percentage": percentage
                         })
 
                     coverage_stats = pd.DataFrame(coverage_stats_list).sort_values(by="percentage", ascending=False)
+                    # --- FIN CÁLCULO PROPORCIÓN ---
 
                 # Guardar resultados
                 st.session_state['current_coverage_stats'] = coverage_stats
-                st.session_state['total_basin_area_km2'] = total_area_m2_calc / 1_000_000
+                # Guardar el área total correcta que usamos
+                st.session_state['total_basin_area_km2'] = total_area_km2 
 
                 # Mostrar tabla
                 st.dataframe(coverage_stats[['Tipo de Cobertura', 'area_km2', 'percentage']]
@@ -4653,6 +4659,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
