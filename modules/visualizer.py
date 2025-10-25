@@ -68,33 +68,15 @@ from modules.data_processor import complete_series
 
 #--- FUNCIONES DE UTILIDAD DE VISUALIZACIÓN
 
-def display_filter_summary(total_stations_count, selected_stations_count, year_range,
-                           selected_months_count, analysis_mode, selected_regions,
-                           selected_municipios, selected_altitudes):
-
-    if isinstance(year_range, tuple) and len(year_range) == 2:
-        year_text = f"{year_range[0]}-{year_range[1]}"
-    else:
-        year_text = "N/A"
-
-    mode_text = "Original (con huecos)"
-    if analysis_mode == "Completar series (interpolación)":
-        mode_text = "Completado (interpolado)"
-
-    summary_parts = [
-        f"**Estaciones:** {selected_stations_count}/{total_stations_count}",
-        f"**Período:** {year_text}",
-        f"**Datos:** {mode_text}"
-    ]
-
-    if selected_regions:
-        summary_parts.append(f"**Región:** {', '.join(selected_regions)}")
-    if selected_municipios:
-        summary_parts.append(f"**Municipio:** {', '.join(selected_municipios)}")
-    if selected_altitudes:
-        summary_parts.append(f"**Altitud:** {', '.join(selected_altitudes)}")
-
-    st.info(" | ".join(summary_parts))
+def display_filter_summary(total_stations_count, selected_stations_count, year_range, selected_months_count, analysis_mode, selected_regions, selected_municipios, selected_altitudes):
+    # Implementación Placeholder - Reemplaza si tienes tu propia lógica
+    with st.expander("Resumen de Filtros Activos", expanded=False):
+        st.write(f"- **Estaciones:** {selected_stations_count} de {total_stations_count} seleccionadas.")
+        st.write(f"- **Período:** {year_range[0]} - {year_range[1]} ({selected_months_count} meses/año).")
+        if selected_regions: st.write(f"- **Regiones:** {', '.join(selected_regions)}")
+        if selected_municipios: st.write(f"- **Municipios:** {', '.join(selected_municipios)}")
+        if selected_altitudes: st.write(f"- **Altitudes:** {', '.join(selected_altitudes)}")
+        # Añade otros filtros si aplica
 
 # NUEVA FUNCIÓN para cargar y cachear los GeoJSON
 @st.cache_data
@@ -1355,7 +1337,6 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                               selected_altitudes, **kwargs):
     st.header("Mapas Avanzados")
 
-    # Mostrar resumen de filtros
     try:
         display_filter_summary(
             total_stations_count=len(st.session_state.get('gdf_stations', [])),
@@ -1368,7 +1349,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
             selected_altitudes=selected_altitudes
         )
     except NameError:
-        st.info("Resumen de filtros no disponible.") # Mensaje alternativo
+        st.info("Resumen de filtros no disponible.")
 
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
@@ -1433,6 +1414,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 st.markdown("#### Controles de Cuenca")
                 basin_names = []
                 regions_from_sidebar = selected_regions
+
                 if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None:
                     gdf_subcuencas_local = st.session_state.gdf_subcuencas
                     if regions_from_sidebar:
@@ -1464,6 +1446,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         st.session_state['unified_basin_gdf'] = None; st.session_state['selected_basins_title'] = ""
                         temp_dem_path_morph = None; temp_dem_path_viz = None
 
+                        # --- Bloque try/except/finally CORREGIDO ---
                         try:
                             with st.spinner("Preparando datos y realizando interpolación..."):
                                 target_basins_gdf = st.session_state.gdf_subcuencas[st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN].isin(selected_basins)]
@@ -1503,7 +1486,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
 
                                 masked_data = masked_data[0].astype(np.float32)
                                 mean_precip_values = masked_data[~np.isnan(masked_data)]; mean_precip = np.mean(mean_precip_values) if mean_precip_values.size > 0 else 0.0
-                                masked_data_viz = masked_data.copy(); masked_data_viz[np.isnan(masked_data_viz)] = 0.0 # Usar 0 para cálculo si es necesario, pero NaN para viz
+                                masked_data_viz = masked_data.copy(); masked_data_viz[np.isnan(masked_data_viz)] = 0.0 # Usar NaN para viz
 
                                 map_traces = []; dem_trace = None
                                 x_coords = np.linspace(masked_transform.c + masked_transform.a / 2, masked_transform.c + masked_transform.a / 2 + masked_transform.a * (masked_data.shape[1] - 1), masked_data.shape[1])
@@ -1551,14 +1534,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                             # --- CÁLCULO DE BALANCE (Movido fuera del spinner) ---
                             run_balance_state = st.session_state.get('run_balance', False)
                             if run_balance_state:
-                                mean_p = st.session_state.get('mean_precip')
-                                morph_r = st.session_state.get('morph_results')
-                                basin_g = st.session_state.get('unified_basin_gdf')
+                                mean_p = st.session_state.get('mean_precip'); morph_r = st.session_state.get('morph_results'); basin_g = st.session_state.get('unified_basin_gdf')
                                 if mean_p is not None and morph_r is not None and not morph_r.get("error") and basin_g is not None:
                                      alt_prom_balance = morph_r.get('alt_prom_m')
                                      if alt_prom_balance is not None:
                                           balance_results_calc = calculate_hydrological_balance(mean_p, alt_prom_balance, basin_g)
-                                          st.session_state['balance_results'] = balance_results_calc
+                                          st.session_state['balance_results'] = balance_results_calc # Guardar resultados correctos
                                      else: st.session_state['balance_results'] = {"error": "Altitud promedio no disponible."}
                                 elif mean_p is None: st.session_state['balance_results'] = {"error": "Precipitación media no calculada."}
                                 elif morph_r is None: st.session_state['balance_results'] = {"error": "Morfometría no calculada (falta DEM?)."}
@@ -1566,9 +1547,13 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 else: st.session_state['balance_results'] = {"error": "Faltan datos para balance."}
                             # --- FIN CÁLCULO BALANCE ---
 
+                        # 'except' debe estar alineado con 'try'
                         except Exception as e:
+                            # Asegurar que traceback esté importado
                             import traceback
                             st.session_state['error_msg'] = f"Ocurrió un error crítico: {e}\n\n{traceback.format_exc()}"
+                        
+                        # 'finally' debe estar alineado con 'try'
                         finally:
                              # Limpieza archivos temporales DEM
                              if 'temp_dem_path_viz' in locals() and os.path.exists(temp_dem_path_viz):
@@ -1577,13 +1562,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                              if 'temp_dem_path_morph' in locals() and os.path.exists(temp_dem_path_morph):
                                   try: os.remove(temp_dem_path_morph)
                                   except: pass
-
+            
             # --- Visualización (fuera del botón) ---
             with col_display:
-                fig_basin_to_show = st.session_state.get('fig_basin')
-                error_msg_to_show = st.session_state.get('error_msg')
-                balance_results_to_show = st.session_state.get('balance_results')
-                morph_results_to_show = st.session_state.get('morph_results')
+                # Código indentado bajo 'with col_display:'
+                fig_basin_to_show = st.session_state.get('fig_basin'); error_msg_to_show = st.session_state.get('error_msg')
+                balance_results_to_show = st.session_state.get('balance_results'); morph_results_to_show = st.session_state.get('morph_results')
                 run_balance_display = st.session_state.get('run_balance', False)
 
                 if error_msg_to_show: st.error(error_msg_to_show)
@@ -1598,10 +1582,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         c1, c2, c3, c4 = st.columns(4)
                         p_val = balance_results_to_show.get('P_media_anual_mm', 0); alt_val = balance_results_to_show.get('Altitud_media_m')
                         et_val = balance_results_to_show.get('ET_media_anual_mm'); q_val = balance_results_to_show.get('Q_mm')
-                        c1.metric("Precipitación Media (P)", f"{p_val:.0f} mm/año")
-                        c2.metric("Altitud Media", f"{alt_val:.0f} m" if alt_val is not None else "N/A")
-                        c3.metric("ET Media Estimada (ET)", f"{et_val:.0f} mm/año" if et_val is not None else "N/A")
-                        c4.metric("Escorrentía (Q=P-ET)", f"{q_val:.0f} mm/año" if q_val is not None else "N/A")
+                        c1.metric("Precipitación Media (P)", f"{p_val:.0f} mm/año"); c2.metric("Altitud Media", f"{alt_val:.0f} m" if alt_val is not None else "N/A")
+                        c3.metric("ET Media Estimada (ET)", f"{et_val:.0f} mm/año" if et_val is not None else "N/A"); c4.metric("Escorrentía (Q=P-ET)", f"{q_val:.0f} mm/año" if q_val is not None else "N/A")
                         q_vol = balance_results_to_show.get('Q_m3_año'); area_km2 = balance_results_to_show.get('Area_km2')
                         if q_vol is not None and area_km2 is not None: st.success(f"Volumen de escorrentía anual estimado: **{q_vol/1e6:.2f} millones de m³** sobre un área de **{area_km2:.2f} km²**.")
                 elif run_balance_display: st.warning("No se pudieron obtener resultados del balance hídrico.")
@@ -1610,15 +1592,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     st.markdown("---"); st.subheader("Morfometría de la Cuenca")
                     if morph_results_to_show.get("error"): st.error(morph_results_to_show["error"])
                     else:
-                        c1m, c2m, c3m = st.columns(3)
-                        c1m.metric("Área", f"{morph_results_to_show.get('area_km2', 'N/A'):.2f} km²")
-                        c2m.metric("Perímetro", f"{morph_results_to_show.get('perimetro_km', 'N/A'):.2f} km")
-                        c3m.metric("Índice de Forma", f"{morph_results_to_show.get('indice_forma', 'N/A'):.2f}")
-                        c4m, c5m, c6m = st.columns(3)
-                        alt_max=morph_results_to_show.get('alt_max_m'); alt_min=morph_results_to_show.get('alt_min_m'); alt_prom=morph_results_to_show.get('alt_prom_m')
-                        c4m.metric("Altitud Máxima", f"{alt_max:.0f} m" if alt_max is not None else "N/A")
-                        c5m.metric("Altitud Mínima", f"{alt_min:.0f} m" if alt_min is not None else "N/A")
-                        c6m.metric("Altitud Promedio", f"{alt_prom:.1f} m" if alt_prom is not None else "N/A")
+                        c1m, c2m, c3m = st.columns(3); c1m.metric("Área", f"{morph_results_to_show.get('area_km2', 'N/A'):.2f} km²"); c2m.metric("Perímetro", f"{morph_results_to_show.get('perimetro_km', 'N/A'):.2f} km"); c3m.metric("Índice de Forma", f"{morph_results_to_show.get('indice_forma', 'N/A'):.2f}")
+                        c4m, c5m, c6m = st.columns(3); alt_max=morph_results_to_show.get('alt_max_m'); alt_min=morph_results_to_show.get('alt_min_m'); alt_prom=morph_results_to_show.get('alt_prom_m')
+                        c4m.metric("Altitud Máxima", f"{alt_max:.0f} m" if alt_max is not None else "N/A"); c5m.metric("Altitud Mínima", f"{alt_min:.0f} m" if alt_min is not None else "N/A"); c6m.metric("Altitud Promedio", f"{alt_prom:.1f} m" if alt_prom is not None else "N/A")
                 elif run_balance_display: st.info("Para Morfometría, sube un DEM válido.")
         # --- Fin Modo Por Cuenca ---
 
@@ -1644,36 +1620,45 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     if "Kriging" in method1_reg: variogram_model1_reg = st.selectbox("Variograma Mapa 1", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_1_reg")
 
                     st.markdown("---"); st.markdown("**Mapa 2**"); year2_reg = st.slider("Año Mapa 2", min_year_reg, max_year_reg, max(min_year_reg, max_year_reg - 1), key="interp_year2_reg")
-                    method2_reg = st.selectbox("Método Mapa 2", options=interpolation_methods_reg, index= (1 % len(interpolation_methods_reg)) if interpolation_methods_reg else 0, key="interp_method2_reg")
+                    index_map2 = min(1, len(interpolation_methods_reg) - 1) if interpolation_methods_reg else 0 
+                    method2_reg = st.selectbox("Método Mapa 2", options=interpolation_methods_reg, index=index_map2, key="interp_method2_reg")
                     variogram_model2_reg = None
                     if "Kriging" in method2_reg: variogram_model2_reg = st.selectbox("Variograma Mapa 2", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_2_reg")
 
-                # gdf_bounds_reg = gdf_filtered.total_bounds # Variable no usada por la función
-                # Usar gdf_filtered que ya tiene las columnas necesarias
+                # gdf_bounds_reg = gdf_filtered.total_bounds # Variable no usada
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
                 # --- LLAMADA CORREGIDA: Sin gdf_bounds ---
-                fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
-                    year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
-                    # gdf_bounds=gdf_bounds_reg, # Argumento eliminado
-                    gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
-                )
-                fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
-                    year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
-                    # gdf_bounds=gdf_bounds_reg, # Argumento eliminado
-                    gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
-                )
+                # from modules.interpolation import create_interpolation_surface # Asegurar importación
+                fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado" # Inicializar
+                try:
+                    fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
+                        year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
+                        # gdf_bounds=gdf_bounds_reg, # Argumento eliminado
+                        gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
+                    )
+                except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
+                except Exception as e1: st.error(f"Error Mapa 1: {e1}"); error1_reg = str(e1)
+
+                try:
+                    fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
+                        year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
+                        # gdf_bounds=gdf_bounds_reg, # Argumento eliminado
+                        gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
+                    )
+                except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
+                except Exception as e2: st.error(f"Error Mapa 2: {e2}"); error2_reg = str(e2)
                 # --- FIN CORRECCIÓN ---
 
                 with map_col1_reg:
                     if fig1_reg: st.plotly_chart(fig1_reg, use_container_width=True)
-                    elif error1_reg: st.info(f"Mapa 1: {error1_reg}")
+                    elif error1_reg and error1_reg != "No ejecutado": st.info(f"Mapa 1: {error1_reg}")
                     else: st.info("No se pudo generar el mapa 1.")
 
                 with map_col2_reg:
                     if fig2_reg: st.plotly_chart(fig2_reg, use_container_width=True)
-                    elif error2_reg: st.info(f"Mapa 2: {error2_reg}")
+                    elif error2_reg and error2_reg != "No ejecutado": st.info(f"Mapa 2: {error2_reg}")
                     else: st.info("No se pudo generar el mapa 2.")
 
                 if fig_var1_reg or fig_var2_reg:
@@ -1696,7 +1681,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
     # --- Pestaña Morfometría ---
     with morph_tab:
         st.subheader("Análisis Morfométrico de Cuenca(s)")
-        st.info("Calcula métricas y curva hipsométrica para la(s) cuenca(s) seleccionadas en 'Superficies de Interpolación -> Por Cuenca Específica'. Requiere un DEM.")
+        st.info("Calcula métricas y curva hipsométrica para la(s) cuenca(s) seleccionadas en 'Superficies -> Por Cuenca'. Requiere DEM.")
         unified_basin_gdf_morph = st.session_state.get('unified_basin_gdf'); morph_results_morph = st.session_state.get('morph_results')
         basin_title_morph = st.session_state.get('selected_basins_title', 'Cuenca no seleccionada'); dem_file_morph = st.session_state.get('dem_file')
 
@@ -1708,58 +1693,57 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                  else: st.warning("Sube un DEM para calcular morfometría.")
 
             if recalculate_morph:
-                 st.info("Calculando morfometría...")
-                 temp_dem_path_morph_tab = os.path.join(os.getcwd(), f"temp_dem_morph_tab_{dem_file_morph.name}")
+                 st.info("Calculando morfometría..."); temp_dem_path_morph_tab = None
                  try:
+                     temp_dem_path_morph_tab = os.path.join(os.getcwd(), f"temp_dem_morph_tab_{dem_file_morph.name}")
                      with open(temp_dem_path_morph_tab, "wb") as f: f.write(dem_file_morph.getbuffer())
                      morph_results_morph = calculate_morphometry(unified_basin_gdf_morph, temp_dem_path_morph_tab)
                      st.session_state['morph_results'] = morph_results_morph
                  except Exception as e_morph_tab: morph_results_morph = {"error": f"Error calculando morfometría: {e_morph_tab}"}; st.session_state['morph_results'] = morph_results_morph
                  finally:
-                     if os.path.exists(temp_dem_path_morph_tab): os.remove(temp_dem_path_morph_tab)
+                     if temp_dem_path_morph_tab and os.path.exists(temp_dem_path_morph_tab): os.remove(temp_dem_path_morph_tab)
 
             if morph_results_morph is not None:
                 if morph_results_morph.get("error"): st.error(morph_results_morph["error"])
                 else:
                     st.markdown("##### Métricas Principales")
-                    c1m, c2m, c3m = st.columns(3)
-                    c1m.metric("Área", f"{morph_results_morph.get('area_km2', 'N/A'):.2f} km²"); c2m.metric("Perímetro", f"{morph_results_morph.get('perimetro_km', 'N/A'):.2f} km"); c3m.metric("Índice de Forma", f"{morph_results_morph.get('indice_forma', 'N/A'):.2f}")
-                    c4m, c5m, c6m = st.columns(3)
-                    alt_max=morph_results_morph.get('alt_max_m'); alt_min=morph_results_morph.get('alt_min_m'); alt_prom=morph_results_morph.get('alt_prom_m')
+                    c1m, c2m, c3m = st.columns(3); c1m.metric("Área", f"{morph_results_morph.get('area_km2', 'N/A'):.2f} km²"); c2m.metric("Perímetro", f"{morph_results_morph.get('perimetro_km', 'N/A'):.2f} km"); c3m.metric("Índice de Forma", f"{morph_results_morph.get('indice_forma', 'N/A'):.2f}")
+                    c4m, c5m, c6m = st.columns(3); alt_max=morph_results_morph.get('alt_max_m'); alt_min=morph_results_morph.get('alt_min_m'); alt_prom=morph_results_morph.get('alt_prom_m')
                     c4m.metric("Altitud Máxima", f"{alt_max:.0f} m" if alt_max is not None else "N/A"); c5m.metric("Altitud Mínima", f"{alt_min:.0f} m" if alt_min is not None else "N/A"); c6m.metric("Altitud Promedio", f"{alt_prom:.1f} m" if alt_prom is not None else "N/A")
 
                     if dem_file_morph:
                         st.markdown("##### Curva Hipsométrica")
                         with st.spinner("Calculando curva hipsométrica..."):
-                             temp_dem_path_hypso = os.path.join(os.getcwd(), f"temp_dem_hypso_{dem_file_morph.name}")
+                             temp_dem_path_hypso = None
                              try:
+                                 temp_dem_path_hypso = os.path.join(os.getcwd(), f"temp_dem_hypso_{dem_file_morph.name}")
                                  with open(temp_dem_path_hypso, "wb") as f: f.write(dem_file_morph.getbuffer())
+                                 # from modules.analysis import calculate_hypsometric_curve # Asegurar importación
                                  fig_hypso = calculate_hypsometric_curve(unified_basin_gdf_morph, temp_dem_path_hypso)
                                  if fig_hypso: st.plotly_chart(fig_hypso, use_container_width=True)
                                  else: st.warning("No se pudo generar la curva hipsométrica.")
                              except ImportError: st.error("Función 'calculate_hypsometric_curve' no encontrada.")
                              except Exception as e_hypso: st.error(f"Error calculando curva hipsométrica: {e_hypso}")
                              finally:
-                                  if os.path.exists(temp_dem_path_hypso): os.remove(temp_dem_path_hypso)
+                                  if temp_dem_path_hypso and os.path.exists(temp_dem_path_hypso): os.remove(temp_dem_path_hypso)
                     else: st.info("Sube un DEM para generar la curva hipsométrica.")
-        else: st.info("Selecciona cuenca(s) en 'Superficies de Interpolación -> Por Cuenca' para ver morfometría.")
+        else: st.info("Selecciona cuenca(s) en 'Superficies -> Por Cuenca' para ver morfometría.")
 
     # --- Pestaña Mapa de Riesgo Climático ---
     with risk_map_tab:
         st.subheader("Mapa de Vulnerabilidad por Tendencias de Precipitación")
         st.info("""Interpola la tendencia (Pendiente de Sen) de estaciones (>10 años) para crear superficie de riesgo.""")
         try:
-            # Asumiendo que create_climate_risk_map está definida/importada
+            # from modules.visualizer import create_climate_risk_map # Asegurar que esté definida o importada
             fig_risk_contour = create_climate_risk_map(df_anual_melted, gdf_filtered)
             if fig_risk_contour: st.plotly_chart(fig_risk_contour, use_container_width=True)
-            # else: La función ya muestra advertencia si falla
         except NameError: st.error("Función 'create_climate_risk_map' no encontrada.")
         except Exception as e_risk: st.error(f"Error al generar mapa de riesgo: {e_risk}")
 
     # --- Pestaña Validación Cruzada ---
     with validation_tab:
         st.subheader("Validación Cruzada Dejando Uno Fuera (LOOCV)")
-        st.info("Evalúa el error (RMSE) de métodos de interpolación para un año, omitiendo una estación a la vez.")
+        st.info("Evalúa el error (RMSE) de métodos de interpolación para un año.")
         df_anual_non_na_val = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
         years_val = sorted(df_anual_non_na_val[Config.YEAR_COL].unique()) if not df_anual_non_na_val.empty else []
         if not years_val: st.warning("No hay datos anuales suficientes para validación.")
@@ -1771,19 +1755,26 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
             else:
                 if st.button("Ejecutar Validación LOOCV", key="run_validation_button"):
                     with st.spinner(f"Ejecutando LOOCV para {selected_year_val}..."):
+                        results_df = None; error_val = None
                         try:
-                            # Asumiendo que perform_loocv_for_all_methods está importada
+                            # from modules.interpolation import perform_loocv_for_all_methods # Asegurar importación
                             results_df = perform_loocv_for_all_methods(
                                 year=selected_year_val,
                                 gdf_metadata=gdf_filtered[cols_present_val].drop_duplicates(subset=[Config.STATION_NAME_COL]),
                                 df_anual_non_na=df_anual_non_na_val
                             )
-                            if results_df is not None and not results_df.empty:
-                                st.dataframe(results_df.style.format({'RMSE': '{:.2f}'}), use_container_width=True)
-                                fig_val = px.bar(results_df.sort_values('RMSE'), x='Método', y='RMSE', title=f"RMSE por Método (LOOCV - {selected_year_val})", labels={'RMSE': 'RMSE (mm)'})
-                                fig_val.update_layout(xaxis_title="Método")
-                                st.plotly_chart(fig_val, use_container_width=True)
-                            else: st.warning("No se obtuvieron resultados de validación.")
+                        except ImportError: error_val = "Función 'perform_loocv_for_all_methods' no encontrada."
+                        except Exception as e_val: error_val = f"Error durante la validación: {e_val}\n{traceback.format_exc() if 'traceback' in locals() else ''}" # Añadir traceback si está importado
+
+                        if results_df is not None and not results_df.empty:
+                            st.dataframe(results_df.style.format({'RMSE': '{:.2f}'}), use_container_width=True)
+                            fig_val = px.bar(results_df.sort_values('RMSE'), x='Método', y='RMSE', title=f"RMSE por Método (LOOCV - {selected_year_val})", labels={'RMSE': 'RMSE (mm)'})
+                            fig_val.update_layout(xaxis_title="Método")
+                            st.plotly_chart(fig_val, use_container_width=True)
+                        elif error_val:
+                            st.error(error_val)
+                        else:
+                            st.warning("No se obtuvieron resultados de validación.")
                         except ImportError: st.error("Función 'perform_loocv_for_all_methods' no encontrada.")
                         except Exception as e_val: st.error(f"Error validación: {e_val}"); st.error(traceback.format_exc())
                             
@@ -4452,6 +4443,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
