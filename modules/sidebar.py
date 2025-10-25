@@ -4,15 +4,15 @@ import streamlit as st
 from modules.config import Config
 import pandas as pd
 import os
-import rasterio # Necesario para la verificación de CRS del DEM base
+import rasterio # Importación necesaria
 
 # --- Ruta al DEM base ---
-# (Asegúrate que 'DemAntioquiaWgs84.tif' esté en 'modules/data/')
 _THIS_FILE_DIR_SB = os.path.dirname(__file__)
 BASE_DEM_FILENAME = "DemAntioquiaWgs84.tif"
 BASE_DEM_PATH = os.path.abspath(os.path.join(_THIS_FILE_DIR_SB, '..', 'data', BASE_DEM_FILENAME))
 
 # Guardar la ruta y estado del CRS del DEM base en la sesión
+# Esto se ejecuta una vez al inicio o cuando el script cambia
 if 'dem_file_path' not in st.session_state:
     st.session_state['dem_file_path'] = None
     st.session_state['dem_crs_is_geographic'] = True # Asumir geográfico (peor caso)
@@ -21,13 +21,17 @@ if os.path.exists(BASE_DEM_PATH):
     st.session_state['dem_file_path'] = BASE_DEM_PATH
     try:
         with rasterio.open(BASE_DEM_PATH) as src:
-            st.session_state['dem_crs_is_geographic'] = src.crs.is_geographic
+            # Verificar si el CRS es geográfico
+            if src.crs:
+                st.session_state['dem_crs_is_geographic'] = src.crs.is_geographic
+            else:
+                st.session_state['dem_crs_is_geographic'] = True # Asumir geográfico si no hay CRS
+                print("Advertencia (sidebar): DEM base no tiene CRS definido.")
     except Exception as e_base_crs:
-        st.session_state['dem_crs_is_geographic'] = True # Asumir geográfico si falla
+        st.session_state['dem_crs_is_geographic'] = True
         print(f"Advertencia (sidebar): No se pudo leer CRS del DEM base: {e_base_crs}")
 else:
     st.session_state['dem_file_path'] = None # No encontrado
-
 # --- FIN Ruta DEM base ---
 
 
@@ -146,7 +150,7 @@ def create_sidebar(gdf_stations, df_long):
         meses_numeros = [meses_dict[m] for m in meses_nombres]
         st.session_state['meses_numeros'] = meses_numeros
 
-    # --- Expander 3: Preprocesamiento y DEM ---
+    # --- Expander 3: Preprocesamiento y DEM (SIMPLIFICADO) ---
     with st.sidebar.expander("3. Opciones de Preprocesamiento y DEM"):
         analysis_mode = st.radio("Modo de análisis", ("Usar datos originales", "Completar series (interpolación)"), key="analysis_mode")
         exclude_na = st.checkbox("Excluir datos nulos (NaN)", key='exclude_na')
@@ -154,16 +158,14 @@ def create_sidebar(gdf_stations, df_long):
         st.markdown("---")
         st.markdown("##### Modelo de Elevación Digital (DEM)")
 
-        # --- Lógica DEM SIMPLIFICADA (Solo Base) ---
+        # Lógica SIMPLIFICADA: Solo informa sobre el DEM base
         if st.session_state.get('dem_file_path') and os.path.exists(st.session_state['dem_file_path']):
             st.info(f"Usando DEM base: {BASE_DEM_FILENAME}")
             if st.session_state.get('dem_crs_is_geographic', False):
                  st.warning("El DEM base está en grados geográficos. El cálculo de áreas (ej. Zonas de Vida) será impreciso.")
         else:
-            st.warning(f"DEM base no encontrado en {BASE_DEM_PATH}. Funciones DEM (Morfometría, Zonas de Vida) no calcularán áreas.")
-            # Asegurar que los paths/objetos estén limpios si no se encuentra el DEM
-            st.session_state['dem_file_path'] = None
-            st.session_state['dem_file_obj'] = None
+            st.error(f"DEM base no encontrado en {BASE_DEM_PATH}. Funciones DEM no calcularán áreas.")
+            st.session_state['dem_file_path'] = None # Asegurar que esté None si no se encuentra
         # --- Fin Lógica DEM ---
 
     # Retornar los valores FINALES
