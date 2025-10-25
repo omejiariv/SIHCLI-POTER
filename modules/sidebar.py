@@ -140,24 +140,92 @@ def create_sidebar(gdf_stations, df_long):
         meses_numeros = [meses_dict[m] for m in meses_nombres]
         st.session_state['meses_numeros'] = meses_numeros # Seguro (clave diferente)
 
-    # --- Expander 3: Preprocesamiento y DEM ---
+# --- Expander 3: Preprocesamiento y DEM ---
     with st.sidebar.expander("3. Opciones de Preprocesamiento y DEM"):
-        analysis_mode = st.radio("Modo de análisis", ("Usar datos originales", "Completar series (interpolación)"), key="analysis_mode")
+        analysis_mode = st.radio(
+            "Modo de análisis", 
+            ("Usar datos originales", "Completar series (interpolación)"), 
+            key="analysis_mode"
+        )
         exclude_na = st.checkbox("Excluir datos nulos (NaN)", key='exclude_na')
         exclude_zeros = st.checkbox("Excluir valores cero (0)", key='exclude_zeros')
         st.markdown("---")
-        st.markdown("##### Modelo de Elevación (Opcional)")
-        dem_file = st.file_uploader("Sube tu archivo DEM (.tif)...", type=["tif", "tiff"], key="dem_uploader_sidebar")
+        st.markdown("##### Modelo de Elevación Digital (DEM)")
+
+        # --- Lógica DEM Base/Cargado ---
+        dem_file_uploaded = st.file_uploader(
+            "Sube un DEM métrico (.tif) para anular el base", 
+            type=["tif", "tiff"], 
+            key="dem_uploader_sidebar"
+        )
         
-        if dem_file:
-            st.session_state['dem_file'] = dem_file
-            st.success(f"Archivo DEM '{dem_file.name}' cargado.")
-        elif 'dem_file' in st.session_state and st.session_state['dem_file'] is not None:
-             st.info(f"Usando DEM cargado: {st.session_state['dem_file'].name}")
+        effective_dem_path = None # Ruta que se usará finalmente
+        effective_dem_display_name = "Ninguno"
+        dem_crs_is_geographic = False # Flag para advertencia de área
+
+        if dem_file_uploaded:
+            # Usar el archivo cargado
+            # Guardar temporalmente para obtener CRS (y usarlo después)
+            temp_path_check = os.path.join(os.getcwd(), f"temp_check_{dem_file_uploaded.name}")
+            try:
+                with open(temp_path_check, "wb") as f: 
+                    f.write(dem_file_uploaded.getbuffer())
+                with rasterio.open(temp_path_check) as src:
+                     # Intentar obtener CRS y verificar si es geográfico
+                     try:
+                         dem_crs_is_geographic = src.crs.is_geographic
+                     except AttributeError: # Si src.crs es None
+                         dem_crs_is_geographic = True # Asumir geográfico si no tiene CRS
+                         st.warning("DEM cargado no tiene CRS definido. Asumiendo geográfico (WGS84).")
+                # Guardar el OBJETO UploadedFile en session_state para que otras funciones lo escriban/lean
+                st.session_state['dem_file_obj'] = dem_file_uploaded 
+                st.session_state['dem_file_path'] = None # Indicar que no es una ruta fija
+                st.session_state['dem_crs_is_geographic'] = dem_crs_is_geographic
+                effective_dem_display_name = f"Cargado: {dem_file_uploaded.name}"
+                st.success(f"Usando DEM cargado: '{dem_file_uploaded.name}'.")
+                if dem_crs_is_geographic:
+                     st.warning("El DEM cargado parece estar en grados geográficos. El cálculo de áreas será impreciso.")
+            except Exception as e_check:
+                 st.error(f"Error al verificar DEM cargado: {e_check}")
+                 st.session_state['dem_file_obj'] = None
+            finally:
+                 if os.path.exists(temp_path_check): 
+                     os.remove(temp_path_check)
+
+        elif os.path.exists(BASE_DEM_PATH):
+            # Usar el archivo base si existe
+            try:
+                with rasterio.open(BASE_DEM_PATH) as src:
+                     try:
+                         dem_crs_is_geographic = src.crs.is_geographic
+                     except AttributeError: # Si src.crs es None
+                         dem_crs_is_geographic = True # Asumir geográfico si no tiene CRS
+                         st.warning("DEM base no tiene CRS definido. Asumiendo geográfico (WGS84).")
+                # Guardar la RUTA al base DEM en session_state
+                st.session_state['dem_file_obj'] = None 
+                st.session_state['dem_file_path'] = BASE_DEM_PATH # Guardar ruta fija
+                st.session_state['dem_crs_is_geographic'] = dem_crs_is_geographic
+                effective_dem_display_name = f"Base: {BASE_DEM_FILENAME}"
+                st.info(f"Usando DEM base: '{BASE_DEM_FILENAME}'.")
+                if dem_crs_is_geographic:
+                     st.warning("El DEM base ('DemAntioquiaWgs84.tif') está en grados geográficos. El cálculo de áreas será impreciso. Sube un DEM métrico para áreas correctas.")
+            except Exception as e_base:
+                 st.error(f"Error al leer DEM base: {e_base}")
+                 st.session_state['dem_file_path'] = None
+                 st.session_state['dem_file_obj'] = None
+        else:
+            # Ni cargado ni base encontrado
+            st.warning(f"DEM base no encontrado en {BASE_DEM_PATH}. Sube un DEM para análisis morfométrico y Zonas de Vida.")
+            st.session_state['dem_file_path'] = None
+            st.session_state['dem_file_obj'] = None
+        # --- Fin Lógica DEM ---
 
     # Retornar los valores FINALES
+    # 'gdf_filtered_geo_data' contiene todas las estaciones que cumplen filtros geo/data
+    # 'selected_stations_final' contiene las estaciones seleccionadas por el usuario DENTRO de ese grupo
+    # Filtramos gdf_filtered_geo_data una vez más para obtener el GDF final a retornar
     final_gdf_to_return = gdf_filtered_geo_data[gdf_filtered_geo_data[Config.STATION_NAME_COL].isin(selected_stations_final)]
-    
+
     return {
         "gdf_filtered": final_gdf_to_return,
         "selected_stations": selected_stations_final,
@@ -171,3 +239,5 @@ def create_sidebar(gdf_stations, df_long):
         "selected_altitudes": selected_altitudes
     }
 
+# (La función apply_filters_to_stations debe estar definida ANTES de create_sidebar)
+# def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celdas): ...
