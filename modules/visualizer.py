@@ -4337,29 +4337,33 @@ def display_life_zones_tab(**kwargs):
                     can_calculate_area = False # Flag para saber si podemos calcular
 
                     # 1. Obtener CRS y Transform del raster reescalado
-                    raster_crs = output_profile.get('crs') # Obtener objeto CRS
-                    raster_transform = output_profile.get('transform')
+                    # 'crs_profile' and 'transform' should have been defined earlier when getting profile info
+                    # Ensure crs_profile = output_profile.get('crs') is retrieved before this block
+                    raster_crs = output_profile.get('crs') # Get CRS object
+                    raster_transform = output_profile.get('transform') # Get Affine object
                     nodata_val = output_profile.get('nodata', 0)
-                    crs_str = str(raster_crs) if raster_crs else "Desconocido" # Para mensajes
+                    crs_str = str(raster_crs) if raster_crs else "Desconocido" # For messages
 
                     # 2. Verificar que el CRS tenga unidades métricas (CORREGIDO)
                     if raster_crs and raster_transform:
                         try:
-                            # Verificar si es proyectado y obtener unidades
+                            # Primero verificar si es proyectado
                             if raster_crs.is_projected:
+                                # Si es proyectado, intentar obtener unidades lineales
                                 crs_units = raster_crs.linear_units.lower() # Convertir a minúsculas
                                 # Verificar si las unidades son metros
                                 if 'metre' in crs_units or 'meter' in crs_units:
                                     can_calculate_area = True
                                 else:
                                     st.warning(f"ADVERTENCIA: Las unidades del CRS proyectado ({crs_units}) no son metros. No se puede calcular el área con precisión.")
+                            # Si no es proyectado, es geográfico
                             elif raster_crs.is_geographic:
                                  st.warning("ADVERTENCIA: El CRS del DEM está en grados geográficos (ej. WGS84). No se puede calcular el área. Use un DEM en CRS proyectado (métrico).")
                             else:
                                  st.warning(f"Tipo de CRS ({crs_str}) no reconocido para cálculo de área.")
 
                         except AttributeError:
-                             # Fallback si falta linear_units o is_projected (poco probable con rasterio CRS)
+                             # Fallback si falta linear_units o is_projected (poco probable)
                              st.warning(f"No se pudieron determinar las unidades del CRS ({crs_str}) para calcular el área.")
                         except Exception as e_crs_check:
                              st.warning(f"Error al verificar unidades del CRS: {e_crs_check}")
@@ -4424,6 +4428,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
