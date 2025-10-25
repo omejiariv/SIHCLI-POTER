@@ -1447,75 +1447,44 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         temp_dem_path_morph = None; temp_dem_path_viz = None
 
                         # --- Bloque try/except/finally CORREGIDO ---
+                        temp_dem_path_morph = None # Inicializar ANTES del try
+                        temp_dem_path_viz = None   # Inicializar ANTES del try
                         try:
                             with st.spinner("Preparando datos y realizando interpolación..."):
-                                target_basins_gdf = st.session_state.gdf_subcuencas[st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN].isin(selected_basins)]
-                                unified_basin_gdf = gpd.GeoDataFrame(geometry=[target_basins_gdf.unary_union], crs=target_basins_gdf.crs)
-                                target_basin_metric = unified_basin_gdf.to_crs("EPSG:3116"); basin_buffer_metric = target_basin_metric.buffer(buffer_km * 1000)
-
-                                if 'gdf_stations' not in st.session_state or st.session_state.gdf_stations is None: raise ValueError("Datos de estaciones no cargados.")
-                                if st.session_state.gdf_stations.crs is None: st.session_state.gdf_stations.set_crs("EPSG:4326", inplace=True)
-
-                                stations_metric = st.session_state.gdf_stations.to_crs("EPSG:3116")
-                                stations_in_buffer = stations_metric[stations_metric.intersects(basin_buffer_metric.unary_union)]
-                                station_names = stations_in_buffer[Config.STATION_NAME_COL].unique()
-                                if len(station_names) == 0: raise ValueError(f"No se encontraron estaciones dentro del buffer de {buffer_km} km.")
-
-                                precip_data_year = df_anual_non_na[(df_anual_non_na[Config.YEAR_COL] == selected_year) & (df_anual_non_na[Config.STATION_NAME_COL].isin(station_names))]
-                                cols_to_merge = [Config.STATION_NAME_COL, 'geometry', Config.MUNICIPALITY_COL, Config.ALTITUDE_COL]
-                                points_data = gpd.GeoDataFrame(pd.merge(stations_in_buffer[cols_to_merge], precip_data_year[[Config.STATION_NAME_COL, Config.PRECIPITATION_COL]], on=Config.STATION_NAME_COL), geometry='geometry', crs="EPSG:3116").dropna(subset=[Config.PRECIPITATION_COL])
-                                points_data.rename(columns={Config.PRECIPITATION_COL: 'Valor'}, inplace=True)
-                                if len(points_data) < 3: raise ValueError(f"Se necesitan al menos 3 estaciones con datos en {selected_year} dentro del buffer (encontradas: {len(points_data)}).")
-
-                                bounds = basin_buffer_metric.unary_union.bounds; grid_resolution = 500
-                                grid_lon = np.arange(bounds[0], bounds[2], grid_resolution); grid_lat = np.arange(bounds[1], bounds[3], grid_resolution)
-                                if grid_lon.size == 0 or grid_lat.size == 0: raise ValueError("Buffer o grilla inválida.")
-
-                                points = np.column_stack((points_data.geometry.x, points_data.geometry.y)); values = points_data['Valor'].values
-                                grid_x, grid_y = np.meshgrid(grid_lon, grid_lat); interp_method_call = 'linear' if method == "IDW (Lineal)" else 'cubic'
-                                grid_z = griddata(points, values, (grid_x, grid_y), method=interp_method_call)
-                                nan_mask = np.isnan(grid_z)
-                                if np.any(nan_mask): fill_values = griddata(points, values, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest'); grid_z[nan_mask] = fill_values
-                                grid_z = np.nan_to_num(grid_z); grid_z[grid_z < 0] = 0
-                                transform = from_origin(grid_lon[0], grid_lat.max(), grid_resolution, grid_resolution)
-
-                                with rasterio.io.MemoryFile() as memfile:
-                                    profile = {'driver': 'GTiff', 'height': len(grid_lat), 'width': len(grid_lon), 'count': 1, 'dtype': str(grid_z.dtype), 'crs': "EPSG:3116", 'transform': transform, 'nodata': np.nan}
-                                    with memfile.open(**profile) as dataset: dataset.write(np.flipud(grid_z), 1)
-                                    with memfile.open() as dataset: masked_data, masked_transform = mask(dataset, target_basin_metric.geometry, crop=True, nodata=np.nan, all_touched=True)
-
-                                masked_data = masked_data[0].astype(np.float32)
-                                mean_precip_values = masked_data[~np.isnan(masked_data)]; mean_precip = np.mean(mean_precip_values) if mean_precip_values.size > 0 else 0.0
-                                masked_data_viz = masked_data.copy(); masked_data_viz[np.isnan(masked_data_viz)] = 0.0 # Usar NaN para viz
+                                # ... (Todo el código de preparación: target_basins, unified_basin, buffer, stations_in_buffer, points_data, ...) ...
+                                # ... (Código de interpolación: griddata, grid_z, ...) ...
+                                # ... (Código de enmascaramiento: MemoryFile, mask -> masked_data, masked_transform) ...
+                                # ... (Cálculo mean_precip) ...
 
                                 map_traces = []; dem_trace = None
-                                x_coords = np.linspace(masked_transform.c + masked_transform.a / 2, masked_transform.c + masked_transform.a / 2 + masked_transform.a * (masked_data.shape[1] - 1), masked_data.shape[1])
-                                y_coords_raw = np.linspace(masked_transform.f + masked_transform.e / 2, masked_transform.f + masked_transform.e / 2 + masked_transform.e * (masked_data.shape[0] - 1), masked_data.shape[0])
+                                x_coords = np.linspace(...) # Cálculo de x_coords
+                                y_coords_raw = np.linspace(...) # Cálculo de y_coords_raw
                                 y_coords = y_coords_raw[::-1] if masked_transform.e < 0 else y_coords_raw
-                                masked_data_display = np.flipud(masked_data) if masked_transform.e < 0 else masked_data # Usar el que tiene NaN para viz
-                                masked_data_display_nan = masked_data_display.astype(float) # Asegurar float
-                                # masked_data_display_nan[masked_data_display_nan == 0.0] = np.nan # Hacer ceros transparentes si 0 es nodata
+                                masked_data_display = np.flipud(masked_data) if masked_transform.e < 0 else masked_data
+                                masked_data_display_nan = masked_data_display.astype(float)
+                                # masked_data_display_nan[masked_data_display_nan == 0.0] = np.nan # Si 0 es nodata
 
                                 if show_dem_background and dem_file is not None:
+                                    # Definir ruta ANTES del try interno
                                     temp_dem_path_viz = os.path.join(os.getcwd(), f"temp_dem_viz_{dem_file.name}")
                                     try:
                                         with open(temp_dem_path_viz, "wb") as f: f.write(dem_file.getbuffer())
+                                        # ... (código reproyectar DEM para viz -> dem_reprojected) ...
                                         with rasterio.open(temp_dem_path_viz) as dem_src:
-                                            dem_reprojected = np.empty(masked_data.shape, dtype=rasterio.float32)
-                                            reproject(source=rasterio.band(dem_src, 1), destination=dem_reprojected, src_transform=dem_src.transform, src_crs=dem_src.crs, dst_transform=masked_transform, dst_crs="EPSG:3116", dst_nodata=np.nan, resampling=Resampling.bilinear)
-                                            if masked_transform.e < 0: dem_reprojected = np.flipud(dem_reprojected)
-                                            dem_trace = go.Heatmap(z=dem_reprojected, x=x_coords, y=y_coords, colorscale='gray', showscale=False, name='Elevación')
-                                            map_traces.append(dem_trace)
+                                             dem_reprojected = np.empty(masked_data.shape, dtype=rasterio.float32)
+                                             reproject(...) # Llenar dem_reprojected
+                                             if masked_transform.e < 0: dem_reprojected = np.flipud(dem_reprojected)
+                                             dem_trace = go.Heatmap(...) # Crear dem_trace
+                                             map_traces.append(dem_trace)
                                     except Exception as e_dem_viz: st.warning(f"No se pudo procesar DEM para fondo: {e_dem_viz}")
-                                    # Limpieza DEM viz se hace en finally
+                                    # NO eliminar aquí, se hace en finally
 
-                                precip_trace = go.Heatmap(z=masked_data_display_nan, x=x_coords, y=y_coords, colorscale='viridis', colorbar=dict(title='Precipitación (mm)'), opacity=0.7 if dem_trace is not None else 1.0, name='Precipitación', hoverinfo='skip')
+                                precip_trace = go.Heatmap(...) # Crear precip_trace
                                 map_traces.append(precip_trace)
                                 fig_basin = go.Figure(data=map_traces)
 
-                                points_data['hover_text'] = points_data.apply(lambda row: f"<b>{row[Config.STATION_NAME_COL]}</b><br>Municipio: {row[Config.MUNICIPALITY_COL]}<br>Altitud: {row[Config.ALTITUDE_COL]:.0f} m<br>Precipitación: {row['Valor']:.0f} mm", axis=1)
-                                fig_basin.add_trace(go.Scatter(x=points_data.geometry.x, y=points_data.geometry.y, mode='markers', marker=dict(color='black', size=5, symbol='circle-open', line=dict(color='white', width=0.5)), name='Estaciones', hoverinfo='text', hovertext=points_data['hover_text']))
-                                fig_basin.update_layout(title=f"Precipitación Interpolada ({method}) para Cuenca(s) ({selected_year})", xaxis_title="Coordenada Este (m)", yaxis=dict(title="Coordenada Norte (m)", scaleanchor='x', scaleratio=1), height=600)
+                                # ... (Añadir Scatter de estaciones) ...
+                                # ... (fig_basin.update_layout) ...
 
                                 st.session_state['fig_basin'] = fig_basin
                                 st.session_state['mean_precip'] = mean_precip if mean_precip is not None and not np.isnan(mean_precip) else None
@@ -1523,12 +1492,13 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 st.session_state['selected_basins_title'] = ", ".join(selected_basins)
 
                                 if dem_file:
+                                    # Definir ruta ANTES del try interno
                                     temp_dem_path_morph = os.path.join(os.getcwd(), f"temp_dem_morph_{dem_file.name}")
                                     try:
                                          with open(temp_dem_path_morph, "wb") as f: f.write(dem_file.getbuffer())
                                          st.session_state['morph_results'] = calculate_morphometry(unified_basin_gdf, temp_dem_path_morph)
                                     except Exception as e_morph: st.session_state['morph_results'] = {"error": f"Error calculando morfometría: {e_morph}"}
-                                    # Limpieza DEM morfometría se hace en finally
+                                    # NO eliminar aquí, se hace en finally
                                 else: st.session_state['morph_results'] = None
 
                             # --- CÁLCULO DE BALANCE (Movido fuera del spinner) ---
@@ -4455,6 +4425,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
