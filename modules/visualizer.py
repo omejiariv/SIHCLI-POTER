@@ -4238,7 +4238,7 @@ def display_life_zones_tab(**kwargs):
         classified_raster, output_profile, name_map = generate_life_zone_map(
             effective_dem_path_for_function, # Pasar la ruta efectiva
             precip_raster_path,
-            mask_geometry=mask_arg, # Pasar geometría o None (SIN guion bajo)
+            maskgeometry=mask_arg, # <-- CORREGIDO: Se quitó el guion bajo
             downscale_factor=downscale_factor
         )
 
@@ -4449,6 +4449,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
