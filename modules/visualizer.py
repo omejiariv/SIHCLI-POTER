@@ -4306,96 +4306,51 @@ def display_life_zones_tab(**kwargs):
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # --- AÑADIR LEYENDA DETALLADA (CORRECT INDENTATION) ---
-                    # This block must align with st.plotly_chart above
-                    st.markdown("---")
-                    st.subheader("Leyenda y Área por Zona de Vida Presente")
+# --- LEYENDA DETALLADA ID -> Nombre + Hectáreas (CORREGIDO check CRS) ---
+                st.markdown("---"); st.subheader("Leyenda y Área por Zona de Vida Presente")
+                area_hectares = []; pixel_counts = []; total_area_ha_calc = 0.0
+                can_calculate_area = False
 
-                    # --- Calcular Área en Hectáreas desde el Raster ---
-                    area_hectares = []
-                    pixel_counts = []
-                    total_area_ha_calc = 0.0
-                    can_calculate_area = False # Flag para saber si podemos calcular
+                # Verificar si CRS es métrico usando unidades (Error 2)
+                if crs_profile and raster_transform:
+                    try:
+                        if crs_profile.is_projected:
+                            crs_units = crs_profile.linear_units.lower()
+                            if 'metre' in crs_units or 'meter' in crs_units:
+                                can_calculate_area = True
+                            else: st.warning(f"ADVERTENCIA: Unidades CRS ({crs_units}) no son metros. Cálculo de área impreciso.")
+                        elif crs_profile.is_geographic:
+                             st.warning("ADVERTENCIA: El CRS del DEM está en grados geográficos. No se puede calcular el área. Use un DEM métrico.")
+                        else: st.warning(f"Tipo de CRS ({crs_str}) no reconocido.")
+                    except AttributeError: st.warning(f"No se pudieron determinar las unidades del CRS ({crs_str}).")
+                    except Exception as e_crs_check: st.warning(f"Error al verificar unidades del CRS: {e_crs_check}")
 
-                    # 1. Obtener CRS y Transform del raster reescalado
-                    # 'crs_profile' and 'transform' should have been defined earlier when getting profile info
-                    # Ensure crs_profile = output_profile.get('crs') is retrieved before this block
-                    raster_crs = output_profile.get('crs') # Get CRS object
-                    raster_transform = output_profile.get('transform') # Get Affine object
-                    nodata_val = output_profile.get('nodata', 0)
-                    crs_str = str(raster_crs) if raster_crs else "Desconocido" # For messages
-
-                    # 2. Verificar que el CRS tenga unidades métricas (CORREGIDO)
-                    if raster_crs and raster_transform:
-                        try:
-                            # Primero verificar si es proyectado
-                            if raster_crs.is_projected:
-                                # Si es proyectado, intentar obtener unidades lineales
-                                crs_units = raster_crs.linear_units.lower() # Convertir a minúsculas
-                                # Verificar si las unidades son metros
-                                if 'metre' in crs_units or 'meter' in crs_units:
-                                    can_calculate_area = True
-                                else:
-                                    st.warning(f"ADVERTENCIA: Las unidades del CRS proyectado ({crs_units}) no son metros. No se puede calcular el área con precisión.")
-                            # Si no es proyectado, es geográfico
-                            elif raster_crs.is_geographic:
-                                 st.warning("ADVERTENCIA: El CRS del DEM está en grados geográficos (ej. WGS84). No se puede calcular el área. Use un DEM en CRS proyectado (métrico).")
-                            else:
-                                 st.warning(f"Tipo de CRS ({crs_str}) no reconocido para cálculo de área.")
-
-                        except AttributeError:
-                             # Fallback si falta linear_units o is_projected (poco probable)
-                             st.warning(f"No se pudieron determinar las unidades del CRS ({crs_str}) para calcular el área.")
-                        except Exception as e_crs_check:
-                             st.warning(f"Error al verificar unidades del CRS: {e_crs_check}")
-
-                    # 3. Calcular áreas SOLO si podemos
-                    if can_calculate_area:
-                        pixel_size_x = abs(raster_transform.a)
-                        pixel_size_y = abs(raster_transform.e)
-                        pixel_area_m2 = pixel_size_x * pixel_size_y
-                        pixel_area_ha = pixel_area_m2 / 10000.0
-
-                        for zone_id in present_zone_ids: # Assumes present_zone_ids exists
-                            count = np.count_nonzero(classified_raster == zone_id)
-                            pixel_counts.append(count)
-                            area_ha = count * pixel_area_ha
-                            area_hectares.append(area_ha)
-                            total_area_ha_calc += area_ha
-
-                        # Crear DataFrame CON área
-                        legend_data = {
-                            "ID": present_zone_ids,
-                            "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids],
-                            "Área (ha)": area_hectares
-                        }
-                        legend_df = pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False)
-
-                        # Mostrar tabla CON área
-                        st.dataframe(
-                            legend_df.set_index('ID').style.format({'Área (ha)': '{:,.1f}'}),
-                            use_container_width=True
-                        )
-                        st.caption(f"Área total clasificada (visible en mapa): {total_area_ha_calc:,.1f} ha")
-
-                    else:
-                        # Si no se pudo calcular el área, mostrar leyenda SIN área
-                        st.info("El área no se puede calcular porque el CRS del DEM no está en metros.") # Mensaje más claro
-                        legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
-                        if present_zone_ids: # Check if list is not empty
-                             legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
-                             st.dataframe(legend_df.set_index('ID'), use_container_width=True)
-
-                    # --- FIN LEYENDA DETALLADA ---
-                    # --- EXPANDER INFO ---
-                    # This block must also align with st.plotly_chart above
-                    st.markdown("---")
-                    with st.expander("Sobre la Clasificación de Zonas de Vida"):
-                         st.markdown("""
-                         El sistema de Zonas de Vida ... (basado en Altitud y Precipitación según tabla local).
-                         ... (Resto del texto explicativo) ...
-                         """)
-                    # --- FIN EXPANDER ---
+                if can_calculate_area:
+                    pixel_size_x = abs(transform.a); pixel_size_y = abs(transform.e)
+                    pixel_area_m2 = pixel_size_x * pixel_size_y; pixel_area_ha = pixel_area_m2 / 10000.0
+                    for zone_id in present_zone_ids:
+                        count = np.count_nonzero(classified_raster == zone_id)
+                        pixel_counts.append(count); area_ha = count * pixel_area_ha
+                        area_hectares.append(area_ha); total_area_ha_calc += area_ha
+                    legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids], "Área (ha)": area_hectares}
+                    legend_df = pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False)
+                    st.dataframe(legend_df.set_index('ID').style.format({'Área (ha)': '{:,.1f}'}), use_container_width=True)
+                    st.caption(f"Área total clasificada (visible en mapa): {total_area_ha_calc:,.1f} ha")
+                else:
+                    legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
+                    if present_zone_ids:
+                         legend_df = pd.DataFrame(legend_data).sort_values(by="ID"); st.dataframe(legend_df.set_index('ID'), use_container_width=True)
+                # --- FIN LEYENDA DETALLADA ---
+                    
+                # --- EXPANDER INFO ---
+                # This block must also align with st.plotly_chart above
+                st.markdown("---")
+                with st.expander("Sobre la Clasificación de Zonas de Vida"):
+                    st.markdown("""
+                    El sistema de Zonas de Vida ... (basado en Altitud y Precipitación según tabla local).
+                    ... (Resto del texto explicativo) ...
+                    """)
+                # --- FIN EXPANDER ---
 
         else:
              st.error("La generación del mapa de zonas de vida falló.")
@@ -4409,21 +4364,3 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
