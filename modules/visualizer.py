@@ -1295,15 +1295,6 @@ def create_climate_risk_map(df_anual, _gdf_stations): # Añadido _ para caché
     fig.update_layout(title="Mapa de Tendencias de Precipitación (Pendiente de Sen)", xaxis_title="Longitud", yaxis_title="Latitud", height=600)
     return fig
 
-def create_folium_map(location, zoom, base_map_config, overlays_config):
-    m = folium.Map(location=location, zoom_start=zoom, tiles=None)
-    folium.TileLayer(tiles=base_map_config['tiles'], attr=base_map_config['attr'], name="Mapa Base").add_to(m)
-    for name, config in overlays_config.items():
-        if config.get('show', False): # Usar .get para seguridad
-             try: folium.GeoJson(data=config.get('data'), name=name).add_to(m)
-             except Exception as e_overlay: st.warning(f"No se pudo añadir capa overlay '{name}': {e_overlay}")
-    return m
-    
 def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader):
     """
     Calcula los datos de la curva hipsométrica y genera la figura de Plotly.
@@ -4341,6 +4332,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
