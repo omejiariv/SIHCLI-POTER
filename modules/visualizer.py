@@ -1456,15 +1456,40 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 # ... (Código de enmascaramiento: MemoryFile, mask -> masked_data, masked_transform) ...
                                 # ... (Cálculo mean_precip) ...
 
-                                map_traces = []; dem_trace = None
-                                x_coords = np.linspace(...) # Cálculo de x_coords
-                                y_coords_raw = np.linspace(...) # Cálculo de y_coords_raw
-                                y_coords = y_coords_raw[::-1] if masked_transform.e < 0 else y_coords_raw
-                                masked_data_display = np.flipud(masked_data) if masked_transform.e < 0 else masked_data
-                                masked_data_display_nan = masked_data_display.astype(float)
-                                # masked_data_display_nan[masked_data_display_nan == 0.0] = np.nan # Si 0 es nodata
+                                    masked_data = masked_data[0].astype(np.float32)
+                                    # Calcular media solo de píxeles válidos (no NaN)
+                                    mean_precip_values = masked_data[~np.isnan(masked_data)]
+                                    mean_precip = np.mean(mean_precip_values) if mean_precip_values.size > 0 else 0.0
+                                    masked_data_viz = masked_data.copy() # Copia para visualización
+                                    masked_data_viz[np.isnan(masked_data_viz)] = 0.0 # Reemplazar NaN si es necesario para cálculos (aunque para viz mejor mantener NaN)
 
-                                if show_dem_background and dem_file is not None:
+                                    map_traces = []
+                                    dem_trace = None
+
+                                    # --- CÁLCULO DE COORDENADAS CORREGIDO ---
+                                    # Obtener dimensiones del raster ENMASCARADO
+                                    height_masked, width_masked = masked_data.shape
+                                    # Obtener transform del raster ENMASCARADO
+                                    transform_masked = masked_transform 
+                                    
+                                    # Calcular coordenadas para los CENTROS de los píxeles
+                                    x_coords = [transform_masked.c + transform_masked.a * (i + 0.5) for i in range(width_masked)]
+                                    y_coords_raw = [transform_masked.f + transform_masked.e * (i + 0.5) for i in range(height_masked)]
+                                    # --- FIN CÁLCULO CORREGIDO ---
+
+                                    # Voltear si es necesario para Plotly
+                                    if transform_masked.e < 0: # Comprobar el transform ENMASCARADO
+                                         y_coords = y_coords_raw[::-1]
+                                         masked_data_display = np.flipud(masked_data) # Usar el que tiene NaN para viz
+                                    else:
+                                         y_coords = y_coords_raw
+                                         masked_data_display = masked_data # Usar el que tiene NaN para viz
+                                    
+                                    # Asegurar que sea float para NaN
+                                    masked_data_display_nan = masked_data_display.astype(float) 
+                                    # masked_data_display_nan[masked_data_display_nan == 0.0] = np.nan # Opcional: si 0 es NoData
+
+                                    if show_dem_background and dem_file is not None:
                                     # Definir ruta ANTES del try interno
                                     temp_dem_path_viz = os.path.join(os.getcwd(), f"temp_dem_viz_{dem_file.name}")
                                     try:
@@ -4434,6 +4459,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
