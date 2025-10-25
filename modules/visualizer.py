@@ -19,21 +19,14 @@ import branca.colormap as cm
 import matplotlib.pyplot as plt
 import pymannkendall as mk
 from scipy import stats
-from prophet.plot import plot_plotly
+# from prophet.plot import plot_plotly # Comentado si no se usa
 import io
 from datetime import datetime, timedelta, date
 import json
 import requests
 import traceback
 import openmeteo_requests
-
-
-from modules.analysis import calculate_all_station_trends
-from modules.analysis import calculate_hydrological_balance
-from modules.interpolation import interpolate_idw
-from modules.interpolation import create_kriging_by_basin
 import rasterio
-from modules.life_zones import generate_life_zone_map, holdridge_zone_map_simplified, holdridge_int_to_name_simplified
 from rasterio.transform import from_origin
 from rasterio.mask import mask
 from scipy.interpolate import griddata
@@ -41,33 +34,35 @@ import gstools as gs
 import pyproj
 from rasterio.warp import reproject, Resampling
 
-#--- Importaciones de Módulos Propios
-from modules.openmeteo_api import get_historical_climate_average
-from modules.analysis import calculate_morphometry, calculate_hypsometric_curve
-from modules.analysis import (
-    calculate_spi,
-    calculate_spei,
-    calculate_monthly_anomalies,
-    calculate_percentiles_and_extremes,
-    analyze_events,
-    calculate_climatological_anomalies
-)
+#--- Importaciones de Módulos Propios ---
 from modules.config import Config
+from modules.openmeteo_api import get_historical_climate_average
+from modules.analysis import (
+    calculate_morphometry, calculate_hypsometric_curve,
+    calculate_hydrological_balance,
+    calculate_all_station_trends,
+    calculate_spi, calculate_spei, calculate_monthly_anomalies,
+    calculate_percentiles_and_extremes, analyze_events,
+    calculate_climatological_anomalies,
+    calculate_basin_stats # Asegurar que esta esté importada
+)
 from modules.utils import add_folium_download_button
-from modules.interpolation import create_interpolation_surface, perform_loocv_for_all_methods
+from modules.interpolation import (
+    create_interpolation_surface, 
+    perform_loocv_for_all_methods,
+    # create_kriging_by_basin, # Comentado si no se usa
+    # interpolate_idw # Comentado si no se usa
+)
 from modules.forecasting import (
-    generate_sarima_forecast,
-    generate_prophet_forecast,
-    get_decomposition_results,
-    create_acf_chart,
-    create_pacf_chart,
-    auto_arima_search,
-    get_weather_forecast
+    generate_sarima_forecast, generate_prophet_forecast,
+    get_decomposition_results, create_acf_chart, create_pacf_chart,
+    auto_arima_search, get_weather_forecast
 )
 from modules.data_processor import complete_series
+from modules.life_zones import generate_life_zone_map, holdridge_int_to_name_simplified
 
-#--- FUNCIONES DE UTILIDAD DE VISUALIZACIÓN
 
+# --- DEFINICIÓN DE display_filter_summary ---
 def display_filter_summary(total_stations_count, selected_stations_count, year_range,
                            selected_months_count, analysis_mode, selected_regions,
                            selected_municipios, selected_altitudes):
@@ -75,10 +70,12 @@ def display_filter_summary(total_stations_count, selected_stations_count, year_r
     if isinstance(year_range, (tuple, list)) and len(year_range) == 2:
         year_text = f"{year_range[0]}-{year_range[1]}"
     else:
-        year_text = str(year_range)
+        year_text = str(year_range) 
+
     mode_text = "Original (con huecos)"
     if analysis_mode == "Completar series (interpolación)":
         mode_text = "Completado (interpolado)"
+
     summary_parts = [
         f"**Estaciones:** {selected_stations_count}/{total_stations_count}",
         f"**Período:** {year_text}",
@@ -87,6 +84,7 @@ def display_filter_summary(total_stations_count, selected_stations_count, year_r
     if selected_regions: summary_parts.append(f"**Región:** {', '.join(selected_regions)}")
     if selected_municipios: summary_parts.append(f"**Municipio:** {', '.join(selected_municipios)}")
     if selected_altitudes: summary_parts.append(f"**Altitud:** {', '.join(selected_altitudes)}")
+    
     with st.expander("Resumen de Filtros Activos", expanded=False):
          st.info(" | ".join(summary_parts))
 # --- FIN display_filter_summary ---
@@ -1235,24 +1233,31 @@ def create_interpolation_surface(year, method, variogram_model, bounds, gdf_meta
         import traceback
         return None, None, f"Error en la interpolación: {e}\n{traceback.format_exc()}"
 
+# --- OTRAS FUNCIONES AUXILIARES (create_climate_risk_map, etc.) ---
 @st.cache_data
-def create_climate_risk_map(df_anual, gdf_stations):
+def create_climate_risk_map(df_anual, _gdf_stations): # Añadido _ para caché
     try:
-        gdf_trends = calculate_all_station_trends(df_anual, gdf_stations)
+        gdf_trends = calculate_all_station_trends(df_anual, _gdf_stations)
     except Exception as e_trend:
          st.warning(f"No se pudieron calcular tendencias para el mapa de riesgo: {e_trend}")
          return None
     if gdf_trends.empty:
         st.warning("No hay suficientes datos de tendencia (>10 años) para generar el mapa de riesgo.")
         return None
-    coords = np.array([geom.coords[0] for geom in gdf_trends.geometry if geom is not None])
-    if coords.size == 0:
+    
+    # Filtrar geometrías nulas antes de acceder a coords
+    gdf_trends_valid_geom = gdf_trends[gdf_trends.geometry.notna() & ~gdf_trends.geometry.is_empty]
+    if gdf_trends_valid_geom.empty:
         st.warning("No se encontraron geometrías válidas en las estaciones con tendencia.")
         return None
-    lons = coords[:, 0]; lats = coords[:, 1]; values = gdf_trends['slope_sen'].values
+        
+    coords = np.array([geom.coords[0] for geom in gdf_trends_valid_geom.geometry])
+    lons = coords[:, 0]; lats = coords[:, 1]; values = gdf_trends_valid_geom['slope_sen'].values
+    
     grid_lon = np.linspace(lons.min() - 0.1, lons.max() + 0.1, 100)
     grid_lat = np.linspace(lats.min() - 0.1, lats.max() + 0.1, 100)
     grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
+    
     try:
         grid_z = griddata((lons, lats), values, (grid_x, grid_y), method='cubic')
         nan_mask = np.isnan(grid_z)
@@ -1263,6 +1268,7 @@ def create_climate_risk_map(df_anual, gdf_stations):
     except Exception as e:
          st.error(f"Error en interpolación (griddata) para mapa de riesgo: {e}")
          return None
+
     fig = go.Figure(data=go.Contour(
         z=grid_z.T, x=grid_lon, y=grid_lat, colorscale='RdBu_r', zmid=0,
         colorbar=dict(title='Tendencia (mm/año)'), contours=dict(showlabels=True, labelfont=dict(size=10, color='white'))
@@ -1270,7 +1276,7 @@ def create_climate_risk_map(df_anual, gdf_stations):
     fig.add_trace(go.Scatter(
         x=lons, y=lats, mode='markers', marker=dict(color='black', size=5, symbol='circle-open'),
         hoverinfo='text',
-        hovertext=gdf_trends.apply(lambda row:
+        hovertext=gdf_trends_valid_geom.apply(lambda row:
                            f"<b>Estación: {row[Config.STATION_NAME_COL]}</b><br><br>"
                            f"Municipio: {row.get(Config.MUNICIPALITY_COL, 'N/A')}<br>"
                            f"Altitud: {row.get(Config.ALTITUDE_COL, 'N/A'):.0f} m<br>"
@@ -1281,6 +1287,15 @@ def create_climate_risk_map(df_anual, gdf_stations):
     fig.update_layout(title="Mapa de Tendencias de Precipitación (Pendiente de Sen)", xaxis_title="Longitud", yaxis_title="Latitud", height=600)
     return fig
 
+def create_folium_map(location, zoom, base_map_config, overlays_config):
+    m = folium.Map(location=location, zoom_start=zoom, tiles=None)
+    folium.TileLayer(tiles=base_map_config['tiles'], attr=base_map_config['attr'], name="Mapa Base").add_to(m)
+    for name, config in overlays_config.items():
+        if config.get('show', False): # Usar .get para seguridad
+             try: folium.GeoJson(data=config.get('data'), name=name).add_to(m)
+             except Exception as e_overlay: st.warning(f"No se pudo añadir capa overlay '{name}': {e_overlay}")
+    return m
+    
 def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader):
     """
     Calcula los datos de la curva hipsométrica y genera la figura de Plotly.
@@ -1410,8 +1425,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
             with col_control:
                 st.markdown("#### Controles de Cuenca")
                 basin_names = []
-                regions_from_sidebar = selected_regions # Usar variable pasada a la función
-                
+                regions_from_sidebar = selected_regions
                 if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None:
                     gdf_subcuencas_local = st.session_state.gdf_subcuencas
                     if regions_from_sidebar:
@@ -1488,7 +1502,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 mean_precip_values = masked_data[~np.isnan(masked_data)]; mean_precip = np.mean(mean_precip_values) if mean_precip_values.size > 0 else 0.0
 
                                 map_traces = []; dem_trace = None
-                                # --- CÁLCULO DE COORDENADAS CORREGIDO ---
+                                # --- CÁLCULO DE COORDENADAS CORREGIDO (Error 3) ---
                                 height_masked, width_masked = masked_data.shape
                                 transform_masked = masked_transform
                                 x_coords = [transform_masked.c + transform_masked.a * (i + 0.5) for i in range(width_masked)]
@@ -1501,12 +1515,13 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                      y_coords = y_coords_raw; masked_data_display = masked_data
                                 
                                 masked_data_display_nan = masked_data_display.astype(float)
-                                masked_data_display_nan[np.isnan(masked_data_display_nan)] = np.nan
+                                masked_data_display_nan[np.isnan(masked_data_display_nan)] = np.nan # Asegurar que NaN siga siendo NaN
 
+                                # --- CORRECCIÓN INDENTACIÓN (Error de indentación anterior) ---
                                 if show_dem_background and effective_dem_path_in_use:
-                                    with st.spinner("Procesando y reproyectando DEM..."):
+                                    with st.spinner("Procesando y reproyectando DEM..."): # INDENTADO
                                         try:
-                                            with rasterio.open(effective_dem_path_in_use) as dem_src:
+                                            with rasterio.open(effective_dem_path_in_use) as dem_src: # Usar path efectivo
                                                 dem_reprojected = np.empty(masked_data.shape, dtype=rasterio.float32)
                                                 reproject(source=rasterio.band(dem_src, 1), destination=dem_reprojected, src_transform=dem_src.transform, src_crs=dem_src.crs, dst_transform=masked_transform, dst_crs="EPSG:3116", dst_nodata=np.nan, resampling=Resampling.bilinear)
                                                 if masked_transform.e < 0: dem_reprojected = np.flipud(dem_reprojected)
@@ -1514,6 +1529,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                                 map_traces.append(dem_trace)
                                         except Exception as e_dem_viz:
                                             st.warning(f"No se pudo procesar DEM para fondo: {e_dem_viz}")
+                                # --- FIN CORRECCIÓN INDENTACIÓN ---
 
                                 precip_trace = go.Heatmap(z=masked_data_display_nan, x=x_coords, y=y_coords, colorscale='viridis', colorbar=dict(title='Precipitación (mm)'), opacity=0.7 if dem_trace is not None else 1.0, name='Precipitación', hoverinfo='skip')
                                 map_traces.append(precip_trace)
@@ -1554,7 +1570,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         except Exception as e:
                             import traceback
                             st.session_state['error_msg'] = f"Ocurrió un error crítico: {e}\n\n{traceback.format_exc()}"
-                        # 'finally' block ya no es necesario aquí para temp_dem_to_delete
+                        # --- CORRECCIÓN Error 5: 'finally' block eliminado ---
+                        # 'finally' ya no es necesario aquí porque no creamos 'temp_dem_to_delete'
             
             # --- Visualización (fuera del botón) ---
             with col_display:
@@ -1590,9 +1607,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 elif run_balance_display: st.info("Para Morfometría, usa el DEM base.")
         # --- Fin Modo Por Cuenca ---
 
-        # --- Modo Regional (CORREGIDO) ---
-        else: # analysis_mode_interp == "Regional (Toda la selección)"
-            # --- AÑADIR SANGRÍA AQUÍ ---
+        # --- Modo Regional ---
+        else:
             df_anual_non_na = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
             if not stations_for_analysis or df_anual_non_na.empty:
                 st.warning("No hay suficientes datos anuales para interpolación regional.")
@@ -1624,13 +1640,16 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 # --- LLAMADA CORREGIDA (Error 1): Sin 'df_anual_non_na' (y sin gdf_bounds) ---
                 fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
                 
-                # ¡¡VERIFICA LA DEFINICIÓN DE create_interpolation_surface!!
-                # Asumiendo que la definición es (year, method, variogram_model, gdf_metadata, df_anual_non_na):
+                # ¡¡IMPORTANTE!! El error indica que 'df_anual_non_na' es inesperado.
+                # Esto significa que tu definición de 'create_interpolation_surface' en 
+                # 'interpolation.py' probablemente NO coincide con la del PDF y 
+                # NO acepta 'df_anual_non_na'.
+                # La llamada se ajusta para OMITIRLO.
                 try:
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
                         year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
-                        gdf_metadata=gdf_metadata_reg,
-                        df_anual_non_na=df_anual_non_na # Pasando el df filtrado por NaN
+                        gdf_metadata=gdf_metadata_reg
+                        # df_anual_non_na=df_anual_melted # <-- Argumento eliminado
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
                 except TypeError as te1: 
@@ -1641,8 +1660,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 try:
                     fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
                         year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
-                        gdf_metadata=gdf_metadata_reg,
-                        df_anual_non_na=df_anual_non_na # Pasando el df filtrado por NaN
+                        gdf_metadata=gdf_metadata_reg
+                        # df_anual_non_na=df_anual_melted # <-- Argumento eliminado
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
                 except TypeError as te2:
@@ -1969,6 +1988,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                  st.error(f"Error al preparar datos para comparación: {e_comp_call}")
         else:
             st.warning("Se necesitan datos de al menos dos años diferentes para Comparación de Mapas.")
+    
+# --- Fin de la función display_advanced_maps_tab ---
             
 def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_analysis,
                                  df_anual_melted, gdf_filtered, analysis_mode, selected_regions,
@@ -4116,6 +4137,7 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         para obtener la precipitación y escorrentía actuales.
         """)
 
+# --- INICIO FUNCIÓN display_life_zones_tab ---
 def display_life_zones_tab(**kwargs):
     st.header("Clasificación de Zonas de Vida (Holdridge)")
     st.info("""
@@ -4127,49 +4149,27 @@ def display_life_zones_tab(**kwargs):
     precip_raster_filename = "PPAMAnt.tif"
     # --- Fin Configuración ---
 
-    # Rutas y DEM
+    # Rutas y DEM (SOLO BASE)
     _THIS_FILE_DIR = os.path.dirname(__file__)
     precip_raster_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', precip_raster_filename))
     
-    # --- Lógica DEM Base/Cargado (Obtener la ruta o el objeto) ---
-    dem_file_obj = st.session_state.get('dem_file_obj') # Objeto UploadedFile
-    dem_fixed_path = st.session_state.get('dem_file_path') # Ruta al DEM base
-    dem_is_geographic = st.session_state.get('dem_crs_is_geographic', True) # Flag del sidebar
+    # Obtener la ruta del DEM base desde el sidebar
+    effective_dem_path_for_function = st.session_state.get('dem_file_path')
+    dem_is_geographic = st.session_state.get('dem_crs_is_geographic', True)
 
-    effective_dem_path_for_function = None # Path a pasar a generate_life_zone_map
-    temp_dem_filename_lifezone = None # Para limpieza
-
-    if dem_file_obj: # Priorizar DEM cargado
-        temp_dem_filename_lifezone = f"temp_dem_for_lifezones_{dem_file_obj.name}"
-        effective_dem_path_for_function = os.path.join(os.getcwd(), temp_dem_filename_lifezone)
-        try:
-            # Escribir solo si no existe (para evitar reescritura innecesaria)
-            if not os.path.exists(effective_dem_path_for_function):
-                with open(effective_dem_path_for_function, "wb") as f:
-                    f.write(dem_file_obj.getbuffer())
-                st.success(f"Usando DEM cargado: {dem_file_obj.name}")
-        except Exception as e_write_lz:
-            st.error(f"No se pudo escribir el archivo DEM temporal para Zonas de Vida: {e_write_lz}")
-            effective_dem_path_for_function = None # No continuar si falla escritura
-    elif dem_fixed_path and os.path.exists(dem_fixed_path): # Usar base si existe
-        effective_dem_path_for_function = dem_fixed_path
-        st.info(f"Usando DEM base: {os.path.basename(dem_fixed_path)}")
-    else:
-        st.warning("Sube un archivo DEM en el panel lateral izquierdo o asegúrate que el DEM base exista para generar el mapa.")
-    # --- Fin Lógica DEM ---
-
-
-    # Verificar existencia del raster de precipitación
+    # Verificar existencia de archivos base
     if not os.path.exists(precip_raster_path):
         st.error(f"No se encontró el archivo raster de precipitación: {precip_raster_path}")
-        # Limpiar DEM temporal si se creó y salimos
-        if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function): os.remove(effective_dem_path_for_function)
         return
+    if not effective_dem_path_for_function:
+         st.warning("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+         return # Detener si no hay DEM
 
     # --- Controles ---
     col_ctrl1, col_ctrl2 = st.columns(2)
     with col_ctrl1:
         resolution_options = {"Baja (Rápido)": 8, "Media": 4, "Alta (Lento)": 2, "Original (Muy Lento)": 1}
+        # CONFIGURAR 'Baja' como default para evitar 'Bad message format'
         selected_resolution = st.select_slider("Seleccionar Resolución del Mapa:", options=list(resolution_options.keys()), value="Baja (Rápido)", key="lifezone_resolution")
         downscale_factor = resolution_options[selected_resolution]
     with col_ctrl2:
@@ -4185,39 +4185,34 @@ def display_life_zones_tab(**kwargs):
                 st.warning("No hay cuenca seleccionada en 'Mapas Avanzados' para usar como máscara."); apply_basin_mask = False
     # --- Fin Controles ---
 
-    # Botón para generar
-    # Solo habilitar si tenemos una ruta de DEM válida
-    if st.button("Generar Mapa de Zonas de Vida", key="gen_life_zone_map", disabled=(effective_dem_path_for_function is None)):
+    if st.button("Generar Mapa de Zonas de Vida", key="gen_life_zone_map"):
         
         mask_arg = mask_geometry_to_use if apply_basin_mask else None
         
-        # Llamar a la función de cálculo (SIN caché ahora, SIN mean_latitude)
+        # --- CORRECCIÓN LLAMADA (Error 4): SIN 'maskgeometry' ---
         classified_raster, output_profile, name_map = generate_life_zone_map(
-            effective_dem_path_for_function, # Pasar la ruta efectiva
+            effective_dem_path_for_function,
             precip_raster_path,
-            mask_geometry=mask_arg,
+            mask_geometry=mask_arg, # <-- CON guion bajo
             downscale_factor=downscale_factor
         )
+        # --- FIN CORRECCIÓN ---
 
         # --- Visualización ---
         if classified_raster is not None and output_profile is not None and name_map is not None:
             st.subheader("Mapa de Zonas de Vida Generado")
 
-            # Obtener metadatos del perfil del raster CLASIFICADO y REESCALADO
             height, width = classified_raster.shape
-            crs_profile = output_profile.get('crs') # Obtener objeto CRS
-            crs_str = str(crs_profile) if crs_profile else "Desconocido" # Convertir a string para mostrar
+            crs_profile = output_profile.get('crs')
+            crs_str = str(crs_profile) if crs_profile else "Desconocido"
             nodata_val = output_profile.get('nodata', 0)
             transform = rasterio.transform.Affine(*output_profile['transform'][:6])
 
-            # --- Generación de Coordenadas (Estándar) ---
             x_start, y_start = transform.c, transform.f
             x_end = x_start + transform.a * width; y_end = y_start + transform.e * height
             x_coords = np.linspace(x_start + transform.a / 2, x_end - transform.a / 2, width)
             y_coords_raw = np.linspace(y_start + transform.e / 2, y_end - transform.e / 2, height)
-            # --- Fin Coordenadas ---
 
-            # --- Lógica para Leyenda y Colores (IDs) ---
             unique_zones_present = np.unique(classified_raster)
             present_zone_ids = sorted([zone_id for zone_id in unique_zones_present if zone_id != nodata_val])
             fig = None
@@ -4252,63 +4247,41 @@ def display_life_zones_tab(**kwargs):
                     for val, col in color_scale_discrete:
                          if val>last_val: simplified_colorscale.append([val, col]); last_val=val
                     color_scale_discrete=simplified_colorscale
-                # --- FIN LÓGICA LEYENDA/COLOR ---
 
-                # --- Voltear datos/coordenadas si es necesario ---
                 if transform.e < 0:
                     y_coords = y_coords_raw[::-1]
                     classified_raster_display = np.flipud(classified_raster)
                 else:
                     y_coords = y_coords_raw
                     classified_raster_display = classified_raster
-                # --- FIN Voltear ---
 
-                # --- Crear Raster con NaN para transparencia ---
                 raster_for_heatmap = classified_raster_display.astype(float)
                 raster_for_heatmap[raster_for_heatmap == nodata_val] = np.nan # Hacer NoData transparente
-                # --- FIN Raster Transparente ---
 
-                # --- Crear Hover Text (si se reactiva) ---
                 # get_zone_name=np.vectorize(lambda zid: name_map.get(zid, "NoData" if zid==nodata_val else f"ID {zid}?"))
                 # hover_names_raster=get_zone_name(classified_raster_display)
-                # --- FIN Hover Text ---
 
-                # --- Creación del Heatmap (CON transparencia, SIN hover) ---
                 fig=go.Figure(data=go.Heatmap(
-                    z=raster_for_heatmap, # Usar raster con NaN
+                    z=raster_for_heatmap,
                     x=x_coords,
                     y=y_coords,
                     colorscale=color_scale_discrete,
-                    zmin=min(present_zone_ids)-0.5 if present_zone_ids else 0, # Ajustar zmin/zmax
+                    zmin=min(present_zone_ids)-0.5 if present_zone_ids else 0,
                     zmax=max(present_zone_ids)+0.5 if present_zone_ids else 1,
                     showscale=True,
-                    colorbar=dict(
-                        title="ID Zona de Vida",
-                        tickvals=tick_values, # IDs presentes
-                        ticktext=tick_texts, # IDs presentes como texto
-                        tickmode='array'
-                    ),
+                    colorbar=dict(title="ID Zona de Vida", tickvals=tick_values, ticktext=tick_texts, tickmode='array'),
                     hoverinfo='skip', # Mantener hover desactivado por estabilidad
-                    # hovertext=hover_names_raster, hoverinfo='text', hovertemplate='<b>Zona:</b> %{hovertext}<extra></extra>' # Código para reactivar hover
                 ))
 
-                # Mostrar figura si se creó
-                if fig is not None:
-                    fig.update_layout(
-                        title="Mapa de Zonas de Vida de Holdridge",
-                        xaxis_title=f"Coordenada X ({crs})", # Use crs defined earlier
-                        yaxis_title=f"Coordenada Y ({crs})",
-                        yaxis_scaleanchor="x",
-                        height=700
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+            if fig is not None:
+                fig.update_layout(title="Mapa de Zonas de Vida", xaxis_title=f"Coordenada X ({crs_str})", yaxis_title=f"Coordenada Y ({crs_str})", yaxis_scaleanchor="x", height=700)
+                st.plotly_chart(fig, use_container_width=True)
 
-# --- LEYENDA DETALLADA ID -> Nombre + Hectáreas (CORREGIDO check CRS) ---
+                # --- LEYENDA DETALLADA ID -> Nombre + Hectáreas (CORREGIDO check CRS - Error 2) ---
                 st.markdown("---"); st.subheader("Leyenda y Área por Zona de Vida Presente")
                 area_hectares = []; pixel_counts = []; total_area_ha_calc = 0.0
                 can_calculate_area = False
 
-                # Verificar si CRS es métrico usando unidades (Error 2)
                 if crs_profile and raster_transform:
                     try:
                         if crs_profile.is_projected:
@@ -4317,9 +4290,16 @@ def display_life_zones_tab(**kwargs):
                                 can_calculate_area = True
                             else: st.warning(f"ADVERTENCIA: Unidades CRS ({crs_units}) no son metros. Cálculo de área impreciso.")
                         elif crs_profile.is_geographic:
+                             # Esto ahora usa el flag del sidebar, es más fiable
                              st.warning("ADVERTENCIA: El CRS del DEM está en grados geográficos. No se puede calcular el área. Use un DEM métrico.")
                         else: st.warning(f"Tipo de CRS ({crs_str}) no reconocido.")
-                    except AttributeError: st.warning(f"No se pudieron determinar las unidades del CRS ({crs_str}).")
+                    except AttributeError: # Fallback
+                         if dem_is_geographic: # Usar el flag del sidebar
+                             st.warning("ADVERTENCIA: El CRS del DEM está en grados geográficos (WGS84). No se puede calcular el área. Use un DEM métrico.")
+                         else: # Si no es geográfico pero falla .linear_units
+                             st.warning(f"No se pudieron determinar las unidades del CRS ({crs_str}). Asumiendo métrico.")
+                             # Intentar calcular de todas formas si no es geográfico
+                             if crs_profile.is_projected: can_calculate_area = True 
                     except Exception as e_crs_check: st.warning(f"Error al verificar unidades del CRS: {e_crs_check}")
 
                 if can_calculate_area:
@@ -4338,27 +4318,20 @@ def display_life_zones_tab(**kwargs):
                     if present_zone_ids:
                          legend_df = pd.DataFrame(legend_data).sort_values(by="ID"); st.dataframe(legend_df.set_index('ID'), use_container_width=True)
                 # --- FIN LEYENDA DETALLADA ---
-                    
+
                 # --- EXPANDER INFO ---
-                # This block must also align with st.plotly_chart above
                 st.markdown("---")
                 with st.expander("Sobre la Clasificación de Zonas de Vida"):
-                    st.markdown("""
-                    El sistema de Zonas de Vida ... (basado en Altitud y Precipitación según tabla local).
-                    ... (Resto del texto explicativo) ...
-                    """)
+                     st.markdown("""
+                     El sistema de Zonas de Vida de Holdridge... (basado en Altitud y Precipitación según tabla local).
+                     ... (Resto del texto explicativo) ...
+                     """)
                 # --- FIN EXPANDER ---
 
         else:
              st.error("La generación del mapa de zonas de vida falló.")
+    
+    elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
+         st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
 
-    # Mensajes si faltan archivos o botón no presionado
-    elif effective_dem_path_for_function is None and os.path.exists(precip_raster_path):
-         st.info("Sube un archivo DEM o asegúrate que el DEM base exista para habilitar la generación del mapa.")
-
-    # Limpieza final del DEM temporal si existe (fuera del botón)
-    # Esto es importante si el usuario sale de la app sin presionar el botón
-    if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
-        try: os.remove(effective_dem_path_for_function)
-        except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
 
