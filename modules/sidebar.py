@@ -21,9 +21,11 @@ if os.path.exists(BASE_DEM_PATH):
     try:
         with rasterio.open(BASE_DEM_PATH) as src:
             if src.crs:
-                dem_base_is_geographic = src.crs.is_geographic
+                # Corregido: Verificar si es geográfico
+                dem_base_is_geographic = src.crs.is_geographic 
             else:
-                print("Advertencia (sidebar): DEM base no tiene CRS definido. Asumiendo geográfico.")
+                dem_base_is_geographic = True # Asumir geográfico si no hay CRS
+                print("Advertencia (sidebar): DEM base no tiene CRS definido.")
         st.session_state['dem_file_path'] = BASE_DEM_PATH
         st.session_state['dem_crs_is_geographic'] = dem_base_is_geographic
         dem_base_found = True
