@@ -4,6 +4,7 @@ import streamlit as st
 from modules.config import Config
 import pandas as pd
 import os
+import rasterio
 
 # --- Añadir ruta al DEM base ---
 _THIS_FILE_DIR_SB = os.path.dirname(__file__)
@@ -242,4 +243,5 @@ def create_sidebar(gdf_stations, df_long):
 
 # (La función apply_filters_to_stations debe estar definida ANTES de create_sidebar)
 # def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celdas): ...
+
 
