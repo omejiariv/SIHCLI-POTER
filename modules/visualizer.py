@@ -4328,34 +4328,32 @@ def display_life_zones_tab(**kwargs):
                 # --- LEYENDA DETALLADA ID -> Nombre + Hectáreas (CORREGIDO check CRS) ---
                 st.markdown("---"); st.subheader("Leyenda y Área por Zona de Vida Presente")
                 area_hectares = []; pixel_counts = []; total_area_ha_calc = 0.0
-                can_calculate_area = False
+                can_calculate_area = False 
+                    raster_crs = output_profile.get('crs')
+                    raster_transform = output_profile.get('transform')
+                    # Usar el flag guardado en sidebar
+                    dem_is_geographic = st.session_state.get('dem_crs_is_geographic', True) # Asumir True si no está
 
-                # Verificar si CRS es métrico usando unidades
-                if crs_profile and crs_profile.is_projected and transform: # Solo calcular si es proyectado y tenemos transform
-                    try:
-                        crs_units = crs_profile.linear_units.lower()
-                        if 'metre' in crs_units or 'meter' in crs_units:
-                            can_calculate_area = True
-                        else: st.warning(f"Unidades CRS ({crs_units}) no son metros.")
-                    except: st.warning(f"No se pudieron verificar unidades del CRS proyectado ({crs_str}).")
+                    # Verificar que NO sea geográfico Y que sea métrico
+                    if not dem_is_geographic and raster_crs and raster_crs.is_projected and raster_transform:
+                         # Intentar verificar unidades si es proyectado
+                         try:
+                             crs_units = raster_crs.linear_units.lower()
+                             if 'metre' in crs_units or 'meter' in crs_units:
+                                 can_calculate_area = True
+                             else:
+                                 st.warning(f"CRS proyectado pero unidades ({crs_units}) no son metros.")
+                         except:
+                              st.warning(f"No se pudieron verificar unidades del CRS proyectado ({raster_crs}).")
 
-                if can_calculate_area:
-                    pixel_size_x = abs(transform.a); pixel_size_y = abs(transform.e)
-                    pixel_area_m2 = pixel_size_x * pixel_size_y; pixel_area_ha = pixel_area_m2 / 10000.0
-                    for zone_id in present_zone_ids:
-                        count = np.count_nonzero(classified_raster == zone_id) # Usar raster original para contar
-                        pixel_counts.append(count); area_ha = count * pixel_area_ha
-                        area_hectares.append(area_ha); total_area_ha_calc += area_ha
-                    legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids], "Área (ha)": area_hectares}
-                    legend_df = pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False)
-                    st.dataframe(legend_df.set_index('ID').style.format({'Área (ha)': '{:,.1f}'}), use_container_width=True)
-                    st.caption(f"Área total clasificada (visible en mapa): {total_area_ha_calc:,.1f} ha")
-                else:
-                    # Advertencia si el CRS es Geográfico (basado en flag del sidebar)
-                    if st.session_state.get('dem_crs_is_geographic', False):
-                         st.warning("ADVERTENCIA: No se calcula el área porque el DEM usado está en grados geográficos. Use un DEM métrico.")
-                    else: # Otra razón
-                         st.warning(f"No se pudo calcular el área (Verificar CRS: {crs_str}).")
+                    if can_calculate_area:
+                         # ... (código para calcular y mostrar área) ...
+                    else:
+                         # Mostrar advertencia específica si es geográfico
+                         if dem_is_geographic:
+                              st.warning("ADVERTENCIA: No se calcula el área porque el DEM usado (base o cargado) está en grados geográficos. Use un DEM métrico.")
+                         else: # Otra razón (CRS desconocido, error, etc.)
+                              st.warning("No se pudo calcular el área (verificar CRS del DEM).")
                     # Mostrar leyenda sin áreas
                     legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
                     if present_zone_ids:
@@ -4383,3 +4381,4 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
