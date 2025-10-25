@@ -1443,6 +1443,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         st.session_state['mean_precip'] = None; st.session_state['morph_results'] = None; st.session_state['balance_results'] = None
                         st.session_state['unified_basin_gdf'] = None; st.session_state['selected_basins_title'] = ""
                         
+                        # Usar solo DEM base
                         effective_dem_path_in_use = dem_fixed_path if (dem_fixed_path and os.path.exists(dem_fixed_path)) else None
                         
                         try:
@@ -1501,7 +1502,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 masked_data_display_nan = masked_data_display.astype(float)
                                 masked_data_display_nan[np.isnan(masked_data_display_nan)] = np.nan # Asegurar que NaN siga siendo NaN
 
-                                # --- CORRECCIÓN INDENTACIÓN ---
+                                # --- CORRECCIÓN INDENTACIÓN (Error 4) ---
                                 if show_dem_background and effective_dem_path_in_use:
                                     with st.spinner("Procesando y reproyectando DEM..."): # INDENTADO
                                         try:
@@ -1554,11 +1555,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         except Exception as e:
                             import traceback
                             st.session_state['error_msg'] = f"Ocurrió un error crítico: {e}\n\n{traceback.format_exc()}"
-                        finally:
-                             # Limpieza archivo temporal DEM (SOLO si se creó)
-                             if temp_dem_to_delete and os.path.exists(temp_dem_to_delete):
-                                  try: os.remove(temp_dem_to_delete)
-                                  except Exception as e_del: st.warning(f"No se pudo eliminar DEM temporal: {e_del}")
+                        # --- CORRECCIÓN Error 5: Eliminar 'finally' y 'temp_dem_to_delete' ---
+                        # 'finally' ya no es necesario aquí porque no creamos 'temp_dem_to_delete'
+                        # El 'effective_dem_path_in_use' es el base, no debe borrarse
             
             # --- Visualización (fuera del botón) ---
             with col_display:
@@ -1624,10 +1623,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
-                # --- LLAMADA CORREGIDA (Error 1): Sin 'df_anual_non_na' ---
+                # --- LLAMADA CORREGIDA (Error 1): Sin 'df_anual_non_na' (y sin gdf_bounds) ---
                 fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
                 try:
-                    # Asumiendo que la función toma (year, method, variogram_model, gdf_metadata)
+                    # ¡¡VERIFICA TU DEFINICIÓN DE FUNCIÓN en interpolation.py!!
+                    # Asumiendo que create_interpolation_surface toma:
+                    # (year, method, variogram_model, gdf_metadata)
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
                         year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
                         gdf_metadata=gdf_metadata_reg
@@ -1719,7 +1720,6 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         with st.spinner("Calculando curva hipsométrica..."):
                              try:
                                  # --- CORRECCIÓN ERROR 'elevations' (Error 3) ---
-                                 # Envolver la llamada en try/except para capturar el error de Plotly
                                  fig_hypso = calculate_hypsometric_curve(unified_basin_gdf_morph, dem_fixed_path_morph)
                                  if fig_hypso: 
                                      st.plotly_chart(fig_hypso, use_container_width=True)
@@ -1727,7 +1727,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                      st.warning("No se pudo generar la curva hipsométrica.")
                              except ImportError: 
                                  st.error("Función 'calculate_hypsometric_curve' no encontrada.")
-                             except ValueError as e_hypso_ve: # Capturar error específico de Plotly
+                             except ValueError as e_hypso_ve: 
                                  if 'elevations' in str(e_hypso_ve):
                                      st.error("Error al generar la figura de la curva hipsométrica: Propiedad 'elevations' inválida. Revisa la función 'calculate_hypsometric_curve'.")
                                      st.error(f"Detalle: {e_hypso_ve}")
@@ -1835,7 +1835,10 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                     
                                     for _, row in df_map_data.iterrows():
                                         if 'geometry' in row and row['geometry'] is not None and not row['geometry'].is_empty and pd.notna(row[Config.PRECIPITATION_COL]):
-                                            popup_object = generate_annual_map_popup_html(row, df_anual_melted_non_na)
+                                            try:
+                                                popup_object = generate_annual_map_popup_html(row, df_anual_melted_non_na)
+                                            except NameError:
+                                                popup_object = f"<b>{row[Config.STATION_NAME_COL]}</b><br>Ppt: {row[Config.PRECIPITATION_COL]:.0f} mm"
                                             folium.CircleMarker(
                                                 location=[row['geometry'].y, row['geometry'].x], radius=5,
                                                 color=colormap(row[Config.PRECIPITATION_COL]), fill=True,
@@ -1915,7 +1918,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 st.markdown("**Mapa 1**"); year1_comp = st.selectbox("Primer año", options=all_years_comp, index=len(all_years_comp) - 1, key="compare_year1")
                 st.markdown("**Mapa 2**"); year2_comp = st.selectbox("Segundo año", options=all_years_comp, index=max(0, len(all_years_comp) - 2), key="compare_year2")
                 
-                min_precip_comp, max_precip_comp = int(df_anual_valid_comp[Config.PRECIPITATION_COL].min()), int(df_anual_valid_comp[Config.PRECIPITATION_COL].max())
+                min_precip_comp = int(df_anual_valid_comp[Config.PRECIPITATION_COL].min())
+                max_precip_comp = int(df_anual_valid_comp[Config.PRECIPITATION_COL].max())
                 if min_precip_comp >= max_precip_comp: max_precip_comp = min_precip_comp + 1
                 color_range_comp = st.slider("Rango de Escala de Color (mm)", min_precip_comp, max_precip_comp, (min_precip_comp, max_precip_comp), key="color_compare")
                 colormap_comp = cm.LinearColormap(colors=plt.cm.viridis.colors, vmin=color_range_comp[0], vmax=color_range_comp[1])
@@ -1967,7 +1971,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                  st.error(f"Error al preparar datos para comparación: {e_comp_call}")
         else:
             st.warning("Se necesitan datos de al menos dos años diferentes para Comparación de Mapas.")
-
+            
 def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_analysis,
                                  df_anual_melted, gdf_filtered, analysis_mode, selected_regions,
                                  selected_municipios, selected_altitudes, **kwargs):
@@ -4404,6 +4408,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
