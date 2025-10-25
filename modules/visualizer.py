@@ -4201,7 +4201,7 @@ def display_life_zones_tab(**kwargs):
         classified_raster, output_profile, name_map = generate_life_zone_map(
             effective_dem_path_for_function,
             precip_raster_path,
-            mask_geometry=mask_arg, # <-- CON guion bajo
+            mask_geometry=mask_arg, # <-- ¡¡CORREGIDO!!
             downscale_factor=downscale_factor
         )
         # --- FIN CORRECCIÓN ---
@@ -4341,6 +4341,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
