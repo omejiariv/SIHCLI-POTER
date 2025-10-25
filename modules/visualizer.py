@@ -4550,92 +4550,66 @@ def display_life_zones_tab(**kwargs):
                     )
                     st.plotly_chart(fig, use_container_width=True) # <-- Muestra el Heatmap
 
-                    # --- AÑADIR LEYENDA DETALLADA (Área por Proporción) ---
+                    # --- AÑADIR LEYENDA DETALLADA (Cálculo de área directo desde raster) ---
                     st.markdown("---")
                     st.subheader("Leyenda y Área por Zona de Vida Presente")
 
-                    # --- Calcular Área en Hectáreas por Proporción ---
-                    # --- REVISED AREA RETRIEVAL ---
-                    total_area_km2 = None # Initialize as None
-                    balance_results_check = st.session_state.get('balance_results') 
-                    
-                    # Try getting area primarily from balance_results if it exists
-                    if balance_results_check and 'Area_km2' in balance_results_check:
-                        total_area_km2 = balance_results_check['Area_km2']
-                    # Fallback: Check if land cover analysis set the area (less likely needed now)
-                    elif st.session_state.get('total_basin_area_km2') is not None:
-                         total_area_km2 = st.session_state.get('total_basin_area_km2')
-                         
-                    # --- END REVISED AREA RETRIEVAL ---
-
-                    # --- DEBUGGING (Keep temporarily) ---
-                    st.write(f"DEBUG: Retrieved total_area_km2 = {total_area_km2}") 
-                    # --- END DEBUGGING ---
-                    
+                    # --- Calcular Área en Hectáreas desde el Raster ---
                     area_hectares = []
-                    # ... (rest of the calculation code remains the same) ...
-                    pixel_counts = [] 
-                    total_valid_pixels_in_map = 0
+                    pixel_counts = []
+                    total_area_ha_calc = 0.0
+                    
+                    # 1. Obtener CRS y Transform del raster reescalado
+                    raster_crs = output_profile.get('crs')
+                    raster_transform = output_profile.get('transform')
                     nodata_val = output_profile.get('nodata', 0)
-                    valid_pixel_mask = (classified_raster != nodata_val)
-                    total_valid_pixels_in_map = np.count_nonzero(valid_pixel_mask)
 
-                    # Check both conditions *before* the loop
-                    if total_valid_pixels_in_map > 0 and total_area_km2 is not None and total_area_km2 > 0:
-                        # ----- Start Calculations -----
-                        area_hectares = []
-                        pixel_counts = []
-                        for zone_id in present_zone_ids:
+                    # 2. Verificar que el CRS sea métrico para calcular área
+                    if raster_crs and raster_crs.is_metric and raster_transform:
+                        # CRS es métrico (ej. EPSG:3116), calcular área desde el píxel
+                        pixel_size_x = abs(raster_transform.a)
+                        pixel_size_y = abs(raster_transform.e)
+                        pixel_area_m2 = pixel_size_x * pixel_size_y
+                        pixel_area_ha = pixel_area_m2 / 10000.0 # 1 ha = 10000 m²
+
+                        # Iterar sobre los IDs presentes en la leyenda
+                        for zone_id in present_zone_ids: # present_zone_ids ya excluye nodata
+                            # Contar píxeles para este ID específico
                             count = np.count_nonzero(classified_raster == zone_id)
                             pixel_counts.append(count)
-                            proportion = count / total_valid_pixels_in_map
-                            area_ha = proportion * (total_area_km2 * 100.0)
+                            # Calcular área en hectáreas
+                            area_ha = count * pixel_area_ha
                             area_hectares.append(area_ha)
-                        # ----- End Calculations -----
-
-                        # ----- Create DataFrame -----
+                            total_area_ha_calc += area_ha
+                        
+                        # Crear DataFrame
                         legend_data = {
                             "ID": present_zone_ids,
                             "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids],
-                            "Área (ha)": area_hectares,
-                            "% del Área": [(c / total_valid_pixels_in_map) * 100.0 for c in pixel_counts]
+                            "Área (ha)": area_hectares
                         }
                         legend_df = pd.DataFrame(legend_data).sort_values(by="Área (ha)", ascending=False)
-                        # ----- End DataFrame Creation -----
 
-                        # ----- Display DataFrame -----
+                        # Mostrar tabla
                         st.dataframe(
-                            legend_df.set_index('ID').style.format({
-                                'Área (ha)': '{:,.1f}',
-                                '% del Área': '{:.1f}%'
-                            }),
+                            legend_df.set_index('ID').style.format({'Área (ha)': '{:,.1f}'}),
                             use_container_width=True
                         )
-                        st.caption(f"Área total clasificada: {total_area_km2:.2f} km² ({total_valid_pixels_in_map} píxeles)")
-                        # ----- End Display DataFrame -----
+                        st.caption(f"Área total clasificada (visible en mapa): {total_area_ha_calc:,.1f} ha")
+                    
+                    else: 
+                        # Si el CRS no es métrico (es Geográfico, como WGS84)
+                        if raster_crs and raster_crs.is_geographic:
+                             st.warning("ADVERTENCIA: No se puede calcular el área en hectáreas porque el CRS del DEM está en grados geográficos (ej. WGS84). Por favor, use un DEM en un CRS proyectado (métrico, ej. EPSG:3116) para ver las áreas.")
+                        else:
+                             st.warning(f"No se pudo determinar el área (CRS: {raster_crs}).")
 
-                    elif total_area_km2 is None or total_area_km2 <= 0:
-                         st.warning("No se pudo obtener un área total válida de la cuenca desde otras pestañas para calcular las hectáreas.")
-                         # Display legend without areas
-                         legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
-                         if present_zone_ids: # Check if list is not empty before creating DF
-                             legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
-                             st.dataframe(legend_df.set_index('ID'), use_container_width=True)
-                         else:
-                              st.info("No hay zonas de vida presentes para mostrar en la leyenda.")
-
-
-                    else: # total_valid_pixels_in_map is 0
-                         st.warning("No hay píxeles válidos clasificados para calcular áreas.")
-                         # Display legend without areas
-                         legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
-                         if present_zone_ids: # Check if list is not empty before creating DF
-                             legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
-                             st.dataframe(legend_df.set_index('ID'), use_container_width=True)
-                         else:
-                              st.info("No hay zonas de vida presentes para mostrar en la leyenda.")
-
+                        # Mostrar leyenda sin áreas
+                        legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
+                        legend_df = pd.DataFrame(legend_data).sort_values(by="ID")
+                        st.dataframe(legend_df.set_index('ID'), use_container_width=True)
                     # --- FIN LEYENDA DETALLADA ---
+                
                     # --- EXPANDER INFO (sin cambios) ---
                 st.markdown("---")
                 with st.expander("Sobre la Clasificación de Zonas de Vida de Holdridge"):
@@ -4659,6 +4633,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
