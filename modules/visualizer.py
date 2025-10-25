@@ -290,15 +290,41 @@ def generate_annual_map_popup_html(row, df_anual_melted_full_period):
     return folium.Popup(html, max_width=300)
 
 def create_folium_map(location, zoom, base_map_config, overlays_config, fit_bounds_data=None):
-    """Crea un mapa base de Folium y le añade capas de overlay de forma inteligente."""
-    m = folium.Map(
-        location=location,
-        zoom_start=zoom,
-        # CORRECCIÓN DE ATTRIBUTEERROR: Extraer solo la clave 'tiles' (que es str)
-        tiles=base_map_config.get('tiles', 'OpenStreetMap'),
-        attr=base_map_config.get('attr', 'OpenStreetMap')
-    )
+    """Crea un mapa de folium base con capas y ajuste de límites opcional."""
+    m = folium.Map(location=location, zoom_start=zoom, tiles=None)
+    folium.TileLayer(tiles=base_map_config['tiles'], attr=base_map_config['attr'], name="Mapa Base").add_to(m)
+    
+    # Lógica de Overlays (WMS, GeoJSON, etc. - como en tu código)
+    if overlays_config:
+        # Asumiendo que overlays_config es una LISTA de diccionarios
+        for layer_config in overlays_config:
+            layer_type = layer_config.get("type", "tile")
+            url = layer_config.get("url")
+            if not url: continue
+            layer_name = layer_config.get("attr", "Overlay")
 
+            if layer_type == "wms":
+                WmsTileLayer(
+                    url=url,
+                    layers=layer_config["layers"], # Requiere 'layers'
+                    fmt=layer_config.get("fmt", 'image/png'),
+                    transparent=layer_config.get("transparent", True),
+                    overlay=True, control=True, name=layer_name
+                ).add_to(m)
+            elif layer_type == "geojson":
+                # Asumiendo que load_geojson_from_url está definida
+                # geojson_data = load_geojson_from_url(url) 
+                # if geojson_data:
+                #     style_function = lambda x: layer_config.get("style", {})
+                #     folium.GeoJson(geojson_data, name=layer_name, style_function=style_function).add_to(m)
+                pass # Platzhalter ya que load_geojson_from_url no está definida aquí
+            else: # Asumir 'tile'
+                folium.TileLayer(
+                    tiles=url, attr=layer_name, name=layer_name,
+                    overlay=True, control=True, show=False
+                ).add_to(m)
+    
+    # Lógica de ajuste de límites (Bounds)
     if fit_bounds_data is not None and not fit_bounds_data.empty:
         if len(fit_bounds_data) > 1:
             bounds = fit_bounds_data.total_bounds
@@ -308,50 +334,7 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
             point = fit_bounds_data.iloc[0].geometry
             m.location = [point.y, point.x]
             m.zoom_start = 12
-
-    if overlays_config:
-        for layer_config in overlays_config:
-            layer_type = layer_config.get("type", "tile") # Asumir 'tile' por defecto
-            url = layer_config.get("url")
-
-            if not url:
-                continue
-
-            layer_name = layer_config.get("attr", "Overlay")
-
-            # LÓGICA PARA DISTINGUIR TIPOS DE CAPA
-            if layer_type == "wms":
-                WmsTileLayer(
-                    url=url,
-                    layers=layer_config["layers"],
-                    fmt=layer_config.get("fmt", 'image/png'),
-                    transparent=layer_config.get("transparent", True),
-                    overlay=True,
-                    control=True,
-                    name=layer_name
-                ).add_to(m)
-
-            elif layer_type == "geojson":
-                geojson_data = load_geojson_from_url(url)
-                if geojson_data:
-                    style_function = lambda x: layer_config.get("style", {})
-
-                    folium.GeoJson(
-                        geojson_data,
-                        name=layer_name,
-                        style_function=style_function
-                    ).add_to(m)
-
-            else: # Asumir que es una capa de teselas (TileLayer)
-                folium.TileLayer(
-                    tiles=url,
-                    attr=layer_name,
-                    name=layer_name,
-                    overlay=True,
-                    control=True,
-                    show=False
-                ).add_to(m)
-
+            
     return m
 
 # MAIN TAB DISPLAY FUNCTIONS
@@ -4333,5 +4316,6 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
