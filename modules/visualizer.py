@@ -1345,16 +1345,19 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
     except Exception as e_summary:
          st.warning(f"Error al mostrar resumen de filtros: {e_summary}")
 
+
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
 
+    # Pestañas implementadas (según tu código anterior)
     tab_names = [
         "Animación GIF", "Superficies de Interpolación", "Morfometría",
         "Mapa de Riesgo Climático", "Validación Cruzada (LOOCV)",
         "Visualización Temporal", "Gráfico de Carrera", "Mapa Animado", "Comparación de Mapas"
     ]
     try:
+        # Asignar todas las pestañas
         gif_tab, kriging_tab, morph_tab, risk_map_tab, validation_tab, temporal_tab, race_tab, anim_tab, compare_tab = st.tabs(tab_names)
     except ValueError as e:
         st.error(f"Error al crear pestañas, verifica 'tab_names': {e}")
@@ -1483,7 +1486,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 mean_precip_values = masked_data[~np.isnan(masked_data)]; mean_precip = np.mean(mean_precip_values) if mean_precip_values.size > 0 else 0.0
 
                                 map_traces = []; dem_trace = None
-                                # --- CÁLCULO DE COORDENADAS CORREGIDO ---
+                                # --- CÁLCULO DE COORDENADAS CORREGIDO (Error 3) ---
                                 height_masked, width_masked = masked_data.shape
                                 transform_masked = masked_transform
                                 x_coords = [transform_masked.c + transform_masked.a * (i + 0.5) for i in range(width_masked)]
@@ -1498,7 +1501,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 masked_data_display_nan = masked_data_display.astype(float)
                                 masked_data_display_nan[np.isnan(masked_data_display_nan)] = np.nan # Asegurar que NaN siga siendo NaN
 
-                                # --- CORRECCIÓN INDENTACIÓN Y USO DE DEM ---
+                                # --- CORRECCIÓN INDENTACIÓN ---
                                 if show_dem_background and effective_dem_path_in_use:
                                     with st.spinner("Procesando y reproyectando DEM..."): # INDENTADO
                                         try:
@@ -1621,13 +1624,10 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
-                # --- LLAMADA CORREGIDA: Sin gdf_bounds Y SIN df_anual_non_na ---
+                # --- LLAMADA CORREGIDA (Error 1): Sin 'df_anual_non_na' ---
                 fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
                 try:
-                    # ¡¡VERIFICA TU DEFINICIÓN DE FUNCIÓN!!
-                    # Asumiendo que create_interpolation_surface toma:
-                    # (year, method, variogram_model, gdf_metadata)
-                    # Basado en el error anterior, quitamos df_anual_non_na
+                    # Asumiendo que la función toma (year, method, variogram_model, gdf_metadata)
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
                         year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
                         gdf_metadata=gdf_metadata_reg
@@ -1705,7 +1705,6 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                  except Exception as e_morph_tab: 
                      morph_results_morph = {"error": f"Error calculando morfometría: {e_morph_tab}"}
                      st.session_state['morph_results'] = morph_results_morph
-                 # No hay 'finally' para borrar el DEM base
 
             if morph_results_morph is not None:
                 if morph_results_morph.get("error"): st.error(morph_results_morph["error"])
@@ -1719,7 +1718,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         st.markdown("##### Curva Hipsométrica")
                         with st.spinner("Calculando curva hipsométrica..."):
                              try:
-                                 # --- CORRECCIÓN ERROR 'elevations' ---
+                                 # --- CORRECCIÓN ERROR 'elevations' (Error 3) ---
                                  # Envolver la llamada en try/except para capturar el error de Plotly
                                  fig_hypso = calculate_hypsometric_curve(unified_basin_gdf_morph, dem_fixed_path_morph)
                                  if fig_hypso: 
@@ -1731,6 +1730,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                              except ValueError as e_hypso_ve: # Capturar error específico de Plotly
                                  if 'elevations' in str(e_hypso_ve):
                                      st.error("Error al generar la figura de la curva hipsométrica: Propiedad 'elevations' inválida. Revisa la función 'calculate_hypsometric_curve'.")
+                                     st.error(f"Detalle: {e_hypso_ve}")
                                  else:
                                       st.error(f"Error en datos para curva hipsométrica: {e_hypso_ve}")
                              except Exception as e_hypso: 
@@ -4404,6 +4404,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
