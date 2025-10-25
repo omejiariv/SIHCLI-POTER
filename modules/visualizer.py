@@ -1460,16 +1460,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                     # Calcular media solo de píxeles válidos (no NaN)
                                     mean_precip_values = masked_data[~np.isnan(masked_data)]
                                     mean_precip = np.mean(mean_precip_values) if mean_precip_values.size > 0 else 0.0
-                                    masked_data_viz = masked_data.copy() # Copia para visualización
-                                    masked_data_viz[np.isnan(masked_data_viz)] = 0.0 # Reemplazar NaN si es necesario para cálculos (aunque para viz mejor mantener NaN)
+                                    masked_data_viz = masked_data.copy(); masked_data_viz[np.isnan(masked_data_viz)] = 0.0
 
-                                    map_traces = []
-                                    dem_trace = None
+                                    map_traces = []; dem_trace = None
 
                                     # --- CÁLCULO DE COORDENADAS CORREGIDO ---
-                                    # Obtener dimensiones del raster ENMASCARADO
                                     height_masked, width_masked = masked_data.shape
-                                    # Obtener transform del raster ENMASCARADO
                                     transform_masked = masked_transform 
                                     
                                     # Calcular coordenadas para los CENTROS de los píxeles
@@ -1628,25 +1624,26 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     variogram_model2_reg = None
                     if "Kriging" in method2_reg: variogram_model2_reg = st.selectbox("Variograma Mapa 2", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_2_reg")
 
-                # gdf_bounds_reg = gdf_filtered.total_bounds # Variable no usada
+                gdf_bounds_reg = gdf_filtered.total_bounds # Esto no se usa en la llamada, pero se define
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
-                # --- LLAMADA CORREGIDA: Sin gdf_bounds ---
-                # from modules.interpolation import create_interpolation_surface # Asegurar importación
-                fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado" # Inicializar
+                # --- LLAMADA CORREGIDA: Sin df_anual_non_na ---
+                fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
                 try:
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
-                        year1_reg, method1_reg, variogram_model1_reg,
-                        gdf_metadata_reg, df_anual_non_na # Pass df_anual_non_na positionally
+                        year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
+                        gdf_metadata=gdf_metadata_reg
+                        # df_anual_non_na=df_anual_non_na # <-- Argumento eliminado
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
                 except Exception as e1: st.error(f"Error Mapa 1: {e1}"); error1_reg = str(e1)
 
                 try:
                     fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
-                        year2_reg, method2_reg, variogram_model2_reg,
-                        gdf_metadata_reg, df_anual_non_na # Pass df_anual_non_na positionally
+                        year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
+                        gdf_metadata=gdf_metadata_reg
+                        # df_anual_non_na=df_anual_non_na # <-- Argumento eliminado
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
                 except Exception as e2: st.error(f"Error Mapa 2: {e2}"); error2_reg = str(e2)
@@ -4459,6 +4456,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
