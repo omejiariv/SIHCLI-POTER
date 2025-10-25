@@ -1775,8 +1775,6 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                             st.error(error_val)
                         else:
                             st.warning("No se obtuvieron resultados de validación.")
-                        except ImportError: st.error("Función 'perform_loocv_for_all_methods' no encontrada.")
-                        except Exception as e_val: st.error(f"Error validación: {e_val}"); st.error(traceback.format_exc())
                             
     with temporal_tab:
         st.subheader("Explorador Anual de Precipitación")
@@ -4443,6 +4441,7 @@ def display_life_zones_tab(**kwargs):
         
     elif not dem_path and os.path.exists(precip_raster_path):
          st.info("Sube un archivo DEM para habilitar la generación del mapa.")
+
 
 
 
