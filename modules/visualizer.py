@@ -1595,91 +1595,90 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
 
         # --- Modo Regional ---
         else:
-            df_anual_non_na = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
-            if not stations_for_analysis or df_anual_non_na.empty:
-                st.warning("No hay suficientes datos anuales para interpolación regional.")
-            else:
-                min_year_reg = int(df_anual_non_na[Config.YEAR_COL].min())
-                max_year_reg = int(df_anual_non_na[Config.YEAR_COL].max())
-                control_col_reg, map_col1_reg, map_col2_reg = st.columns([1, 2, 2])
+        df_anual_non_na = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
+        if not stations_for_analysis or df_anual_non_na.empty:
+            st.warning("No hay suficientes datos anuales para interpolación regional.")
+        else:
+            min_year_reg = int(df_anual_non_na[Config.YEAR_COL].min())
+            max_year_reg = int(df_anual_non_na[Config.YEAR_COL].max())
+            control_col_reg, map_col1_reg, map_col2_reg = st.columns([1, 2, 2])
 
-                with control_col_reg:
-                    st.markdown("#### Controles de los Mapas")
-                    interpolation_methods_reg = ["Kriging Ordinario", "IDW", "Spline (Thin Plate)"]
-                    if Config.ELEVATION_COL in gdf_filtered.columns and not gdf_filtered[Config.ELEVATION_COL].isnull().all():
-                         interpolation_methods_reg.insert(1, "Kriging con Deriva Externa (KED)")
+            with control_col_reg:
+                st.markdown("#### Controles de los Mapas")
+                interpolation_methods_reg = ["Kriging Ordinario", "IDW", "Spline (Thin Plate)"]
+                if Config.ELEVATION_COL in gdf_filtered.columns and not gdf_filtered[Config.ELEVATION_COL].isnull().all():
+                     interpolation_methods_reg.insert(1, "Kriging con Deriva Externa (KED)")
 
-                    st.markdown("**Mapa 1**"); year1_reg = st.slider("Año Mapa 1", min_year_reg, max_year_reg, max_year_reg, key="interp_year1_reg")
-                    method1_reg = st.selectbox("Método Mapa 1", options=interpolation_methods_reg, key="interp_method1_reg")
-                    variogram_model1_reg = None
-                    if "Kriging" in method1_reg: variogram_model1_reg = st.selectbox("Variograma Mapa 1", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_1_reg")
+                st.markdown("**Mapa 1**"); year1_reg = st.slider("Año Mapa 1", min_year_reg, max_year_reg, max_year_reg, key="interp_year1_reg")
+                method1_reg = st.selectbox("Método Mapa 1", options=interpolation_methods_reg, key="interp_method1_reg")
+                variogram_model1_reg = None
+                if "Kriging" in method1_reg: variogram_model1_reg = st.selectbox("Variograma Mapa 1", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_1_reg")
 
-                    st.markdown("---"); st.markdown("**Mapa 2**"); year2_reg = st.slider("Año Mapa 2", min_year_reg, max_year_reg, max(min_year_reg, max_year_reg - 1), key="interp_year2_reg")
-                    index_map2 = min(1, len(interpolation_methods_reg) - 1) if interpolation_methods_reg else 0 
-                    method2_reg = st.selectbox("Método Mapa 2", options=interpolation_methods_reg, index=index_map2, key="interp_method2_reg")
-                    variogram_model2_reg = None
-                    if "Kriging" in method2_reg: variogram_model2_reg = st.selectbox("Variograma Mapa 2", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_2_reg")
+                st.markdown("---"); st.markdown("**Mapa 2**"); year2_reg = st.slider("Año Mapa 2", min_year_reg, max_year_reg, max(min_year_reg, max_year_reg - 1), key="interp_year2_reg")
+                index_map2 = min(1, len(interpolation_methods_reg) - 1) if interpolation_methods_reg else 0 
+                method2_reg = st.selectbox("Método Mapa 2", options=interpolation_methods_reg, index=index_map2, key="interp_method2_reg")
+                variogram_model2_reg = None
+                if "Kriging" in method2_reg: variogram_model2_reg = st.selectbox("Variograma Mapa 2", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_2_reg")
 
-                cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
-                gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
+            gdf_bounds_reg = gdf_filtered.total_bounds # <-- DEFINIDO
+            cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
+            gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
-                # --- LLAMADA CORREGIDA (Error 1): Sin 'df_anual_non_na' (y sin gdf_bounds) ---
-                fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
-                try:
-                    # ¡¡VERIFICA TU DEFINICIÓN DE FUNCIÓN en interpolation.py!!
-                    # Asumiendo que create_interpolation_surface toma:
-                    # (year, method, variogram_model, gdf_metadata, df_anual)
-                    # Basado en el error anterior, 'df_anual_non_na' era el incorrecto
-                    # La función probablemente espera el dataframe de datos
-                    fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
-                        year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
-                        gdf_metadata=gdf_metadata_reg,
-                        df_anual=df_anual_melted # <-- Pasando df_anual_melted (o df_anual_non_na si es ese)
-                    )
-                except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
-                except TypeError as te1: 
-                     st.error(f"Error Mapa 1 (TypeError): {te1}. Verifica argumentos 'create_interpolation_surface'.")
-                     error1_reg = str(te1)
-                except Exception as e1: st.error(f"Error Mapa 1: {e1}"); error1_reg = str(e1)
+            # --- LLAMADA RESTAURADA (asumiendo definición del PDF) ---
+            fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
+            try:
+                fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
+                    year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
+                    gdf_bounds=gdf_bounds_reg, # <-- RE-AÑADIDO
+                    gdf_metadata=gdf_metadata_reg,
+                    df_anual_non_na=df_anual_non_na # <-- RE-AÑADIDO
+                )
+            except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
+            except TypeError as te1: 
+                 st.error(f"Error Mapa 1 (TypeError): {te1}. ¡Revisa la definición de 'create_interpolation_surface' en interpolation.py!")
+                 error1_reg = str(te1)
+            except Exception as e1: st.error(f"Error Mapa 1: {e1}"); error1_reg = str(e1)
 
-                try:
-                    fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
-                        year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
-                        gdf_metadata=gdf_metadata_reg,
-                        df_anual=df_anual_melted # <-- Pasando df_anual_melted (o df_anual_non_na si es ese)
-                    )
-                except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
-                except TypeError as te2:
-                     st.error(f"Error Mapa 2 (TypeError): {te2}. Verifica argumentos 'create_interpolation_surface'.")
-                     error2_reg = str(te2)
-                except Exception as e2: st.error(f"Error Mapa 2: {e2}"); error2_reg = str(e2)
-                # --- FIN CORRECCIÓN ---
+            try:
+                fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
+                    year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
+                    gdf_bounds=gdf_bounds_reg, # <-- RE-AÑADIDO
+                    gdf_metadata=gdf_metadata_reg,
+                    df_anual_non_na=df_anual_non_na # <-- RE-AÑADIDO
+                )
+            except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
+            except TypeError as te2:
+                 st.error(f"Error Mapa 2 (TypeError): {te2}. ¡Revisa la definición de 'create_interpolation_surface' en interpolation.py!")
+                 error2_reg = str(te2)
+            except Exception as e2: st.error(f"Error Mapa 2: {e2}"); error2_reg = str(e2)
+            # --- FIN CORRECCIÓN ---
 
-                with map_col1_reg:
-                    if fig1_reg: st.plotly_chart(fig1_reg, use_container_width=True)
-                    elif error1_reg and error1_reg != "No ejecutado": st.info(f"Mapa 1: {error1_reg}")
-                    else: st.info("No se pudo generar el mapa 1.")
+            with map_col1_reg:
+                if fig1_reg: st.plotly_chart(fig1_reg, use_container_width=True)
+                elif error1_reg and error1_reg != "No ejecutado": st.info(f"Mapa 1: {error1_reg}")
+                else: st.info("No se pudo generar el mapa 1.")
 
-                with map_col2_reg:
-                    if fig2_reg: st.plotly_chart(fig2_reg, use_container_width=True)
-                    elif error2_reg and error2_reg != "No ejecutado": st.info(f"Mapa 2: {error2_reg}")
-                    else: st.info("No se pudo generar el mapa 2.")
+            with map_col2_reg:
+                if fig2_reg: st.plotly_chart(fig2_reg, use_container_width=True)
+                elif error2_reg and error2_reg != "No ejecutado": st.info(f"Mapa 2: {error2_reg}")
+                else: st.info("No se pudo generar el mapa 2.")
 
-                if fig_var1_reg or fig_var2_reg:
-                    st.markdown("---"); st.markdown("##### Variogramas (si aplica Kriging)")
-                    col_var1, col_var2 = st.columns(2)
-                    with col_var1:
-                        if fig_var1_reg:
-                            st.pyplot(fig_var1_reg); buf_var1 = io.BytesIO(); fig_var1_reg.savefig(buf_var1, format="png", bbox_inches='tight')
-                            st.download_button("Descargar Variograma 1", buf_var1.getvalue(), f"variograma_{year1_reg}_{method1_reg}.png", "image/png")
-                            plt.close(fig_var1_reg)
-                        else: st.caption("Variograma no disponible para Mapa 1.")
-                    with col_var2:
-                        if fig_var2_reg:
-                            st.pyplot(fig_var2_reg); buf_var2 = io.BytesIO(); fig_var2_reg.savefig(buf_var2, format="png", bbox_inches='tight')
-                            st.download_button("Descargar Variograma 2", buf_var2.getvalue(), f"variograma_{year2_reg}_{method2_reg}.png", "image/png")
-                            plt.close(fig_var2_reg)
-                        else: st.caption("Variograma no disponible para Mapa 2.")
+            if fig_var1_reg or fig_var2_reg:
+                st.markdown("---"); st.markdown("##### Variogramas (si aplica Kriging)")
+                col_var1, col_var2 = st.columns(2)
+                with col_var1:
+                    if fig_var1_reg:
+                        st.pyplot(fig_var1_reg); buf_var1 = io.BytesIO(); fig_var1_reg.savefig(buf_var1, format="png", bbox_inches='tight')
+                        st.download_button("Descargar Variograma 1", buf_var1.getvalue(), f"variograma_{year1_reg}_{method1_reg}.png", "image/png")
+                        plt.close(fig_var1_reg)
+                    else: st.caption("Variograma no disponible para Mapa 1.")
+                with col_var2:
+                    if fig_var2_reg:
+                        st.pyplot(fig_var2_reg); buf_var2 = io.BytesIO(); fig_var2_reg.savefig(buf_var2, format="png", bbox_inches='tight')
+                        st.download_button("Descargar Variograma 2", buf_var2.getvalue(), f"variograma_{year2_reg}_{method2_reg}.png", "image/png")
+                        plt.close(fig_var2_reg)
+                    else: st.caption("Variograma no disponible para Mapa 2.")
+                        
         # --- Fin Sección Regional ---
 
     # --- Pestaña Morfometría ---
@@ -4199,7 +4198,7 @@ def display_life_zones_tab(**kwargs):
         classified_raster, output_profile, name_map = generate_life_zone_map(
             effective_dem_path_for_function, # Pasar la ruta efectiva
             precip_raster_path,
-            maskgeometry=mask_arg, # <-- CORREGIDO: Se quitó el guion bajo
+            mask_geometry=mask_arg,
             downscale_factor=downscale_factor
         )
 
@@ -4410,6 +4409,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
