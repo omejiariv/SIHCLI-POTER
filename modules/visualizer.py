@@ -1612,18 +1612,16 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado" # Inicializar
                 try:
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
-                        year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
-                        # gdf_bounds=gdf_bounds_reg, # Argumento eliminado
-                        gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
+                        year1_reg, method1_reg, variogram_model1_reg,
+                        gdf_metadata_reg, df_anual_non_na # Pass df_anual_non_na positionally
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
                 except Exception as e1: st.error(f"Error Mapa 1: {e1}"); error1_reg = str(e1)
 
                 try:
                     fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
-                        year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
-                        # gdf_bounds=gdf_bounds_reg, # Argumento eliminado
-                        gdf_metadata=gdf_metadata_reg, df_anual_non_na=df_anual_non_na
+                        year2_reg, method2_reg, variogram_model2_reg,
+                        gdf_metadata_reg, df_anual_non_na # Pass df_anual_non_na positionally
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
                 except Exception as e2: st.error(f"Error Mapa 2: {e2}"); error2_reg = str(e2)
@@ -4436,6 +4434,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
