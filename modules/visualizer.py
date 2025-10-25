@@ -302,17 +302,25 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
         # Fallback si la config está mal
         folium.TileLayer(tiles="cartodbpositron", attr="CartoDB").add_to(m)
 
-    # Lógica de Overlays (WMS, GeoJSON, etc.)
+    # Lógica de Overlays (WMS, GeoJSON, etc. - como en tu código)
     if overlays_config:
         # Asumiendo que overlays_config es una LISTA de diccionarios
         for layer_config in overlays_config:
+            # Asegurarse que layer_config sea un diccionario
+            if not isinstance(layer_config, dict):
+                # st.warning(f"Elemento de overlay no es un diccionario: {layer_config}")
+                continue # Saltar si no es un diccionario
+
             layer_type = layer_config.get("type", "tile")
             url = layer_config.get("url")
             if not url: continue
-            layer_name = layer_config.get("attr", "Overlay") # Usar 'attr' o 'name'
+            layer_name = layer_config.get("attr", layer_config.get("name", "Overlay")) # Usar 'attr' o 'name'
 
             try:
                 if layer_type == "wms":
+                    if "layers" not in layer_config:
+                        # st.warning(f"Capa WMS '{layer_name}' no tiene 'layers' definidos.")
+                        continue
                     WmsTileLayer(
                         url=url,
                         layers=layer_config["layers"], # Requiere 'layers'
@@ -322,7 +330,7 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
                         attr=layer_name
                     ).add_to(m)
                 elif layer_type == "geojson":
-                    # Asumiendo que load_geojson_from_url está definida
+                    # Asumiendo que load_geojson_from_url está definida en otra parte
                     geojson_data = load_geojson_from_url(url) 
                     if geojson_data:
                         style_function = lambda x: layer_config.get("style", {})
@@ -4333,6 +4341,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
