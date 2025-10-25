@@ -89,10 +89,10 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
         # st.write("Clasificación completada.")
 
         # --- APLICAR MÁSCARA (Usando mask_geometry SIN guion bajo) ---
-        if mask_geometry is not None and not mask_geometry.empty:
+        if mask_geometry is not None and not mask_geometry.empty: # <-- SIN GUION BAJO
             # st.write("Aplicando máscara de geometría...")
             try:
-                mask_geometry_reproj = mask_geometry.to_crs(dst_profile['crs'])
+                mask_geometry_reproj = mask_geometry.to_crs(dst_profile['crs']) # <-- SIN GUION BAJO
                 temp_classified_path = "temp_classified_raster_mask.tif"
                 output_profile_mask = dst_profile.copy(); output_profile_mask.update({'dtype': rasterio.int16, 'nodata': 0, 'count': 1})
                 with rasterio.open(temp_classified_path, 'w', **output_profile_mask) as dst: dst.write(classified_raster, 1)
