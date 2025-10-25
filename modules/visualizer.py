@@ -1381,15 +1381,15 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
 
-    # Reducir la lista de pestañas a las que están implementadas
+    # Pestañas implementadas
     tab_names = [
         "Animación GIF", "Superficies de Interpolación", "Morfometría",
-        "Mapa de Riesgo Climático", "Validación Cruzada (LOOCV)"
-        # "Visualización Temporal", "Gráfico de Carrera", "Mapa Animado", "Comparación de Mapas" # Comentadas
+        "Mapa de Riesgo Climático", "Validación Cruzada (LOOCV)",
+        "Visualización Temporal", "Gráfico de Carrera", "Mapa Animado", "Comparación de Mapas"
     ]
     try:
-        # Asignar solo las pestañas en la lista reducida
-        gif_tab, kriging_tab, morph_tab, risk_map_tab, validation_tab = st.tabs(tab_names)
+        # Asignar todas las pestañas
+        gif_tab, kriging_tab, morph_tab, risk_map_tab, validation_tab, temporal_tab, race_tab, anim_tab, compare_tab = st.tabs(tab_names)
     except ValueError as e:
         st.error(f"Error al crear pestañas, verifica 'tab_names': {e}")
         return
@@ -1543,11 +1543,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                      y_coords = y_coords_raw; masked_data_display = masked_data
                                 
                                 masked_data_display_nan = masked_data_display.astype(float)
-                                # masked_data_display_nan[masked_data_display_nan == 0.0] = np.nan # Opcional
+                                masked_data_display_nan[np.isnan(masked_data_display_nan)] = 0.0 # Convertir NaN a 0 para DEM
+                                masked_data_display_nan[masked_data_display_nan == 0.0] = np.nan # Hacer ceros transparentes
 
+                                # --- CORRECCIÓN INDENTACIÓN ---
                                 if show_dem_background and effective_dem_path_in_use:
-                                    # --- BLOQUE INDENTADO CORREGIDO ---
-                                    with st.spinner("Procesando y reproyectando DEM..."):
+                                    with st.spinner("Procesando y reproyectando DEM..."): # INDENTADO
                                         try:
                                             with rasterio.open(effective_dem_path_in_use) as dem_src:
                                                 dem_reprojected = np.empty(masked_data.shape, dtype=rasterio.float32)
@@ -1557,7 +1558,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                                 map_traces.append(dem_trace)
                                         except Exception as e_dem_viz:
                                             st.warning(f"No se pudo procesar DEM para fondo: {e_dem_viz}")
-                                    # --- FIN BLOQUE INDENTADO ---
+                                # --- FIN CORRECCIÓN INDENTACIÓN ---
 
                                 precip_trace = go.Heatmap(z=masked_data_display_nan, x=x_coords, y=y_coords, colorscale='viridis', colorbar=dict(title='Precipitación (mm)'), opacity=0.7 if dem_trace is not None else 1.0, name='Precipitación', hoverinfo='skip')
                                 map_traces.append(precip_trace)
@@ -1665,24 +1666,24 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     variogram_model2_reg = None
                     if "Kriging" in method2_reg: variogram_model2_reg = st.selectbox("Variograma Mapa 2", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_2_reg")
 
-                gdf_bounds_reg = gdf_filtered.total_bounds
+                # gdf_bounds_reg = gdf_filtered.total_bounds # Variable no usada
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
                 # --- LLAMADA CORREGIDA: Sin gdf_bounds Y SIN df_anual_non_na ---
                 fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
                 try:
-                    # Asumiendo que create_interpolation_surface ahora toma (year, method, variogram_model, gdf_metadata)
                     # ¡¡VERIFICA TU DEFINICIÓN DE FUNCIÓN!!
-                    # Basado en el error, quitamos df_anual_non_na y gdf_bounds
+                    # Asumiendo que create_interpolation_surface toma:
+                    # (year, method, variogram_model, gdf_metadata, df_anual_non_na)
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
                         year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
                         gdf_metadata=gdf_metadata_reg,
-                        df_anual_non_na=df_anual_melted # <-- RE-AÑADIDO df_anual_melted (o df_anual_non_na si es el correcto)
+                        df_anual_non_na=df_anual_melted # <-- RE-AÑADIDO (usar df_anual_melted o df_anual_non_na)
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
                 except TypeError as te1: 
-                     st.error(f"Error Mapa 1 (TypeError): {te1}. Verifica los argumentos de 'create_interpolation_surface'.")
+                     st.error(f"Error Mapa 1 (TypeError): {te1}. Verifica argumentos 'create_interpolation_surface'.")
                      error1_reg = str(te1)
                 except Exception as e1: st.error(f"Error Mapa 1: {e1}"); error1_reg = str(e1)
 
@@ -1690,11 +1691,11 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
                         year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
                         gdf_metadata=gdf_metadata_reg,
-                        df_anual_non_na=df_anual_melted # <-- RE-AÑADIDO df_anual_melted (o df_anual_non_na si es el correcto)
+                        df_anual_non_na=df_anual_melted # <-- RE-AÑADIDO (usar df_anual_melted o df_anual_non_na)
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
                 except TypeError as te2:
-                     st.error(f"Error Mapa 2 (TypeError): {te2}. Verifica los argumentos de 'create_interpolation_surface'.")
+                     st.error(f"Error Mapa 2 (TypeError): {te2}. Verifica argumentos 'create_interpolation_surface'.")
                      error2_reg = str(te2)
                 except Exception as e2: st.error(f"Error Mapa 2: {e2}"); error2_reg = str(e2)
                 # --- FIN CORRECCIÓN ---
@@ -1846,251 +1847,170 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                             st.plotly_chart(fig_val, use_container_width=True)
                         elif error_val: st.error(error_val)
                         else: st.warning("No se obtuvieron resultados de validación.")
-                            
+
+    # --- Pestañas restantes (DESCOMENTADAS) ---
     with temporal_tab:
         st.subheader("Explorador Anual de Precipitación")
-
-        df_anual_melted_non_na = \
-            df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
-
+        df_anual_melted_non_na = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
         if not df_anual_melted_non_na.empty:
             all_years_int = sorted(df_anual_melted_non_na[Config.YEAR_COL].unique())
-
             controls_col, map_col = st.columns([1, 3])
-
             with controls_col:
                 st.markdown("##### Opciones de Visualización")
-                selected_base_map_config, selected_overlays_config = display_map_controls(st,
-                                                                                         "temporal")
+                try:
+                    selected_base_map_config, selected_overlays_config = display_map_controls(st, "temporal")
+                except NameError:
+                    st.error("Función 'display_map_controls' no encontrada.")
+                    selected_base_map_config = {'tiles': 'cartodbpositron', 'attr': 'CartoDB'}
+                    selected_overlays_config = []
+                
                 selected_year = None
                 if len(all_years_int) > 1:
-                    selected_year = st.slider('Seleccione un Año para Explorar',
-                                             min_value=min(all_years_int),
-                                             max_value=max(all_years_int),
-                                             value=min(all_years_int),
-                                             key="temporal_year_slider")
-
+                    selected_year = st.slider('Seleccione un Año para Explorar', min_value=min(all_years_int), max_value=max(all_years_int), value=min(all_years_int), key="temporal_year_slider")
                 elif len(all_years_int) == 1:
-                    selected_year = all_years_int[0]
-                    st.info(f"Mostrando único año disponible: {selected_year}")
-
+                    selected_year = all_years_int[0]; st.info(f"Mostrando único año disponible: {selected_year}")
+                
                 if selected_year:
                     st.markdown(f"#### Resumen del Año: {selected_year}")
-
-                    df_year_filtered = \
-                        df_anual_melted_non_na[df_anual_melted_non_na[Config.YEAR_COL] == selected_year]
-
+                    df_year_filtered = df_anual_melted_non_na[df_anual_melted_non_na[Config.YEAR_COL] == selected_year]
                     if not df_year_filtered.empty:
                         num_stations = len(df_year_filtered)
                         st.metric("Estaciones con Datos", num_stations)
-
-                        if num_stations > 1:
-                            st.metric("Promedio Anual",
-                                      f"{df_year_filtered[Config.PRECIPITATION_COL].mean():.0f} mm")
-                            st.metric("Máximo Anual",
-                                      f"{df_year_filtered[Config.PRECIPITATION_COL].max():.0f} mm")
-                        else:
-                            st.metric("Precipitación Anual",
-                                      f"{df_year_filtered[Config.PRECIPITATION_COL].iloc[0]:.0f} mm")
-
+                        if num_stations > 0: # Evitar error en mean/max
+                            st.metric("Promedio Anual", f"{df_year_filtered[Config.PRECIPITATION_COL].mean():.0f} mm")
+                            st.metric("Máximo Anual", f"{df_year_filtered[Config.PRECIPITATION_COL].max():.0f} mm")
+                    
             with map_col:
                 if selected_year:
-                    # CORRECCIÓN DE ATTRIBUTEERROR: Extraer solo la clave 'tiles' (YA ESTABA EN EL CÓDIGO ORIGINAL, PERO ES VÁLIDA)
-                    m_temporal = create_folium_map([4.57, -74.29], 5,
-                                                   {'tiles': selected_base_map_config['tiles'], 'attr': selected_base_map_config['attr']}, selected_overlays_config)
-
-                    df_year_filtered = \
-                        df_anual_melted_non_na[df_anual_melted_non_na[Config.YEAR_COL] == selected_year]
-
-                    if not df_year_filtered.empty:
-                        cols_to_merge = [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL,
-                                         Config.ALTITUDE_COL, 'geometry']
-
-                        df_map_data = pd.merge(df_year_filtered,
-                                               gdf_filtered[cols_to_merge].drop_duplicates(subset=[Config.STATION_NAME_COL]),
-                                               on=Config.STATION_NAME_COL, how="inner")
-
-                        if not df_map_data.empty:
-                            min_val, max_val = \
-                                df_anual_melted_non_na[Config.PRECIPITATION_COL].min(), \
-                                df_anual_melted_non_na[Config.PRECIPITATION_COL].max()
-
-                            if min_val >= max_val: max_val = min_val + 1
-
-                            colormap = cm.LinearColormap(colors=plt.cm.viridis.colors, vmin=min_val,
-                                                         vmax=max_val)
-
-                            for _, row in df_map_data.iterrows():
-                                popup_object = generate_annual_map_popup_html(row,
-                                                                              df_anual_melted_non_na)
-
-                                folium.CircleMarker(
-                                    location=[row['geometry'].y, row['geometry'].x], radius=5,
-                                    color=colormap(row[Config.PRECIPITATION_COL]), fill=True,
-                                    fill_color=colormap(row[Config.PRECIPITATION_COL]), fill_opacity=0.8,
-                                    tooltip=row[Config.STATION_NAME_COL], popup=popup_object
-                                ).add_to(m_temporal)
-
-                            temp_gdf = gpd.GeoDataFrame(df_map_data, geometry='geometry',
-                                                         crs=gdf_filtered.crs)
-
-                            if not temp_gdf.empty:
-                                bounds = temp_gdf.total_bounds
-                                if np.all(np.isfinite(bounds)):
-                                    m_temporal.fit_bounds([[bounds[1], bounds[0]], [bounds[3],
-                                                                                    bounds[2]]])
-
+                    try:
+                        m_temporal = create_folium_map([4.57, -74.29], 5, {'tiles': selected_base_map_config['tiles'], 'attr': selected_base_map_config['attr']}, selected_overlays_config)
+                        df_year_filtered_map = df_anual_melted_non_na[df_anual_melted_non_na[Config.YEAR_COL] == selected_year]
+                        if not df_year_filtered_map.empty:
+                            cols_to_merge_temp = [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, 'geometry']
+                            df_map_data = pd.merge(df_year_filtered_map, gdf_filtered[cols_to_merge_temp].drop_duplicates(subset=[Config.STATION_NAME_COL]), on=Config.STATION_NAME_COL, how="inner")
+                            if not df_map_data.empty:
+                                min_val, max_val = df_anual_melted_non_na[Config.PRECIPITATION_COL].min(), df_anual_melted_non_na[Config.PRECIPITATION_COL].max()
+                                if min_val >= max_val: max_val = min_val + 1
+                                colormap = cm.LinearColormap(colors=plt.cm.viridis.colors, vmin=min_val, vmax=max_val)
+                                for _, row in df_map_data.iterrows():
+                                    if 'geometry' in row and row['geometry'] is not None:
+                                        popup_object = generate_annual_map_popup_html(row, df_anual_melted_non_na)
+                                        folium.CircleMarker(
+                                            location=[row['geometry'].y, row['geometry'].x], radius=5,
+                                            color=colormap(row[Config.PRECIPITATION_COL]), fill=True,
+                                            fill_color=colormap(row[Config.PRECIPITATION_COL]), fill_opacity=0.8,
+                                            tooltip=row[Config.STATION_NAME_COL], popup=popup_object
+                                        ).add_to(m_temporal)
+                                temp_gdf = gpd.GeoDataFrame(df_map_data, geometry='geometry', crs=gdf_filtered.crs)
+                                if not temp_gdf.empty:
+                                    bounds = temp_gdf.total_bounds
+                                    if np.all(np.isfinite(bounds)): m_temporal.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
                             folium.LayerControl().add_to(m_temporal)
                             folium_static(m_temporal, height=700, width=None)
+                    except NameError as e_temp:
+                         st.error(f"Error en Pestaña Temporal: {e_temp}. Asegúrate que las funciones 'create_folium_map' y 'generate_annual_map_popup_html' estén definidas.")
+                    except Exception as e_temp_map:
+                         st.error(f"Error al crear mapa temporal: {e_temp_map}")
 
     with race_tab:
         st.subheader("Ranking Anual de Precipitación por Estación")
-        df_anual_valid = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
-
-        if not df_anual_valid.empty:
+        df_anual_valid_race = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
+        if not df_anual_valid_race.empty:
             fig_racing = px.bar(
-                df_anual_valid,
-                x=Config.PRECIPITATION_COL,
-                y=Config.STATION_NAME_COL,
-                animation_frame=Config.YEAR_COL,
-                orientation='h',
-                labels={
-                    Config.PRECIPITATION_COL: 'Precipitación Anual (mm)',
-                    Config.STATION_NAME_COL: 'Estación'
-                },
+                df_anual_valid_race,
+                x=Config.PRECIPITATION_COL, y=Config.STATION_NAME_COL,
+                animation_frame=Config.YEAR_COL, orientation='h',
+                labels={Config.PRECIPITATION_COL: 'Precipitación Anual (mm)', Config.STATION_NAME_COL: 'Estación'},
                 title="Evolución de Precipitación Anual por Estación"
             )
-
-            # Bloque original: Ajuste de altura dinámico y ordenamiento correcto.
-            fig_racing.update_layout(
-                height=max(600, len(stations_for_analysis) * 35),
-                yaxis=dict(categoryorder='total ascending')
-            )
-
+            fig_racing.update_layout(height=max(600, len(stations_for_analysis) * 35), yaxis=dict(categoryorder='total ascending'))
             st.plotly_chart(fig_racing, use_container_width=True)
-        else:
-            st.warning("No hay suficientes datos anuales con los filtros actuales para generar el Gráfico de Carrera.")
+        else: st.warning("No hay datos anuales suficientes para Gráfico de Carrera.")
 
     with anim_tab:
         st.subheader("Mapa Animado de Precipitación Anual")
-
-        df_anual_valid = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
-
-        if not df_anual_valid.empty:
-            # Asegurar que se tienen las coordenadas en el gdf_filtered
-            gdf_coords = gdf_filtered[[Config.STATION_NAME_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL]].drop_duplicates(subset=[Config.STATION_NAME_COL])
-            
-            df_anim_merged = pd.merge(
-                df_anual_valid,
-                gdf_coords, # Usamos el gdf con solo coordenadas
-                on=Config.STATION_NAME_COL, how="inner"
-            )
-
+        df_anual_valid_anim = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
+        if not df_anual_valid_anim.empty:
+            gdf_coords_anim = gdf_filtered[[Config.STATION_NAME_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL]].drop_duplicates(subset=[Config.STATION_NAME_COL])
+            df_anim_merged = pd.merge(df_anual_valid_anim, gdf_coords_anim, on=Config.STATION_NAME_COL, how="inner")
             if not df_anim_merged.empty:
                 fig_mapa_animado = px.scatter_geo(
                     df_anim_merged,
                     lat=Config.LATITUDE_COL, lon=Config.LONGITUDE_COL,
                     color=Config.PRECIPITATION_COL, size=Config.PRECIPITATION_COL,
-                    hover_name=Config.STATION_NAME_COL,
-                    animation_frame=Config.YEAR_COL,
-                    projection='natural earth',
-                    title='Precipitación Anual por Estación',
-                    color_continuous_scale=px.colors.sequential.Viridis # Añadir una escala de color
+                    hover_name=Config.STATION_NAME_COL, animation_frame=Config.YEAR_COL,
+                    projection='natural earth', title='Precipitación Anual por Estación',
+                    color_continuous_scale=px.colors.sequential.Viridis
                 )
-
                 fig_mapa_animado.update_geos(fitbounds="locations", visible=True)
                 st.plotly_chart(fig_mapa_animado, use_container_width=True)
-
-            else:
-                st.warning("No se pudieron combinar los datos anuales con la información geográfica de las estaciones.")
-
-        else:
-            st.warning("No hay suficientes datos anuales con los filtros actuales para generar el Mapa Animado.")
+            else: st.warning("No se pudieron combinar datos anuales con coordenadas.")
+        else: st.warning("No hay datos anuales suficientes para Mapa Animado.")
 
     with compare_tab:
         st.subheader("Comparación de Mapas Anuales")
-        df_anual_valid = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
-        all_years = sorted(df_anual_valid[Config.YEAR_COL].unique())
-
-        if len(all_years) > 1:
-            control_col, map_col1, map_col2 = st.columns([1, 2, 2])
-            with control_col:
+        df_anual_valid_comp = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
+        all_years_comp = sorted(df_anual_valid_comp[Config.YEAR_COL].unique())
+        if len(all_years_comp) > 1:
+            control_col_comp, map_col1_comp, map_col2_comp = st.columns([1, 2, 2])
+            with control_col_comp:
                 st.markdown("##### Controles de Mapa")
-                selected_base_map_config, selected_overlays_config = display_map_controls(st, "compare")
-                min_year, max_year = int(all_years[0]), int(all_years[-1])
+                try:
+                    selected_base_map_config_comp, selected_overlays_config_comp = display_map_controls(st, "compare")
+                except NameError:
+                    st.error("Función 'display_map_controls' no encontrada.")
+                    selected_base_map_config_comp = {'tiles': 'cartodbpositron', 'attr': 'CartoDB'}
+                    selected_overlays_config_comp = []
                 
-                st.markdown("**Mapa 1**")
-                year1 = st.selectbox("Seleccione el primer año", options=all_years, index=len(all_years) - 1, key="compare_year1")
+                min_year_comp, max_year_comp = int(all_years_comp[0]), int(all_years_comp[-1])
+                st.markdown("**Mapa 1**"); year1_comp = st.selectbox("Primer año", options=all_years_comp, index=len(all_years_comp) - 1, key="compare_year1")
+                st.markdown("**Mapa 2**"); year2_comp = st.selectbox("Segundo año", options=all_years_comp, index=max(0, len(all_years_comp) - 2), key="compare_year2")
                 
-                st.markdown("**Mapa 2**")
-                year2 = st.selectbox(
-                    "Seleccione el segundo año",
-                    options=all_years,
-                    index=len(all_years) - 2 if len(all_years) > 1 else 0,
-                    key="compare_year2"
-                )
+                min_precip_comp, max_precip_comp = int(df_anual_valid_comp[Config.PRECIPITATION_COL].min()), int(df_anual_valid_comp[Config.PRECIPITATION_COL].max())
+                if min_precip_comp >= max_precip_comp: max_precip_comp = min_precip_comp + 1
+                color_range_comp = st.slider("Rango de Escala de Color (mm)", min_precip_comp, max_precip_comp, (min_precip_comp, max_precip_comp), key="color_compare")
+                colormap_comp = cm.LinearColormap(colors=plt.cm.viridis.colors, vmin=color_range_comp[0], vmax=color_range_comp[1])
 
-                min_precip, max_precip = int(df_anual_valid[Config.PRECIPITATION_COL].min()), int(df_anual_valid[Config.PRECIPITATION_COL].max())
-                if min_precip >= max_precip: max_precip = min_precip + 1
-                color_range = st.slider("Rango de Escala de Color (mm)", min_precip, max_precip, (min_precip, max_precip), key="color_compare")
-                colormap = cm.LinearColormap(
-                    colors=plt.cm.viridis.colors,
-                    vmin=color_range[0],
-                    vmax=color_range[1]
-                )
-
+            # Definir la función interna
             def create_compare_map(data, year, col, gdf_stations_info, df_anual_full):
                 col.markdown(f"**Precipitación en {year}**")
+                try:
+                    m_comp = create_folium_map([6.24, -75.58], 6, {'tiles': selected_base_map_config_comp['tiles'], 'attr': selected_base_map_config_comp['attr']}, selected_overlays_config_comp)
+                    if not data.empty:
+                        data_with_geom = pd.merge(data, gdf_stations_info, on=Config.STATION_NAME_COL)
+                        gpd_data = gpd.GeoDataFrame(data_with_geom, geometry='geometry', crs=gdf_stations_info.crs)
+                        for _, row in gpd_data.iterrows():
+                            if pd.notna(row[Config.PRECIPITATION_COL]) and 'geometry' in row and row['geometry'] is not None:
+                                popup_object_comp = generate_annual_map_popup_html(row, df_anual_full)
+                                folium.CircleMarker(
+                                    location=[row['geometry'].y, row['geometry'].x], radius=5,
+                                    color=colormap_comp(row[Config.PRECIPITATION_COL]),
+                                    fill=True, fill_color=colormap_comp(row[Config.PRECIPITATION_COL]), fill_opacity=0.8,
+                                    tooltip=row[Config.STATION_NAME_COL], popup=popup_object_comp
+                                ).add_to(m_comp)
+                        if not gpd_data.empty:
+                            bounds_comp = gpd_data.total_bounds
+                            if np.all(np.isfinite(bounds_comp)): m_comp.fit_bounds([[bounds_comp[1], bounds_comp[0]], [bounds_comp[3], bounds_comp[2]]])
+                    folium.LayerControl().add_to(m_comp)
+                    with col: folium_static(m_comp, height=450, width=None)
+                except NameError as e_comp_inner:
+                     st.error(f"Error en create_compare_map: {e_comp_inner}. Faltan 'create_folium_map' o 'generate_annual_map_popup_html'.")
+                except Exception as e_comp_map:
+                     st.error(f"Error al crear mapa de comparación: {e_comp_map}")
 
-                m = create_folium_map([6.24, -75.58], 6, {'tiles': selected_base_map_config['tiles'], 'attr': selected_base_map_config['attr']},
-                                      selected_overlays_config)
-
-                if not data.empty:
-                    # Se incluye la geometría para el join
-                    data_with_geom = pd.merge(data, gdf_stations_info,
-                                              on=Config.STATION_NAME_COL)
-
-                    gpd_data = gpd.GeoDataFrame(data_with_geom, geometry='geometry',
-                                                 crs=gdf_stations_info.crs)
-
-                    for _, row in gpd_data.iterrows():
-                        if pd.notna(row[Config.PRECIPITATION_COL]):
-                            popup_object = generate_annual_map_popup_html(row, df_anual_full)
-
-                            folium.CircleMarker(
-                                location=[row['geometry'].y, row['geometry'].x], radius=5,
-                                color=colormap(row[Config.PRECIPITATION_COL]),
-                                fill=True, fill_color=colormap(row[Config.PRECIPITATION_COL]), fill_opacity=0.8,
-                                tooltip=row[Config.STATION_NAME_COL], popup=popup_object
-                            ).add_to(m)
-
-                    if not gpd_data.empty:
-                        # Asegurar que los límites son válidos antes de usarlos
-                        bounds = gpd_data.total_bounds
-                        if np.all(np.isfinite(bounds)):
-                           m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-
-                    folium.LayerControl().add_to(m)
-
-                with col:
-                    folium_static(m, height=450, width=None)
-
-            # Necesitamos más columnas en gdf_geometries para el merge en create_compare_map
-            gdf_geometries = gdf_filtered[[Config.STATION_NAME_COL,
-                                           Config.MUNICIPALITY_COL, Config.ALTITUDE_COL,
-                                           'geometry']].drop_duplicates(subset=[Config.STATION_NAME_COL])
-
-            data_year1 = df_anual_valid[df_anual_valid[Config.YEAR_COL] == year1]
-            data_year2 = df_anual_valid[df_anual_valid[Config.YEAR_COL] == year2]
-
-            create_compare_map(data_year1, year1, map_col1, gdf_geometries,
-                               df_anual_valid)
-
-            create_compare_map(data_year2, year2, map_col2, gdf_geometries,
-                               df_anual_valid)
-
+            # Preparar datos y llamar a la función interna
+            try:
+                cols_geom = [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, 'geometry']
+                gdf_geometries = gdf_filtered[cols_geom].drop_duplicates(subset=[Config.STATION_NAME_COL])
+                data_year1 = df_anual_valid_comp[df_anual_valid_comp[Config.YEAR_COL] == year1_comp]
+                data_year2 = df_anual_valid_comp[df_anual_valid_comp[Config.YEAR_COL] == year2_comp]
+                
+                create_compare_map(data_year1, year1_comp, map_col1_comp, gdf_geometries, df_anual_valid_comp)
+                create_compare_map(data_year2, year2_comp, map_col2_comp, gdf_geometries, df_anual_valid_comp)
+            except Exception as e_comp_call:
+                 st.error(f"Error al preparar datos para comparación: {e_comp_call}")
         else:
-            st.warning("Se necesitan datos de al menos dos años diferentes para generar la Comparación de Mapas.")
+            st.warning("Se necesitan datos de al menos dos años diferentes para Comparación de Mapas.")
 
 
 def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_analysis,
@@ -4529,6 +4449,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
