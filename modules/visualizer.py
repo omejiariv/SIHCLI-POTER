@@ -1502,7 +1502,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 masked_data_display_nan = masked_data_display.astype(float)
                                 masked_data_display_nan[np.isnan(masked_data_display_nan)] = np.nan # Asegurar que NaN siga siendo NaN
 
-                                # --- CORRECCIÓN INDENTACIÓN (Error 4) ---
+                                # --- CORRECCIÓN INDENTACIÓN (Error de indentación anterior) ---
                                 if show_dem_background and effective_dem_path_in_use:
                                     with st.spinner("Procesando y reproyectando DEM..."): # INDENTADO
                                         try:
@@ -1555,9 +1555,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         except Exception as e:
                             import traceback
                             st.session_state['error_msg'] = f"Ocurrió un error crítico: {e}\n\n{traceback.format_exc()}"
-                        # --- CORRECCIÓN Error 5: Eliminar 'finally' y 'temp_dem_to_delete' ---
-                        # 'finally' ya no es necesario aquí porque no creamos 'temp_dem_to_delete'
-                        # El 'effective_dem_path_in_use' es el base, no debe borrarse
+                        # --- CORRECCIÓN Error 5: 'finally' block eliminado ---
+                        # 'finally' block y 'temp_dem_to_delete' eliminados porque ya no creamos
+                        # archivos temporales aquí (solo usamos el path base)
             
             # --- Visualización (fuera del botón) ---
             with col_display:
@@ -1628,11 +1628,13 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 try:
                     # ¡¡VERIFICA TU DEFINICIÓN DE FUNCIÓN en interpolation.py!!
                     # Asumiendo que create_interpolation_surface toma:
-                    # (year, method, variogram_model, gdf_metadata)
+                    # (year, method, variogram_model, gdf_metadata, df_anual)
+                    # Basado en el error anterior, 'df_anual_non_na' era el incorrecto
+                    # La función probablemente espera el dataframe de datos
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
                         year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
-                        gdf_metadata=gdf_metadata_reg
-                        # df_anual_non_na=df_anual_melted # <-- Argumento eliminado
+                        gdf_metadata=gdf_metadata_reg,
+                        df_anual=df_anual_melted # <-- Pasando df_anual_melted (o df_anual_non_na si es ese)
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
                 except TypeError as te1: 
@@ -1643,8 +1645,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 try:
                     fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
                         year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
-                        gdf_metadata=gdf_metadata_reg
-                        # df_anual_non_na=df_anual_melted # <-- Argumento eliminado
+                        gdf_metadata=gdf_metadata_reg,
+                        df_anual=df_anual_melted # <-- Pasando df_anual_melted (o df_anual_non_na si es ese)
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
                 except TypeError as te2:
@@ -4408,6 +4410,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
