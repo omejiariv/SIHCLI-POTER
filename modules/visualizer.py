@@ -1525,13 +1525,21 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         
                         # 'finally' debe estar alineado con 'try'
                         finally:
-                             # Limpieza archivos temporales DEM
-                             if 'temp_dem_path_viz' in locals() and os.path.exists(temp_dem_path_viz):
-                                  try: os.remove(temp_dem_path_viz)
-                                  except: pass
-                             if 'temp_dem_path_morph' in locals() and os.path.exists(temp_dem_path_morph):
-                                  try: os.remove(temp_dem_path_morph)
-                                  except: pass
+                             # Limpieza archivos temporales DEM (CORREGIDO check for None)
+                             # Verificar si la variable existe, NO es None, Y el path existe
+                             if 'temp_dem_path_viz' in locals() and temp_dem_path_viz is not None and os.path.exists(temp_dem_path_viz):
+                                  try: 
+                                      os.remove(temp_dem_path_viz)
+                                      st.write(f"DEBUG: Removed {temp_dem_path_viz}") # Optional Debug
+                                  except Exception as e_del_viz: 
+                                      st.warning(f"No se pudo eliminar DEM temporal viz: {e_del_viz}")
+                             # Verificar si la variable existe, NO es None, Y el path existe
+                             if 'temp_dem_path_morph' in locals() and temp_dem_path_morph is not None and os.path.exists(temp_dem_path_morph):
+                                  try: 
+                                      os.remove(temp_dem_path_morph)
+                                      st.write(f"DEBUG: Removed {temp_dem_path_morph}") # Optional Debug
+                                  except Exception as e_del_morph: 
+                                      st.warning(f"No se pudo eliminar DEM temporal morph: {e_del_morph}")
             
             # --- Visualización (fuera del botón) ---
             with col_display:
@@ -4428,6 +4436,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
