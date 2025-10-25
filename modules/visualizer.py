@@ -68,19 +68,39 @@ from modules.data_processor import complete_series
 
 #--- FUNCIONES DE UTILIDAD DE VISUALIZACIÓN
 
-def display_filter_summary(total_stations_count, selected_stations_count, year_range, selected_months_count, analysis_mode, selected_regions, selected_municipios, selected_altitudes):
-    # Usar la versión con st.expander
+def display_filter_summary(total_stations_count, selected_stations_count, year_range,
+                           selected_months_count, analysis_mode, selected_regions,
+                           selected_municipios, selected_altitudes):
+    """Muestra un resumen de los filtros activos."""
+    if isinstance(year_range, tuple) and len(year_range) == 2:
+        year_text = f"{year_range[0]}-{year_range[1]}"
+    else:
+        year_text = "N/A"
+
+    mode_text = "Original (con huecos)"
+    if analysis_mode == "Completar series (interpolación)":
+        mode_text = "Completado (interpolado)"
+
+    summary_parts = [
+        f"**Estaciones:** {selected_stations_count}/{total_stations_count}",
+        f"**Período:** {year_text}",
+        f"**Datos:** {mode_text}"
+    ]
+
+    if selected_regions:
+        summary_parts.append(f"**Región:** {', '.join(selected_regions)}")
+    if selected_municipios:
+        summary_parts.append(f"**Municipio:** {', '.join(selected_municipios)}")
+    if selected_altitudes:
+        summary_parts.append(f"**Altitud:** {', '.join(selected_altitudes)}")
+
+    # Usar st.expander como en la otra versión para consistencia
     with st.expander("Resumen de Filtros Activos", expanded=False):
-        st.write(f"- **Estaciones:** {selected_stations_count} de {total_stations_count} seleccionadas.")
-        # Asumiendo que year_range es una tupla
-        if isinstance(year_range, (tuple, list)) and len(year_range) == 2:
-             st.write(f"- **Período:** {year_range[0]} - {year_range[1]} ({selected_months_count} meses/año).")
-        else:
-             st.write(f"- **Período:** {year_range}")
-        if selected_regions: st.write(f"- **Regiones:** {', '.join(selected_regions)}")
-        if selected_municipios: st.write(f"- **Municipios:** {', '.join(selected_municipios)}")
-        if selected_altitudes: st.write(f"- **Altitudes:** {', '.join(selected_altitudes)}")
-        st.write(f"- **Modo Análisis:** {analysis_mode}")
+         st.markdown(" | ".join(summary_parts))
+         # O si prefieres la lista:
+         # for part in summary_parts:
+         #    st.markdown(f"- {part.replace('**', '')}") # Quitar negrita para lista
+# --- FIN display_filter_summary ---
         
 # NUEVA FUNCIÓN para cargar y cachear los GeoJSON
 @st.cache_data
@@ -1341,8 +1361,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                               selected_altitudes, **kwargs):
     st.header("Mapas Avanzados")
 
+    # Llamar a la función de resumen
     try:
-        # Llamar a la función de resumen (asegúrate que esté definida como arriba)
         display_filter_summary(
             total_stations_count=len(st.session_state.get('gdf_stations', [])),
             selected_stations_count=len(stations_for_analysis),
@@ -1353,8 +1373,6 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
             selected_municipios=selected_municipios,
             selected_altitudes=selected_altitudes
         )
-    except NameError:
-        st.info("Resumen de filtros no disponible (función display_filter_summary no definida).")
     except Exception as e_summary:
          st.warning(f"Error al mostrar resumen de filtros: {e_summary}")
 
@@ -1363,15 +1381,15 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
 
+    # Reducir la lista de pestañas a las que están implementadas
     tab_names = [
         "Animación GIF", "Superficies de Interpolación", "Morfometría",
-        "Mapa de Riesgo Climático", "Validación Cruzada (LOOCV)",
-        # "Visualización Temporal", "Gráfico de Carrera", "Mapa Animado", "Comparación de Mapas" # Comentados si no están listos
+        "Mapa de Riesgo Climático", "Validación Cruzada (LOOCV)"
+        # "Visualización Temporal", "Gráfico de Carrera", "Mapa Animado", "Comparación de Mapas" # Comentadas
     ]
-    # Ajustar asignación si se reducen pestañas
     try:
+        # Asignar solo las pestañas en la lista reducida
         gif_tab, kriging_tab, morph_tab, risk_map_tab, validation_tab = st.tabs(tab_names)
-        # gif_tab, kriging_tab, morph_tab, risk_map_tab, validation_tab, temporal_tab, race_tab, anim_tab, compare_tab = st.tabs(tab_names)
     except ValueError as e:
         st.error(f"Error al crear pestañas, verifica 'tab_names': {e}")
         return
@@ -1447,8 +1465,10 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     method = st.selectbox("Método de interpolación:", options=["IDW (Lineal)", "Spline (Cúbico)"], key="interp_method_basin")
                     run_balance = st.toggle("Calcular Balance Hídrico", value=True, key="run_balance_toggle_cuenca")
                     show_dem_background = st.toggle("Visualizar DEM de fondo", value=True, key="show_dem_toggle_cuenca")
-                    dem_file_obj = st.session_state.get('dem_file_obj') # Obtener objeto cargado
-                    dem_fixed_path = st.session_state.get('dem_file_path') # Obtener ruta base
+                    
+                    # Obtener info del DEM desde el sidebar
+                    dem_file_obj = st.session_state.get('dem_file_obj')
+                    dem_fixed_path = st.session_state.get('dem_file_path')
 
                     if st.button("Generar Mapa para Cuenca(s)", disabled=not selected_basins, key="generate_basin_map_button"):
                         st.session_state['run_balance'] = run_balance; st.session_state['fig_basin'] = None; st.session_state['error_msg'] = None
@@ -1518,20 +1538,18 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 # --- FIN CÁLCULO CORREGIDO ---
                                 
                                 if transform_masked.e < 0:
-                                     y_coords = y_coords_raw[::-1]
-                                     masked_data_display = np.flipud(masked_data)
+                                     y_coords = y_coords_raw[::-1]; masked_data_display = np.flipud(masked_data)
                                 else:
-                                     y_coords = y_coords_raw
-                                     masked_data_display = masked_data
+                                     y_coords = y_coords_raw; masked_data_display = masked_data
                                 
                                 masked_data_display_nan = masked_data_display.astype(float)
-                                # masked_data_display_nan[masked_data_display_nan == 0.0] = np.nan # Si 0 es nodata
+                                # masked_data_display_nan[masked_data_display_nan == 0.0] = np.nan # Opcional
 
-                                if show_dem_background and effective_dem_path_in_use: # <-- CORRECCIÓN: Usar path efectivo
+                                if show_dem_background and effective_dem_path_in_use:
                                     # --- BLOQUE INDENTADO CORREGIDO ---
-                                    with st.spinner("Procesando y reproyectando DEM..."): # Indentado
+                                    with st.spinner("Procesando y reproyectando DEM..."):
                                         try:
-                                            with rasterio.open(effective_dem_path_in_use) as dem_src: # Usar path efectivo
+                                            with rasterio.open(effective_dem_path_in_use) as dem_src:
                                                 dem_reprojected = np.empty(masked_data.shape, dtype=rasterio.float32)
                                                 reproject(source=rasterio.band(dem_src, 1), destination=dem_reprojected, src_transform=dem_src.transform, src_crs=dem_src.crs, dst_transform=masked_transform, dst_crs="EPSG:3116", dst_nodata=np.nan, resampling=Resampling.bilinear)
                                                 if masked_transform.e < 0: dem_reprojected = np.flipud(dem_reprojected)
@@ -1554,9 +1572,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 st.session_state['unified_basin_gdf'] = unified_basin_gdf
                                 st.session_state['selected_basins_title'] = ", ".join(selected_basins)
 
-                                if effective_dem_path_in_use: # Usar path efectivo
+                                if effective_dem_path_in_use:
                                     try:
-                                         # No es necesario re-escribir si es el base, pero calculate_morphometry necesita el path
                                          st.session_state['morph_results'] = calculate_morphometry(unified_basin_gdf, effective_dem_path_in_use)
                                     except Exception as e_morph: st.session_state['morph_results'] = {"error": f"Error calculando morfometría: {e_morph}"}
                                 else: 
@@ -1618,7 +1635,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         c1m, c2m, c3m = st.columns(3); c1m.metric("Área", f"{morph_results_to_show.get('area_km2', 'N/A'):.2f} km²"); c2m.metric("Perímetro", f"{morph_results_to_show.get('perimetro_km', 'N/A'):.2f} km"); c3m.metric("Índice de Forma", f"{morph_results_to_show.get('indice_forma', 'N/A'):.2f}")
                         c4m, c5m, c6m = st.columns(3); alt_max=morph_results_to_show.get('alt_max_m'); alt_min=morph_results_to_show.get('alt_min_m'); alt_prom=morph_results_to_show.get('alt_prom_m')
                         c4m.metric("Altitud Máxima", f"{alt_max:.0f} m" if alt_max is not None else "N/A"); c5m.metric("Altitud Mínima", f"{alt_min:.0f} m" if alt_min is not None else "N/A"); c6m.metric("Altitud Promedio", f"{alt_prom:.1f} m" if alt_prom is not None else "N/A")
-                elif run_balance_display: st.info("Para Morfometría, sube un DEM válido.")
+                elif run_balance_display: st.info("Para Morfometría, sube un DEM válido o asegúrate que el base esté disponible.")
         # --- Fin Modo Por Cuenca ---
 
         # --- Modo Regional ---
@@ -1648,26 +1665,23 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                     variogram_model2_reg = None
                     if "Kriging" in method2_reg: variogram_model2_reg = st.selectbox("Variograma Mapa 2", ['linear', 'spherical', 'exponential', 'gaussian'], key="var_model_2_reg")
 
-                # cols_metadata = ... (Definido en el bloque anterior)
+                gdf_bounds_reg = gdf_filtered.total_bounds
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
-
 
                 # --- LLAMADA CORREGIDA: Sin gdf_bounds Y SIN df_anual_non_na ---
                 fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
                 try:
                     # Asumiendo que create_interpolation_surface ahora toma (year, method, variogram_model, gdf_metadata)
                     # ¡¡VERIFICA TU DEFINICIÓN DE FUNCIÓN!!
-                    # Basado en el error, quitamos df_anual_non_na. 
-                    # Es posible que la función necesite gdf_filtered en su lugar, o nada.
-                    # Probando quitar df_anual_non_na
+                    # Basado en el error, quitamos df_anual_non_na y gdf_bounds
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
                         year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
-                        gdf_metadata=gdf_metadata_reg
-                        # df_anual_non_na=df_anual_non_na # <-- Argumento eliminado
+                        gdf_metadata=gdf_metadata_reg,
+                        df_anual_non_na=df_anual_melted # <-- RE-AÑADIDO df_anual_melted (o df_anual_non_na si es el correcto)
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
-                except TypeError as te1: # Capturar TypeError específico
+                except TypeError as te1: 
                      st.error(f"Error Mapa 1 (TypeError): {te1}. Verifica los argumentos de 'create_interpolation_surface'.")
                      error1_reg = str(te1)
                 except Exception as e1: st.error(f"Error Mapa 1: {e1}"); error1_reg = str(e1)
@@ -1675,8 +1689,8 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 try:
                     fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
                         year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
-                        gdf_metadata=gdf_metadata_reg
-                        # df_anual_non_na=df_anual_non_na # <-- Argumento eliminado
+                        gdf_metadata=gdf_metadata_reg,
+                        df_anual_non_na=df_anual_melted # <-- RE-AÑADIDO df_anual_melted (o df_anual_non_na si es el correcto)
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
                 except TypeError as te2:
@@ -1738,7 +1752,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                  else: st.warning("Sube un DEM o asegúrate que el DEM base esté disponible para calcular morfometría.")
 
             if recalculate_morph and effective_dem_path_morph:
-                 st.info("Calculando morfometría...")
+                 st.info("Calculando morfometría..."); 
                  try:
                      # Escribir temporal SOLO si es un archivo cargado
                      if dem_file_obj_morph and temp_dem_path_morph_tab:
@@ -1767,6 +1781,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         with st.spinner("Calculando curva hipsométrica..."):
                              temp_dem_path_hypso = None
                              try:
+                                 path_to_use_hypso = None
                                  # Escribir temporal SOLO si es un archivo cargado
                                  if dem_file_obj_morph:
                                       temp_dem_path_hypso = os.path.join(os.getcwd(), f"temp_dem_hypso_{dem_file_obj_morph.name}")
@@ -1775,9 +1790,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                  else: # Usar ruta base
                                       path_to_use_hypso = effective_dem_path_morph
 
-                                 fig_hypso = calculate_hypsometric_curve(unified_basin_gdf_morph, path_to_use_hypso)
-                                 if fig_hypso: st.plotly_chart(fig_hypso, use_container_width=True)
-                                 else: st.warning("No se pudo generar la curva hipsométrica.")
+                                 if path_to_use_hypso: # Solo si tenemos un path válido
+                                     fig_hypso = calculate_hypsometric_curve(unified_basin_gdf_morph, path_to_use_hypso)
+                                     if fig_hypso: st.plotly_chart(fig_hypso, use_container_width=True)
+                                     else: st.warning("No se pudo generar la curva hipsométrica.")
+                                 else:
+                                      st.warning("No se encontró un DEM válido para la curva hipsométrica.")
                              except ImportError: st.error("Función 'calculate_hypsometric_curve' no encontrada.")
                              except Exception as e_hypso: st.error(f"Error calculando curva hipsométrica: {e_hypso}")
                              finally:
@@ -4511,6 +4529,7 @@ def display_life_zones_tab(**kwargs):
     if temp_dem_filename_lifezone and os.path.exists(effective_dem_path_for_function) and dem_file_obj: # Solo eliminar si vino de upload
         try: os.remove(effective_dem_path_for_function)
         except Exception as e_del_final: st.warning(f"No se pudo eliminar DEM temporal al salir: {e_del_final}")
+
 
 
 
