@@ -4,6 +4,12 @@ import streamlit as st
 from modules.config import Config
 import pandas as pd
 
+# --- Añadir ruta al DEM base ---
+_THIS_FILE_DIR_SB = os.path.dirname(__file__)
+BASE_DEM_FILENAME = "DemAntioquiaWgs84.tif" # Nombre del DEM base
+BASE_DEM_PATH = os.path.abspath(os.path.join(_THIS_FILE_DIR_SB, '..', 'data', BASE_DEM_FILENAME))
+# --- Fin añadir ruta ---
+
 # --- FUNCIÓN MOVIDA AL INICIO ---
 def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celdas):
     """
@@ -164,3 +170,4 @@ def create_sidebar(gdf_stations, df_long):
         "selected_municipios": selected_municipios,
         "selected_altitudes": selected_altitudes
     }
+
