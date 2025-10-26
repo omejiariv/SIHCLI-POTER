@@ -112,9 +112,14 @@ def complete_series(_df):
         df_resampled = df_station.reindex(date_range)
         
         df_resampled[Config.PRECIPITATION_COL] = \
-            df_resampled[Config.PRECIPITATION_COL].interpolate(method='time')
+            df_resampled[Config.PRECIPITATION_COL].interpolate(method='linear')
             
-        df_resampled[Config.ORIGIN_COL] = df_resampled[Config.ORIGIN_COL].fillna('Completado')
+        # Identifica las filas que ERAN NaN ANTES de interpolar
+        filas_nuevas_mask = df_resampled[Config.ORIGIN_COL].isna() 
+        # Asigna 'Completado' SÓLO a esas filas
+        df_resampled.loc[filas_nuevas_mask, Config.ORIGIN_COL] = 'Completado'
+        # Asegura que las originales sigan siendo 'Original'
+        df_resampled[Config.ORIGIN_COL] = df_resampled[Config.ORIGIN_COL].fillna('Original')
         df_resampled[Config.STATION_NAME_COL] = station
         
         if station_metadata is not None:
@@ -282,4 +287,5 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
