@@ -132,7 +132,7 @@ def complete_series(_df):
 
 
 @st.cache_data
-def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile):
+def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_parquet):
     df_stations_raw = load_csv_data(uploaded_file_mapa)
     df_precip_raw = load_csv_data(uploaded_file_precip)
     gdf_municipios = load_shapefile(uploaded_zip_shapefile)
@@ -175,27 +175,25 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
     if Config.ALTITUDE_COL in gdf_stations.columns:
         gdf_stations[Config.ALTITUDE_COL] = standardize_numeric_column(gdf_stations[Config.ALTITUDE_COL])
 
-    columns_to_exclude = [
-        Config.DATE_COL, Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL,
-        'temp_sst', 'temp_media', 'id', 'fecha', 'mes', 'año', 'id_estacio', 'nom_est', 'unnamed',
-        'fecha_mes_año', 'enso_año', 'enso_mes'
-    ]
+    # --- INICIO DEL REEMPLAZO ---
+    st.info("Cargando datos de precipitación desde Parquet (¡rápido!)...")
+
+    if uploaded_file_parquet is None:
+        st.error("Por favor, carga el archivo 'datos_precipitacion_largos.parquet' para continuar.")
+        return None, None, None, None, None
+
+    df_long = pd.read_parquet(uploaded_file_parquet)
     
-    id_vars = [col for col in df_precip_raw.columns if any(ex_col in col for ex_col in columns_to_exclude)]
-    station_id_cols = [col for col in df_precip_raw.columns if col not in id_vars]
+    # Renombramos la columna del Parquet a la que usa la app
+    df_long.rename(columns={'precipitacion_mm': Config.PRECIPITATION_COL}, inplace=True)
+    # --- FIN DEL REEMPLAZO ---
 
-    if not station_id_cols:
-        st.error("Error: No se pudieron identificar las columnas de estación. Verifique que los nombres de las columnas de metadatos (fecha, enso, etc.) sean correctos.")
-        return None, None, None, None
-
-    df_long = df_precip_raw.melt(id_vars=id_vars, value_vars=station_id_cols, var_name='id_estacion', value_name=Config.PRECIPITATION_COL)
-
-    cols_to_numeric = [Config.ENSO_ONI_COL, 'temp_sst', 'temp_media', Config.PRECIPITATION_COL, Config.SOI_COL, Config.IOD_COL]
+    cols_to_numeric = [Config.ENSO_ONI_COL, 'temp_sst', 'temp_media', Config.SOI_COL, Config.IOD_COL]
     for col in cols_to_numeric:
         if col in df_long.columns:
             df_long[col] = standardize_numeric_column(df_long[col])
 
-    df_long.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
+    # df_long.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
 
     df_long[Config.DATE_COL] = parse_spanish_dates(df_long[Config.DATE_COL])
     df_long.dropna(subset=[Config.DATE_COL], inplace=True)
@@ -275,3 +273,4 @@ def download_and_load_remote_dem(url):
         raise ValueError("La URL del servidor DEM no está configurada.")
     st.info(f"Simulación de descarga remota. En un entorno real, se usaría un archivo temporal. Usando '{url}' como marcador.")
     return url
+
