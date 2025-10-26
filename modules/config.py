@@ -24,7 +24,7 @@ class Config:
     URL_PRECIPITACION_CSV = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/DatosPptnmes_ENSO.csv"
     URL_SHAPEFILE_ZIP = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/mapaCVENSO.zip"
     URL_SUBCUENCAS_GEOJSON = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/SubcuencasAinfluencia.geojson"
-    URL_PARQUET = "https://github.com/omejiariv/SIHCLI-POTER/blob/main/data/datos_precipitacion_largos.parquet"
+    URL_PARQUET = f"https://raw.githubusercontent.com/{Config.GITHUB_USER}/{Config.GITHUB_REPO}/{Config.BRANCH}/data/datos_precipitacion_largos.parquet"
     DEM_SERVER_URL = "https://tu-bucket.storage.com/srtm_antioquia.tif" # URL de ejemplo para el DEM
 
     # --- Rutas robustas a los archivos locales del proyecto
@@ -112,4 +112,5 @@ class Config:
         for key, value in default_state.items():
             if key not in st.session_state:
                 st.session_state[key] = value
+
 
