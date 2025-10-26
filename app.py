@@ -27,6 +27,7 @@ from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
 from modules.analysis import calculate_monthly_anomalies, calculate_basin_stats
 from modules.github_loader import load_csv_from_url, load_zip_from_url
+from modules.data_processor import load_parquet_from_url
 
 # --- Desactivar Advertencias ---
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -534,6 +535,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
