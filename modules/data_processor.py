@@ -166,6 +166,11 @@ def complete_series(_df):
          df_final_completed[Config.YEAR_COL] = None
          df_final_completed[Config.MONTH_COL] = None
 
+    # --- LÍNEAS TEMPORALES DE DEPURACIÓN ---
+    st.write(f"Debug: Primeras 5 filas ANTES de devolver df_final_completed (Modo Completar Series):")
+    st.dataframe(df_final_completed.head())
+    # --- FIN DEPURACIÓN ---
+    
     return df_final_completed
 
 @st.cache_data
@@ -319,6 +324,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
