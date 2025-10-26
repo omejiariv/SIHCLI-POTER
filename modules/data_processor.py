@@ -82,7 +82,6 @@ def load_shapefile(file_uploader_object):
 
 @st.cache_data
 def complete_series(_df):
-#--- FIN DE LA CORRECCIÓN ---
     """Completa las series de tiempo mensuales para cada estación mediante interpolación."""
     all_completed_dfs = []
     station_list = _df[Config.STATION_NAME_COL].unique()
@@ -100,41 +99,65 @@ def complete_series(_df):
         if not df_station.empty and metadata_cols_to_keep:
             station_metadata = df_station[metadata_cols_to_keep].iloc[0]
 
+        # Convertir a datetime ANTES de establecer el índice
         df_station[Config.DATE_COL] = pd.to_datetime(df_station[Config.DATE_COL])
+        
+        # Guardar el índice original ANTES de reindexar
+        original_index = df_station.set_index(Config.DATE_COL).index
+        
+        # Establecer el índice para la lógica de reindexación y limpieza
         df_station.set_index(Config.DATE_COL, inplace=True)
         
         if not df_station.index.is_unique:
             df_station = df_station[~df_station.index.duplicated(keep='first')]
+            original_index = df_station.index # Actualizar el índice original si se eliminaron duplicados
             
-        df_station[Config.ORIGIN_COL] = 'Original'
-        
-        date_range = pd.date_range(start=df_station.index.min(), end=df_station.index.max(), freq='MS')
-        df_resampled = df_station.reindex(date_range)
-        
+        # Crear el rango completo de fechas
+        if not df_station.empty:
+             start_date = df_station.index.min()
+             end_date = df_station.index.max()
+             if pd.isna(start_date) or pd.isna(end_date): continue # Saltar si no hay fechas válidas
+             date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
+             
+             # Reindexar para crear el DataFrame completo con huecos (NaN)
+             df_resampled = df_station.reindex(date_range)
+        else:
+             continue # Saltar si la estación no tiene datos
+
+        # Interpolar la precipitación usando el método lineal (más estable)
         df_resampled[Config.PRECIPITATION_COL] = \
             df_resampled[Config.PRECIPITATION_COL].interpolate(method='linear')
             
-        # Identifica las filas que ERAN NaN ANTES de interpolar
-        filas_nuevas_mask = df_resampled[Config.ORIGIN_COL].isna() 
-        # Asigna 'Completado' SÓLO a esas filas
-        df_resampled.loc[filas_nuevas_mask, Config.ORIGIN_COL] = 'Completado'
-        # Asegura que las originales sigan siendo 'Original'
-        df_resampled[Config.ORIGIN_COL] = df_resampled[Config.ORIGIN_COL].fillna('Original')
+        # --- INICIO DEL NUEVO BLOQUE DE ASIGNACIÓN DE ORIGEN ---
+        
+        # 1. Primero, marca TODAS las filas del DataFrame reindexado como 'Completado'
+        df_resampled[Config.ORIGIN_COL] = 'Completado' 
+        
+        # 2. Luego, usa el índice original para sobrescribir y marcar solo esas como 'Original'
+        #    Usamos intersect para asegurarnos de que solo marcamos índices que existen en df_resampled
+        indices_a_marcar_original = original_index.intersection(df_resampled.index)
+        df_resampled.loc[indices_a_marcar_original, Config.ORIGIN_COL] = 'Original'
+        
+        # --- FIN DEL NUEVO BLOQUE ---
+        
+        # Asignar nombre de estación (importante después de reindexar)
         df_resampled[Config.STATION_NAME_COL] = station
         
+        # Volver a añadir metadatos si existían
         if station_metadata is not None:
             for col_name, value in station_metadata.items():
                 df_resampled[col_name] = value
 
+        # Añadir columnas de año y mes
         df_resampled[Config.YEAR_COL] = df_resampled.index.year
         df_resampled[Config.MONTH_COL] = df_resampled.index.month
         
+        # Resetear el índice para devolver un DataFrame plano
         df_resampled.reset_index(inplace=True)
         df_resampled.rename(columns={'index': Config.DATE_COL}, inplace=True)
         all_completed_dfs.append(df_resampled)
         
     return pd.concat(all_completed_dfs, ignore_index=True) if all_completed_dfs else pd.DataFrame()
-
 
 @st.cache_data
 def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_parquet):
@@ -287,5 +310,6 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
