@@ -182,7 +182,7 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
         st.error("Por favor, carga el archivo 'datos_precipitacion_largos.parquet' para continuar.")
         return None, None, None, None, None
 
-    df_long = pd.read_parquet(uploaded_file_parquet)
+    df_long = uploaded_file_parquet
     
     # Renombramos la columna del Parquet a la que usa la app
     df_long.rename(columns={'precipitacion_mm': Config.PRECIPITATION_COL}, inplace=True)
@@ -282,3 +282,4 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
