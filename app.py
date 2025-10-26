@@ -134,7 +134,7 @@ def main():
                         'parquet': load_parquet_from_url(Config.URL_PARQUET)
                     }
                     # Ahora, actualiza la condición y la llamada a la función
-                    if all(github_files.values()):
+                    if all(item is not None for item in github_files.values()):
                         process_and_store_data(
                             github_files['mapa'], 
                             github_files['precip'], 
@@ -535,6 +535,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
