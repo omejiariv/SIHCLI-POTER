@@ -118,7 +118,7 @@ def main():
             uploaded_file_precip = st.file_uploader("2. Archivo de precipitación (CSV)", type="csv")
             uploaded_zip_shapefile = st.file_uploader("3. Shapefile de municipios (.zip)", type="zip")
             if st.button("Procesar Datos Manuales"):
-                if all([uploaded_fiif all([uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_parquet]):
+                if all([uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_parquet]):
                     process_and_store_data(uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_parquet)
                 else:
                     st.warning("Por favor, suba los 4 archivos requeridos (Estaciones, Precipitación, Municipios y Parquet).")
@@ -527,6 +527,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
