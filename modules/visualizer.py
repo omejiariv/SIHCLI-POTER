@@ -1645,10 +1645,12 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 # NO acepta 'df_anual_non_na'.
                 # La llamada se ajusta para OMITIRLO.
                 try:
+                    gdf_bounds_reg = gdf_filtered.total_bounds
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
                         year=year1_reg, method=method1_reg, variogram_model=variogram_model1_reg,
-                        gdf_metadata=gdf_metadata_reg
-                        # df_anual_non_na=df_anual_melted # <-- Argumento eliminado
+                        gdf_bounds=gdf_bounds_reg,
+                        gdf_metadata=gdf_metadata_reg,
+                        df_anual_non_na=df_anual_melted
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error1_reg = "ImportError"
                 except TypeError as te1: 
@@ -1659,8 +1661,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 try:
                     fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
                         year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
-                        gdf_metadata=gdf_metadata_reg
-                        # df_anual_non_na=df_anual_melted # <-- Argumento eliminado
+                        gdf_bounds=gdf_bounds_reg,
+                        gdf_metadata=gdf_metadata_reg,
+                        df_anual_non_na=df_anual_melted
                     )
                 except ImportError: st.error("Función 'create_interpolation_surface' no encontrada."); error2_reg = "ImportError"
                 except TypeError as te2:
@@ -4332,6 +4335,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
