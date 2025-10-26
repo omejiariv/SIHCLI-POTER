@@ -84,66 +84,70 @@ def load_shapefile(file_uploader_object):
 def complete_series(_df):
     """Completa las series de tiempo mensuales para cada estación mediante interpolación."""
     all_completed_dfs = []
-    station_list = _df[Config.STATION_NAME_COL].unique()
+    # Asegurarnos de trabajar solo con las columnas necesarias al inicio
+    cols_needed = [Config.STATION_NAME_COL, Config.DATE_COL, Config.PRECIPITATION_COL] + \
+                  [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL]
+                   if col in _df.columns]
+    df_input = _df[cols_needed].copy() # Trabajar con una copia limpia
+
+    station_list = df_input[Config.STATION_NAME_COL].unique()
     
     metadata_cols_to_keep = [
         col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL]
-        if col in _df.columns
+        if col in df_input.columns
     ]
 
-    # La lógica de la barra de progreso se manejará fuera de la función cacheada si es necesario,
-    # pero para estabilidad y rendimiento, es mejor omitirla aquí.
     for i, station in enumerate(station_list):
-        df_station = _df[_df[Config.STATION_NAME_COL] == station].copy()
+        # Filtrar datos de la estación desde la copia limpia
+        df_station = df_input[df_input[Config.STATION_NAME_COL] == station].copy() 
         station_metadata = None
         if not df_station.empty and metadata_cols_to_keep:
-            station_metadata = df_station[metadata_cols_to_keep].iloc[0]
+            # Extraer metadata antes de modificar df_station
+            station_metadata = df_station[metadata_cols_to_keep].iloc[0].to_dict() 
 
-        # Convertir a datetime ANTES de establecer el índice
-        df_station[Config.DATE_COL] = pd.to_datetime(df_station[Config.DATE_COL])
-        
-        # Guardar el índice original ANTES de reindexar
-        original_index = df_station.set_index(Config.DATE_COL).index
-        
-        # Establecer el índice para la lógica de reindexación y limpieza
+        # Asegurar tipo datetime y manejar errores
+        df_station[Config.DATE_COL] = pd.to_datetime(df_station[Config.DATE_COL], errors='coerce')
+        df_station.dropna(subset=[Config.DATE_COL], inplace=True) # Eliminar filas sin fecha válida
+        if df_station.empty: continue # Saltar si no quedan datos
+
         df_station.set_index(Config.DATE_COL, inplace=True)
         
+        # Eliminar duplicados en el índice (fechas)
         if not df_station.index.is_unique:
             df_station = df_station[~df_station.index.duplicated(keep='first')]
-            original_index = df_station.index # Actualizar el índice original si se eliminaron duplicados
             
-        # Crear el rango completo de fechas
-        if not df_station.empty:
-             start_date = df_station.index.min()
-             end_date = df_station.index.max()
-             if pd.isna(start_date) or pd.isna(end_date): continue # Saltar si no hay fechas válidas
-             date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
-             
-             # Reindexar para crear el DataFrame completo con huecos (NaN)
-             df_resampled = df_station.reindex(date_range)
-        else:
-             continue # Saltar si la estación no tiene datos
+        # Guardar el índice original DESPUÉS de limpiar duplicados
+        original_index = df_station.index 
 
-        # Interpolar la precipitación usando el método lineal (más estable)
+        # Crear el rango completo de fechas
+        start_date = df_station.index.min()
+        end_date = df_station.index.max()
+        if pd.isna(start_date) or pd.isna(end_date): continue 
+        date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
+             
+        # Reindexar para crear el DataFrame completo con huecos (NaN)
+        df_resampled = df_station.reindex(date_range)
+        
+        # Interpolar la precipitación usando el método lineal
         df_resampled[Config.PRECIPITATION_COL] = \
             df_resampled[Config.PRECIPITATION_COL].interpolate(method='linear')
             
-        # --- INICIO DEL NUEVO BLOQUE DE ASIGNACIÓN DE ORIGEN ---
+        # --- Simplified Origin Assignment ---
+        # Identifica los índices que son NUEVOS (están en df_resampled pero NO estaban en original_index)
+        new_indices = df_resampled.index.difference(original_index)
         
-        # 1. Primero, marca TODAS las filas del DataFrame reindexado como 'Completado'
-        df_resampled[Config.ORIGIN_COL] = 'Completado' 
+        # Crea la columna 'origin', por defecto todas las filas son 'Original'
+        df_resampled[Config.ORIGIN_COL] = 'Original'
         
-        # 2. Luego, usa el índice original para sobrescribir y marcar solo esas como 'Original'
-        #    Usamos intersect para asegurarnos de que solo marcamos índices que existen en df_resampled
-        indices_a_marcar_original = original_index.intersection(df_resampled.index)
-        df_resampled.loc[indices_a_marcar_original, Config.ORIGIN_COL] = 'Original'
-        
-        # --- FIN DEL NUEVO BLOQUE ---
+        # Sobrescribe SOLO las filas con índices NUEVOS para que digan 'Completado'
+        if not new_indices.empty:
+            df_resampled.loc[new_indices, Config.ORIGIN_COL] = 'Completado'
+        # --- End Simplified Block ---
         
         # Asignar nombre de estación (importante después de reindexar)
         df_resampled[Config.STATION_NAME_COL] = station
         
-        # Volver a añadir metadatos si existían
+        # Volver a añadir metadatos si existían usando el diccionario guardado
         if station_metadata is not None:
             for col_name, value in station_metadata.items():
                 df_resampled[col_name] = value
@@ -310,6 +314,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
