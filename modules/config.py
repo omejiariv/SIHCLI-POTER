@@ -16,7 +16,7 @@ class Config:
 
     # --- Constantes para carga de datos desde GitHub
     GITHUB_USER = "omejiariv"
-    GITHUB_REPO = "Chaac-SIHCLI"
+    GITHUB_REPO = "SIHCLI-POTER"
     BRANCH = "main"
     
     # --- URLs directas a los archivos RAW en GitHub
@@ -112,6 +112,7 @@ class Config:
         for key, value in default_state.items():
             if key not in st.session_state:
                 st.session_state[key] = value
+
 
 
 
