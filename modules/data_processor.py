@@ -274,3 +274,11 @@ def download_and_load_remote_dem(url):
     st.info(f"Simulación de descarga remota. En un entorno real, se usaría un archivo temporal. Usando '{url}' como marcador.")
     return url
 
+@st.cache_data
+def load_parquet_from_url(url):
+    if not url: return None
+    try:
+        return pd.read_parquet(url)
+    except Exception as e:
+        st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
+        return None
