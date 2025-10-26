@@ -82,86 +82,91 @@ def load_shapefile(file_uploader_object):
 
 @st.cache_data
 def complete_series(_df):
-    """Completa las series de tiempo mensuales para cada estación mediante interpolación."""
-    all_completed_dfs = []
-    # Asegurarnos de trabajar solo con las columnas necesarias al inicio
-    cols_needed = [Config.STATION_NAME_COL, Config.DATE_COL, Config.PRECIPITATION_COL] + \
-                  [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL]
-                   if col in _df.columns]
-    df_input = _df[cols_needed].copy() # Trabajar con una copia limpia
-
-    station_list = df_input[Config.STATION_NAME_COL].unique()
+    """Completa las series de tiempo mensuales para cada estación mediante interpolación, preservando metadatos."""
+    all_resampled_dfs = []
     
-    metadata_cols_to_keep = [
-        col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL]
-        if col in df_input.columns
-    ]
+    # Define columnas esenciales para el proceso de interpolación
+    id_cols = [Config.STATION_NAME_COL, Config.DATE_COL]
+    value_col = Config.PRECIPITATION_COL
+    origin_col = Config.ORIGIN_COL
+    
+    # Selecciona solo las columnas esenciales para evitar problemas con otras columnas durante el reindexado
+    df_input = _df[id_cols + [value_col]].copy() 
+    
+    station_list = df_input[Config.STATION_NAME_COL].unique()
 
-    for i, station in enumerate(station_list):
-        # Filtrar datos de la estación desde la copia limpia
-        df_station = df_input[df_input[Config.STATION_NAME_COL] == station].copy() 
-        station_metadata = None
-        if not df_station.empty and metadata_cols_to_keep:
-            # Extraer metadata antes de modificar df_station
-            station_metadata = df_station[metadata_cols_to_keep].iloc[0].to_dict() 
-
-        # Asegurar tipo datetime y manejar errores
+    for station in station_list:
+        # Filtra datos de la estación desde la copia limpia y mínima
+        df_station = df_input[df_input[Config.STATION_NAME_COL] == station].copy()
+        
+        # Asegura tipo datetime y maneja errores, elimina filas sin fecha válida
         df_station[Config.DATE_COL] = pd.to_datetime(df_station[Config.DATE_COL], errors='coerce')
-        df_station.dropna(subset=[Config.DATE_COL], inplace=True) # Eliminar filas sin fecha válida
+        df_station.dropna(subset=[Config.DATE_COL], inplace=True)
         if df_station.empty: continue # Saltar si no quedan datos
 
+        # Establece índice de fecha y elimina duplicados
         df_station.set_index(Config.DATE_COL, inplace=True)
-        
-        # Eliminar duplicados en el índice (fechas)
         if not df_station.index.is_unique:
             df_station = df_station[~df_station.index.duplicated(keep='first')]
             
-        # Guardar el índice original DESPUÉS de limpiar duplicados
-        original_index = df_station.index 
+        original_index = df_station.index # Guarda el índice original DESPUÉS de limpiar duplicados
 
-        # Crear el rango completo de fechas
-        start_date = df_station.index.min()
-        end_date = df_station.index.max()
-        if pd.isna(start_date) or pd.isna(end_date): continue 
+        # Salta si no hay índice válido
+        if df_station.empty or original_index.empty: continue 
+        start_date, end_date = original_index.min(), original_index.max()
+        if pd.isna(start_date) or pd.isna(end_date): continue # Salta si las fechas min/max no son válidas
+        
+        # Crea el rango completo de fechas y reindexa
         date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
-             
-        # Reindexar para crear el DataFrame completo con huecos (NaN)
         df_resampled = df_station.reindex(date_range)
         
-        # Interpolar la precipitación usando el método lineal
-        df_resampled[Config.PRECIPITATION_COL] = \
-            df_resampled[Config.PRECIPITATION_COL].interpolate(method='linear')
-            
-        # --- Simplified Origin Assignment ---
-        # Identifica los índices que son NUEVOS (están en df_resampled pero NO estaban en original_index)
+        # Interpolar la precipitación
+        df_resampled[value_col] = df_resampled[value_col].interpolate(method='linear')
+        
+        # --- Asignación de Origen Robusta ---
         new_indices = df_resampled.index.difference(original_index)
-        
-        # Crea la columna 'origin', por defecto todas las filas son 'Original'
-        df_resampled[Config.ORIGIN_COL] = 'Original'
-        
-        # Sobrescribe SOLO las filas con índices NUEVOS para que digan 'Completado'
+        df_resampled[origin_col] = 'Original' # Por defecto Original
         if not new_indices.empty:
-            df_resampled.loc[new_indices, Config.ORIGIN_COL] = 'Completado'
-        # --- End Simplified Block ---
-        
-        # Asignar nombre de estación (importante después de reindexar)
+            df_resampled.loc[new_indices, origin_col] = 'Completado' # Sobrescribe los nuevos
+        # --- Fin Asignación de Origen ---
+
+        # Añadir nombre de estación de nuevo (se pierde en reindex)
         df_resampled[Config.STATION_NAME_COL] = station
         
-        # Volver a añadir metadatos si existían usando el diccionario guardado
-        if station_metadata is not None:
-            for col_name, value in station_metadata.items():
-                df_resampled[col_name] = value
-
-        # Añadir columnas de año y mes
-        df_resampled[Config.YEAR_COL] = df_resampled.index.year
-        df_resampled[Config.MONTH_COL] = df_resampled.index.month
-        
-        # Resetear el índice para devolver un DataFrame plano
+        # Resetear índice y seleccionar solo columnas procesadas
         df_resampled.reset_index(inplace=True)
         df_resampled.rename(columns={'index': Config.DATE_COL}, inplace=True)
-        all_completed_dfs.append(df_resampled)
+        # Guardamos solo las columnas que hemos procesado explícitamente en el bucle
+        all_resampled_dfs.append(df_resampled[[Config.STATION_NAME_COL, Config.DATE_COL, value_col, origin_col]]) 
+
+    # Si no se procesó ninguna estación, devolver DataFrame vacío
+    if not all_resampled_dfs:
+        st.warning("No se encontraron datos válidos para completar series en las estaciones seleccionadas.")
+        return pd.DataFrame()
         
-    return pd.concat(all_completed_dfs, ignore_index=True) if all_completed_dfs else pd.DataFrame()
+    # Concatenar todos los DataFrames procesados (solo con columnas esenciales)
+    df_completed_core = pd.concat(all_resampled_dfs, ignore_index=True)
+
+    # --- Unir (Merge) Metadatos de VUELTA al FINAL ---
+    # Selecciona las columnas de metadatos del DataFrame ORIGINAL (_df)
+    metadata_cols = [Config.STATION_NAME_COL] + \
+                    [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL] 
+                     if col in _df.columns]
+    # Crea un DataFrame de metadatos únicos por estación
+    df_metadata = _df[metadata_cols].drop_duplicates(subset=[Config.STATION_NAME_COL])
+    
+    # Une los datos completados ('core') con la metadata usando el nombre de la estación
+    df_final_completed = pd.merge(df_completed_core, df_metadata, on=Config.STATION_NAME_COL, how='left')
+
+    # Añadir columnas de Año/Mes al DataFrame final
+    if Config.DATE_COL in df_final_completed.columns:
+        df_final_completed[Config.YEAR_COL] = df_final_completed[Config.DATE_COL].dt.year
+        df_final_completed[Config.MONTH_COL] = df_final_completed[Config.DATE_COL].dt.month
+    else: # Fallback por si algo sale mal
+         df_final_completed[Config.YEAR_COL] = None
+         df_final_completed[Config.MONTH_COL] = None
+
+    return df_final_completed
 
 @st.cache_data
 def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_parquet):
@@ -314,6 +319,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
