@@ -4281,7 +4281,7 @@ def display_life_zones_tab(**kwargs):
                 area_hectares = []; pixel_counts = []; total_area_ha_calc = 0.0
                 can_calculate_area = False
 
-                if crs_profile and raster_transform:
+                if crs_profile and transform:
                     try:
                         if crs_profile.is_projected:
                             crs_units = crs_profile.linear_units.lower()
@@ -4332,6 +4332,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
