@@ -65,10 +65,10 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
 
 def main():
     #--- Definiciones de Funciones Internas ---
-    def process_and_store_data(file_mapa, file_precip, file_shape):
+    def process_and_store_data(file_mapa, file_precip, file_shape, file_parquet):
         with st.spinner("Procesando archivos y cargando datos..."):
             gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = \
-                load_and_process_all_data(file_mapa, file_precip, file_shape)
+                load_and_process_all_data(file_mapa, file_precip, file_shape, file_parquet)
 
             if gdf_stations is not None and df_long is not None and gdf_municipios is not None:
                 st.session_state.update({
@@ -129,10 +129,17 @@ def main():
                     github_files = {
                         'mapa': load_csv_from_url(Config.URL_ESTACIONES_CSV),
                         'precip': load_csv_from_url(Config.URL_PRECIPITACION_CSV),
-                        'shape': load_zip_from_url(Config.URL_SHAPEFILE_ZIP)
+                        'shape': load_zip_from_url(Config.URL_SHAPEFILE_ZIP),
+                        'parquet': load_parquet_from_url(Config.URL_PARQUET)
                     }
-                    if github_files['mapa'] is not None and github_files['precip'] is not None:
-                        process_and_store_data(github_files['mapa'], github_files['precip'], github_files['shape'])
+                    # Ahora, actualiza la condición y la llamada a la función
+                    if all(github_files.values()):
+                        process_and_store_data(
+                            github_files['mapa'], 
+                            github_files['precip'], 
+                            github_files['shape'],
+                            github_files['parquet']
+                        )   
                     else:
                         st.error("No se pudieron descargar los archivos desde GitHub.")
 
@@ -527,6 +534,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
