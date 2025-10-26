@@ -23,9 +23,9 @@ class Config:
     URL_ESTACIONES_CSV = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/mapaCVENSO.csv"
     URL_PRECIPITACION_CSV = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/DatosPptnmes_ENSO.csv"
     URL_SHAPEFILE_ZIP = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/mapaCVENSO.zip"
-    URL_SUBCUENCAS_GEOJSON = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/SubcuencasAinfluencia.geojson"
-    URL_PARQUET = f"https://raw.githubusercontent.com/{Config.GITHUB_USER}/{Config.GITHUB_REPO}/{Config.BRANCH}/data/datos_precipitacion_largos.parquet"
-    DEM_SERVER_URL = "https://tu-bucket.storage.com/srtm_antioquia.tif" # URL de ejemplo para el DEM
+    URL_SUBCUENCAS_GEOJSON = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/SubcuencasAInfluencia.geojson"
+    URL_PARQUET = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/datos_precipitacion_largos.parquet"
+    DEM_SERVER_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{BRANCH}/data/DemAntioquiaWgs84.tif"
 
     # --- Rutas robustas a los archivos locales del proyecto
     _MODULES_DIR = os.path.dirname(__file__)
@@ -112,5 +112,6 @@ class Config:
         for key, value in default_state.items():
             if key not in st.session_state:
                 st.session_state[key] = value
+
 
 
