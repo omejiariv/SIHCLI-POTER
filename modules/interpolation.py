@@ -239,23 +239,40 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
         return fig, None, error_message # Devuelve 3 valores
 
     if z_grid is not None:
+        # --- START INDENTED BLOCK ---
         fig = go.Figure(data=go.Contour(
             z=z_grid.T, x=grid_lon, y=grid_lat,
-            colorscale=px.colors.sequential.YIGnBu,
+            colorscale=px.colors.sequential.YlGnBu, # Corrected name
             colorbar_title='Precipitación (mm)',
-            contours=dict(showlabels=True, labelfont=dict(size=10, color='white'), labelformat=".0f")
+            # ADDED Enhancements from old code:
+            contours=dict(
+                coloring='heatmap', # Keep coloring if desired, or remove
+                showlabels=True,  # Show labels on contour lines
+                labelfont=dict(size=10, color='white'), # Label style
+                labelformat=".0f" # Format labels as integers
+            ),
+            line_smoothing=0.85, # Smooth contour lines
+            line_color='black',  # Optional: add faint line color
+            line_width=0.5       # Optional: add faint line width
         ))
+        
+        # Modify the hover text creation for the Scatter plot
+        hover_texts = [
+             f"<b>{row[Config.STATION_NAME_COL]}</b><br>" +
+             f"Municipio: {row.get(Config.MUNICIPALITY_COL, 'N/A')}<br>" + # Use .get for safety
+             f"Altitud: {row.get(Config.ALTITUDE_COL, 'N/A')} m<br>" +     # Use .get for safety
+             f"Precipitación: {row[Config.PRECIPITATION_COL]:.0f} mm"
+             for _, row in df_clean.iterrows() # Use df_clean which has station data
+        ]
+
         fig.add_trace(go.Scatter(
             x=lons, y=lats, mode='markers', marker=dict(color='red', size=5, line=dict(width=1,
             color='black')),
             name='Estaciones',
             hoverinfo='text',
-            text=[f"<b>{row[Config.STATION_NAME_COL]}</b><br>" +
-                  f"Municipio: {row[Config.MUNICIPALITY_COL]}<br>" +
-                  f"Altitud: {row[Config.ALTITUDE_COL]} m<br>" +
-                  f"Precipitación: {row[Config.PRECIPITATION_COL]:.0f} mm"
-                  for _, row in df_clean.iterrows()]
+            text=hover_texts # Use the generated hover texts
         ))
+        
         if rmse is not None:
             fig.add_annotation(
                 x=0.01, y=0.99, xref="paper", yref="paper",
@@ -269,9 +286,13 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
             legend=dict(x=0.01, y=0.01, bgcolor="rgba(0,0,0,0)")
         )
         return fig, fig_variogram, None # Devuelve 3 valores
+        # --- END INDENTED BLOCK ---
 
-    return go.Figure().update_layout(title="Error: Método no implementado"), None, "Método no implementado" # Devuelve 3 valores
-     
+    # Fallback if z_grid ended up being None
+    # Ensure fig_variogram is closed if created but not returned
+    if fig_variogram: plt.close(fig_variogram) 
+    return go.Figure().update_layout(title="Error: No se pudo generar la superficie Z"), None, "Superficie Z es None"
+
 @st.cache_data
 def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
     """
@@ -313,6 +334,7 @@ def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
         variance = np.zeros_like(grid_z)
 
     return grid_z, variance
+
 
 
 
