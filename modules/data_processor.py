@@ -137,9 +137,6 @@ def complete_series(_df):
         # Interpolar la precipitación DESPUÉS de asignar el origen
         df_resampled[value_col] = df_resampled[value_col].interpolate(method='linear')
         
-        # Rellenar cualquier NaN restante en precipitación con 0 (después de interpolar)
-        df_resampled[value_col] = df_resampled[value_col].fillna(0) 
-
         # Añadir nombre de estación de nuevo
         df_resampled[Config.STATION_NAME_COL] = station
         
@@ -318,6 +315,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
