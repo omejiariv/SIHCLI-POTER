@@ -15,23 +15,70 @@ import pymannkendall as mk
 @st.cache_data
 def calculate_spi(series, window):
     """
-    Calcula el Índice de Precipitación Estandarizado (SPI).
+    Calcula el Índice de Precipitación Estandarizado (SPI), manejando ceros.
     """
+    # Asegurar que la serie tenga índice de fecha y esté ordenada
     series = series.sort_index()
-    rolling_sum = series.rolling(window, min_periods=window).sum()
-    data_for_fit = rolling_sum.dropna()
-    data_for_fit = data_for_fit[np.isfinite(data_for_fit)]
     
-    if len(data_for_fit) > 0:
-        params = gamma.fit(data_for_fit, floc=0)
-        shape, loc, scale = params
-        cdf = gamma.cdf(rolling_sum, shape, loc=loc, scale=scale)
-    else:
+    # Calcular la suma acumulada (rolling sum)
+    rolling_sum = series.rolling(window=window, min_periods=window).sum()
+    
+    # --- Manejo de Ceros ---
+    # 1. Separar los datos válidos (no NaN)
+    data_valid = rolling_sum.dropna()
+    data_valid = data_valid[np.isfinite(data_valid)] # Quitar inf si los hubiera
+    
+    if data_valid.empty:
+        st.warning(f"SPI-{window}: No hay suficientes datos válidos para el cálculo.")
         return pd.Series(dtype=float)
 
-    spi = norm.ppf(cdf)
-    spi = np.where(np.isinf(spi), np.nan, spi)
-    return pd.Series(spi, index=rolling_sum.index)
+    # 2. Calcular la probabilidad de cero (q)
+    n_total = len(data_valid)
+    n_zeros = (data_valid == 0).sum()
+    q = n_zeros / n_total
+    
+    # 3. Separar los datos estrictamente positivos para el ajuste Gamma
+    data_positive = data_valid[data_valid > 0]
+    
+    spi = pd.Series(np.nan, index=rolling_sum.index) # Serie de salida inicializada con NaN
+
+    # --- Ajuste Gamma y Cálculo CDF (Solo si hay datos positivos) ---
+    if not data_positive.empty:
+        try:
+            # 4. Ajustar la distribución Gamma SOLO a los datos positivos
+            params = gamma.fit(data_positive, floc=0) 
+            shape, loc, scale = params # loc debería ser 0 por floc=0
+            
+            # 5. Calcular el CDF Gamma (G(x)) para TODOS los datos válidos (incluyendo ceros)
+            #    gamma.cdf(0, ...) dará 0, lo cual es correcto aquí.
+            cdf_gamma = gamma.cdf(data_valid, shape, loc=loc, scale=scale)
+            
+            # 6. Calcular el CDF combinado H(x) = q + (1 - q) * G(x)
+            prob_combined = q + (1 - q) * cdf_gamma
+            
+            # Asegurar que las probabilidades estén estrictamente entre 0 y 1 para norm.ppf
+            prob_combined = np.clip(prob_combined, 1e-6, 1 - 1e-6) 
+            
+            # 7. Transformar a SPI usando la inversa de la normal estándar
+            spi_calculated = norm.ppf(prob_combined)
+            
+            # Asignar los valores calculados al índice correcto en la serie de salida
+            spi.loc[data_valid.index] = spi_calculated
+
+        except Exception as e:
+            st.warning(f"SPI-{window}: Falló el ajuste Gamma o cálculo CDF. Error: {e}")
+            # Dejar los valores como NaN si falla el ajuste/cálculo
+            pass # spi ya está inicializada con NaN
+
+    # Manejar los casos donde solo hubo ceros (si q=1)
+    elif q == 1:
+         # Si todos los valores válidos son cero, el SPI técnicamente no está bien definido, 
+         # pero asignar 0 es una convención razonable (precipitación exactamente igual a la media de ceros).
+         spi.loc[data_valid.index] = 0.0
+
+    # Reemplazar infinitos (por si acaso clip no fue suficiente) y devolver
+    spi.replace([np.inf, -np.inf], np.nan, inplace=True)
+    return spi
 
 @st.cache_data
 def calculate_spei(precip_series, et_series, scale):
@@ -422,3 +469,4 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
