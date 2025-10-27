@@ -565,78 +565,87 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                         df_monthly_filtered.groupby([Config.STATION_NAME_COL,
                                                      Config.ORIGIN_COL]).size().unstack(fill_value=0)
                     
-                    # --- AÑADIR DEBUG DESPUÉS DEL GROUPBY ---
-                    st.write("Debug Composición (visualizer): data_composition DESPUÉS del groupby/unstack (primeras 5):")
-                    st.dataframe(data_composition.head())
-                    # --- FIN DEBUG ---
+                    # (Optional Debug AFTER groupby/unstack)
+                    # st.write("Debug Composición (visualizer): data_composition DESPUÉS del groupby/unstack (primeras 5):")
+                    # st.dataframe(data_composition.head())
 
-                    # --- El resto del código para calcular % y crear el gráfico ---
+                    # Asegurar que las columnas 'Original' y 'Completado' existan
                     if 'Original' not in data_composition: data_composition['Original'] = 0
                     if 'Completado' not in data_composition: data_composition['Completado'] = 0
 
+                    # Calcular total
                     data_composition['total'] = data_composition['Original'] + data_composition['Completado']
-                    data_composition = data_composition[data_composition['total'] > 0] 
+                    
+                    # --- START CORRECTION for INF ---
+                    # Initialize percentage columns with 0.0
+                    data_composition['% Original'] = 0.0
+                    data_composition['% Completado'] = 0.0
 
-                    # Nivel 4 de indentación
-                    if not data_composition.empty: 
-                        # Nivel 5 de indentación
-                        data_composition['% Original'] = ...
-                        data_composition['% Completado'] = ...
-
-                        # Debug (Nivel 5)
-                        st.write("Debug Composición...")
-                        st.dataframe(data_composition.head())
-                        st.write("Debug Composición...")
-                        st.dataframe(data_composition['% Completado'].describe())
-                        # --- FIN DEBUG ---                       
-
-                        # Inside the 'if not data_composition.empty:' block
-
-                        # ... (percentage calculation lines) ...
-                        data_composition['% Original'] = (data_composition['Original'] / data_composition['total']) * 100
-                        data_composition['% Completado'] = (data_composition['Completado'] / data_composition['total']) * 100
-
-                        # --- ADD DEBUG HERE ---
-                        st.write("Debug Sort: data_composition BEFORE sorting (first 5 rows):")
-                        st.dataframe(data_composition.head())
-                        st.write("Debug Sort: Data types BEFORE sorting:")
-                        st.write(data_composition.dtypes)
-                        # --- END DEBUG ---
+                    # Create mask for rows where total > 0
+                    mask_total_greater_than_zero = data_composition['total'] > 0
+                    
+                    # Calculate percentages ONLY where total > 0
+                    if mask_total_greater_than_zero.any(): # Check if there are any valid rows
+                        data_composition.loc[mask_total_greater_than_zero, '% Original'] = \
+                            (data_composition.loc[mask_total_greater_than_zero, 'Original'] / 
+                             data_composition.loc[mask_total_greater_than_zero, 'total']) * 100
                         
-                        sort_order_comp = st.radio("Ordenar por:", ["% Datos Originales (Mayor a Menor)", "% Datos Originales (Menor a Mayor)", "Alfabético"], horizontal=True,
-                                                   key="sort_comp")
+                        data_composition.loc[mask_total_greater_than_zero, '% Completado'] = \
+                            (data_composition.loc[mask_total_greater_than_zero, 'Completado'] / 
+                             data_composition.loc[mask_total_greater_than_zero, 'total']) * 100
+                    
+                    # (Optional but safe) Replace any remaining inf/-inf/NaN with 0 in percentage columns
+                    # We need numpy for this
+                    import numpy as np 
+                    data_composition.replace([np.inf, -np.inf, np.nan], 0.0, inplace=True)
+                    # --- END CORRECTION for INF ---
 
-                        if "Mayor a Menor" in sort_order_comp: data_composition = data_composition.sort_values("% Original", ascending=False)
-                        elif "Menor a Mayor" in sort_order_comp: data_composition = data_composition.sort_values("% Original", ascending=True)
-                        else: data_composition = data_composition.sort_index(ascending=True)
+                    # --- Debug AFTER % calc and BEFORE sorting ---
+                    st.write("Debug Sort: data_composition BEFORE sorting (first 5 rows):")
+                    st.dataframe(data_composition.head())
+                    st.write("Debug Sort: Data types BEFORE sorting:")
+                    st.write(data_composition.dtypes)
+                    st.write("Debug Sort: Describe % Completado column BEFORE sorting:")
+                    st.dataframe(data_composition['% Completado'].describe()) # Describe after potential inf/nan replace
+                    # --- END DEBUG ---
 
-                        df_plot = data_composition.reset_index().melt(
-                            id_vars=Config.STATION_NAME_COL,
-                            value_vars=['% Original', '% Completado'],
-                            var_name='Tipo de Dato',
-                            value_name='Porcentaje'
-                        )
+                    # Ordenamiento
+                    sort_order_comp = st.radio("Ordenar por:", ["% Datos Originales (Mayor a Menor)", "% Datos Originales (Menor a Mayor)", "Alfabético"], horizontal=True,
+                                               key="sort_comp")
 
-                        # --- AÑADIR DEBUG AQUÍ ---
-                        st.write("Debug Composición (visualizer): df_plot ANTES de px.bar (primeras 10):")
-                        st.dataframe(df_plot.head(10))
-                        # --- FIN DEBUG ---
+                    # Sorting logic
+                    if "Mayor a Menor" in sort_order_comp: data_composition = data_composition.sort_values("% Original", ascending=False)
+                    elif "Menor a Mayor" in sort_order_comp: data_composition = data_composition.sort_values("% Original", ascending=True)
+                    else: data_composition = data_composition.sort_index(ascending=True)
 
-                        fig_comp = px.bar(
-                            df_plot,
-                            x=Config.STATION_NAME_COL,
-                            y='Porcentaje',
-                            color='Tipo de Dato',
-                            title='Composición de Datos por Estación',
-                            labels={Config.STATION_NAME_COL: 'Estación', 'Porcentaje': '% del Período'},
-                            text_auto='.1f',
-                            color_discrete_map={'% Original': '#1f77b4', '% Completado': '#ff7f0e'} # Azul y Naranja
-                        )
+                    # Melt para preparar datos para el gráfico
+                    df_plot = data_composition.reset_index().melt(
+                        id_vars=Config.STATION_NAME_COL,
+                        value_vars=['% Original', '% Completado'],
+                        var_name='Tipo de Dato',
+                        value_name='Porcentaje'
+                    )
+                    
+                    # --- Debug ANTES de px.bar ---
+                    st.write("Debug Composición (visualizer): df_plot ANTES de px.bar (primeras 10):")
+                    st.dataframe(df_plot.head(10))
+                    # --- FIN DEBUG ---
 
-                        fig_comp.update_layout(height=500, xaxis={'categoryorder': 'trace'}, barmode='stack')
-                        st.plotly_chart(fig_comp, use_container_width=True)
-                    else:
-                        st.warning("No hay datos válidos para calcular la composición después del filtrado inicial.")
+                    # Crear el gráfico (este código no cambia)
+                    fig_comp = px.bar(
+                        df_plot,
+                        x=Config.STATION_NAME_COL,
+                        y='Porcentaje',
+                        color='Tipo de Dato',
+                        title='Composición de Datos por Estación',
+                        labels={Config.STATION_NAME_COL: 'Estación', 'Porcentaje': '% del Período'},
+                        text_auto='.1f',
+                        color_discrete_map={'% Original': '#1f77b4', '% Completado': '#ff7f0e'} 
+                    )
+
+                    fig_comp.update_layout(height=500, xaxis={'categoryorder': 'trace'}, barmode='stack')
+                    st.plotly_chart(fig_comp, use_container_width=True)
+
                 # Nivel 3 de indentación: Else para 'if not df_monthly_filtered.empty...'
                 else:
                     st.warning("No hay datos mensuales procesados o falta la columna 'origin' para mostrar la composición.")
@@ -4307,6 +4316,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
