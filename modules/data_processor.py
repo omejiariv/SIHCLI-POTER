@@ -165,15 +165,6 @@ def complete_series(_df):
     # Asegúrate que df_metadata tenga las columnas correctas
     df_final_completed = pd.merge(df_completed_core, df_metadata, on=Config.STATION_NAME_COL, how='left')
 
-    # --- LÍNEAS TEMPORALES DE DEPURACIÓN (Mantenidas por ahora) ---
-    st.write(f"Debug: Primeras 5 filas ANTES de devolver df_final_completed (Modo Completar Series):")
-    st.dataframe(df_final_completed.head())
-    st.write(f"Debug: Últimas 5 filas ANTES de devolver df_final_completed:")
-    st.dataframe(df_final_completed.tail())
-    st.write(f"Debug: Conteo de valores en 'origin':")
-    st.dataframe(df_final_completed[origin_col].value_counts())
-    # --- FIN DEPURACIÓN ---
-
     return df_final_completed
     
 @st.cache_data
@@ -287,14 +278,6 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
         if col in df_enso.columns:
             df_enso[col] = standardize_numeric_column(df_enso[col])
 
-    # --- ADD DEBUG LINES ---
-    st.write("Debug: Columns in df_long AFTER merge (in data_processor):", df_long.columns.tolist())
-    if Config.ET_COL in df_long.columns:
-        st.write(f"Debug: First 5 non-null values of {Config.ET_COL}:", df_long[Config.ET_COL].dropna().head().tolist())
-    else:
-        st.warning(f"Debug: Column '{Config.ET_COL}' NOT FOUND in df_long after merge!")
-    # --- END DEBUG LINES ---
- 
     return gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas
 
 def extract_elevation_from_dem(gdf_stations, dem_data_source):
@@ -339,6 +322,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
