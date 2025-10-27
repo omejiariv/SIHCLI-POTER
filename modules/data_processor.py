@@ -204,7 +204,6 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
         geometry=gpd.points_from_xy(df_stations_raw[lon_col], df_stations_raw[lat_col]),
         crs="EPSG:4326"
     )
-    st.write("Debug Point 1 (data_processor): Columns in gdf_stations AFTER loading:", gdf_stations.columns.tolist())
 
     gdf_stations[Config.LONGITUDE_COL] = gdf_stations.geometry.x
     gdf_stations[Config.LATITUDE_COL] = gdf_stations.geometry.y
@@ -257,9 +256,6 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
     ]
     existing_metadata_cols = [col for col in station_metadata_cols if col in gdf_stations.columns]
     gdf_metadata_unique = gdf_stations[existing_metadata_cols].drop_duplicates(subset=[Config.STATION_NAME_COL])
-
-    st.write("Debug Point 2 (data_processor): Columns selected for gdf_metadata_unique:", gdf_metadata_unique.columns.tolist())
-    st.write("Debug Point 2 (data_processor): Is 'et_mmy' in gdf_metadata_unique cols?", Config.ET_COL in gdf_metadata_unique.columns)
 
     cols_to_drop_from_long = [c for c in existing_metadata_cols if c != Config.STATION_NAME_COL and c in df_long.columns]
     df_long.drop(columns=cols_to_drop_from_long, inplace=True, errors='ignore')
@@ -322,6 +318,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
