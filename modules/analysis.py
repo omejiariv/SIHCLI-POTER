@@ -82,37 +82,90 @@ def calculate_spi(series, window):
 
 @st.cache_data
 def calculate_spei(precip_series, et_series, scale):
-
-    st.write(f"Debug calculate_spei: Recibida et_series. Es None? {et_series is None}")
-    if et_series is not None:
-        st.write(f"Debug calculate_spei: Primeros valores de et_series:\n{et_series.head()}")
-        st.write(f"Debug calculate_spei: Hay valores no nulos en et_series? {et_series.notna().any()}")
-        
     """
     Calcula el Índice de Precipitación y Evapotranspiración Estandarizado (SPEI).
     """
-    from scipy.stats import loglaplace
+    st.write(f"--- Debug SPEI-{scale} Inicio ---") # Mensaje de inicio
+
+    # Validación inicial de entradas
+    if precip_series is None or et_series is None:
+        st.error(f"SPEI-{scale}: precip_series o et_series es None.")
+        return pd.Series(dtype=float)
+    if precip_series.empty or et_series.empty:
+         st.warning(f"SPEI-{scale}: precip_series o et_series está vacía.")
+         return pd.Series(dtype=float)
+
+    st.write(f"Debug calculate_spei: Recibida et_series. Es None? {et_series is None}, Tiene valores? {et_series.notna().any()}")
+    if et_series is not None and et_series.notna().any():
+        st.write(f"Debug calculate_spei: Stats descriptivos de et_series:", et_series.describe().to_dict())
+
     scale = int(scale)
-    df = pd.DataFrame({'precip': precip_series, 'et': et_series})
-    df = df.sort_index().asfreq('MS')
-    df.dropna(inplace=True)
-    if len(df) < scale * 2:
+    # Asegurar alineación de índices y frecuencia mensual
+    df = pd.DataFrame({'precip': precip_series, 'et': et_series}).sort_index()
+    # Intentar inferir frecuencia mensual o rellenar si es necesario
+    df = df.asfreq('MS') # Fuerza frecuencia mensual, rellenará con NaN si faltan meses
+
+    # Rellenar NaNs en et_series con la media podría ser una opción, pero puede distorsionar resultados.
+    # Por ahora, solo quitamos filas donde AMBOS son NaN o donde P es NaN
+    df.dropna(subset=['precip'], inplace=True) 
+    df['et'] = df['et'].fillna(method='ffill').fillna(method='bfill') # Relleno simple para ET si tiene NaNs
+    df.dropna(subset=['et'], inplace=True) # Quitar si aún quedan NaNs en ET
+
+    if len(df) < scale * 2: # Chequeo DESPUÉS de limpiar NaNs
+        st.warning(f"SPEI-{scale}: Serie demasiado corta ({len(df)} puntos) después de limpiar NaNs.")
         return pd.Series(dtype=float)
 
     water_balance = df['precip'] - df['et']
     rolling_balance = water_balance.rolling(window=scale, min_periods=scale).sum()
     data_for_fit = rolling_balance.dropna()
-    data_for_fit = data_for_fit[np.isfinite(data_for_fit)]
+    data_for_fit = data_for_fit[np.isfinite(data_for_fit)] # Quitar Infinitos
 
-    if len(data_for_fit) > 0:
-        params = loglaplace.fit(data_for_fit)
-        cdf = loglaplace.cdf(rolling_balance, *params)
-    else:
-        return pd.Series(dtype=float)
-        
-    spei = norm.ppf(cdf)
-    spei = np.where(np.isinf(spei), np.nan, spei)
-    return pd.Series(spei, index=rolling_balance.index)
+    # --- DEBUG 1: Revisa el balance P-ETP y datos para ajuste ---
+    st.write(f"Debug SPEI-{scale}: Stats descriptivos de P (precip):", df['precip'].describe().to_dict())
+    st.write(f"Debug SPEI-{scale}: Stats descriptivos de ETP (et):", df['et'].describe().to_dict())
+    st.write(f"Debug SPEI-{scale}: Stats descriptivos de P-ETP (water_balance):", water_balance.describe().to_dict())
+    st.write(f"Debug SPEI-{scale}: Hay valores < 0 en water_balance? { (water_balance < 0).any() }")
+    st.write(f"Debug SPEI-{scale}: Stats descriptivos de Suma Acumulada (data_for_fit):", data_for_fit.describe().to_dict())
+    # --- FIN DEBUG 1 ---
+
+    spei = pd.Series(np.nan, index=rolling_balance.index) # Inicializar salida con NaN
+
+    if not data_for_fit.empty and len(data_for_fit.unique()) > 1: # Añadido chequeo de más de un valor único
+        try:
+            # Ajustar floc dinámicamente para evitar errores si min <= 0
+            params = loglaplace.fit(data_for_fit, floc=data_for_fit.min() - 1e-5 if data_for_fit.min() <=0 else 0) 
+
+            # --- DEBUG Parámetros ---
+            st.write(f"Debug SPEI-{scale}: Parámetros ajustados (LogLaplace): {params}")
+            # --- FIN DEBUG Parámetros ---
+
+            cdf = loglaplace.cdf(rolling_balance.dropna(), *params) # Calcular CDF solo para valores no-NaN del rolling_balance
+            cdf_series = pd.Series(cdf, index=rolling_balance.dropna().index) # Ponerlo en una Serie con el índice correcto
+
+            # --- DEBUG 2: Revisa el CDF ---
+            st.write(f"Debug SPEI-{scale}: Stats descriptivos CDF (probabilidades):", cdf_series.describe().to_dict())
+            # --- FIN DEBUG 2 ---
+
+            # Asegurar probabilidades entre casi 0 y casi 1
+            cdf_clipped = np.clip(cdf_series.values, 1e-7, 1 - 1e-7) 
+
+            spei_calculated = norm.ppf(cdf_clipped)
+
+            # Asignar los valores calculados al índice correcto en la serie de salida 'spei'
+            spei.loc[cdf_series.index] = spi_calculated 
+
+        except Exception as e:
+             st.error(f"SPEI-{scale}: Falló el ajuste Log-Laplace o cálculo CDF. Error: {e}")
+             import traceback
+             st.error(traceback.format_exc()) # Imprime el traceback completo
+    elif data_for_fit.empty:
+        st.warning(f"SPEI-{scale}: No hay datos válidos (data_for_fit vacío) para ajustar la distribución después de la suma acumulada.")
+    else: # Solo un valor único
+         st.warning(f"SPEI-{scale}: Todos los valores en data_for_fit son iguales ({data_for_fit.iloc[0]}). No se puede ajustar la distribución.")
+
+    spei.replace([np.inf, -np.inf], np.nan, inplace=True)
+    st.write(f"--- Debug SPEI-{scale} Fin ---") # Mensaje de fin
+    return spei
     
 @st.cache_data
 def calculate_monthly_anomalies(_df_monthly_filtered, _df_long):
@@ -475,5 +528,6 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
