@@ -161,8 +161,7 @@ def perform_loocv_for_all_methods(_year, _gdf_metadata, _df_anual_non_na):
 # FUNCIÓN ORIGINAL, AHORA ACTUALIZADA PARA USAR LA FUNCIÓN AUXILIAR
 # -----------------------------------------------------------------------------
 @st.cache_data
-def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_metadata,
- df_anual_non_na):
+def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_metadata, df_anual_non_na):
     """Crea una superficie de interpolación y calcula el error RMSE."""
     fig_var = None
     error_msg = None
@@ -310,3 +309,4 @@ def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
         variance = np.zeros_like(grid_z)
 
     return grid_z, variance
+
