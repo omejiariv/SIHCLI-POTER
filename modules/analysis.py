@@ -85,7 +85,6 @@ def calculate_spei(precip_series, et_series, scale):
     """
     Calcula el Índice de Precipitación y Evapotranspiración Estandarizado (SPEI).
     """
-    st.write(f"--- Debug SPEI-{scale} Inicio ---") # Mensaje de inicio
 
     # Validación inicial de entradas
     if precip_series is None or et_series is None:
@@ -120,14 +119,6 @@ def calculate_spei(precip_series, et_series, scale):
     data_for_fit = rolling_balance.dropna()
     data_for_fit = data_for_fit[np.isfinite(data_for_fit)] # Quitar Infinitos
 
-    # --- DEBUG 1: Revisa el balance P-ETP y datos para ajuste ---
-    st.write(f"Debug SPEI-{scale}: Stats descriptivos de P (precip):", df['precip'].describe().to_dict())
-    st.write(f"Debug SPEI-{scale}: Stats descriptivos de ETP (et):", df['et'].describe().to_dict())
-    st.write(f"Debug SPEI-{scale}: Stats descriptivos de P-ETP (water_balance):", water_balance.describe().to_dict())
-    st.write(f"Debug SPEI-{scale}: Hay valores < 0 en water_balance? { (water_balance < 0).any() }")
-    st.write(f"Debug SPEI-{scale}: Stats descriptivos de Suma Acumulada (data_for_fit):", data_for_fit.describe().to_dict())
-    # --- FIN DEBUG 1 ---
-
     spei = pd.Series(np.nan, index=rolling_balance.index) # Inicializar salida con NaN
 
     if not data_for_fit.empty and len(data_for_fit.unique()) > 1: # Añadido chequeo de más de un valor único
@@ -135,16 +126,8 @@ def calculate_spei(precip_series, et_series, scale):
             # Ajustar floc dinámicamente para evitar errores si min <= 0
             params = loglaplace.fit(data_for_fit, floc=data_for_fit.min() - 1e-5 if data_for_fit.min() <=0 else 0) 
 
-            # --- DEBUG Parámetros ---
-            st.write(f"Debug SPEI-{scale}: Parámetros ajustados (LogLaplace): {params}")
-            # --- FIN DEBUG Parámetros ---
-
             cdf = loglaplace.cdf(rolling_balance.dropna(), *params) # Calcular CDF solo para valores no-NaN del rolling_balance
             cdf_series = pd.Series(cdf, index=rolling_balance.dropna().index) # Ponerlo en una Serie con el índice correcto
-
-            # --- DEBUG 2: Revisa el CDF ---
-            st.write(f"Debug SPEI-{scale}: Stats descriptivos CDF (probabilidades):", cdf_series.describe().to_dict())
-            # --- FIN DEBUG 2 ---
 
             # Asegurar probabilidades entre casi 0 y casi 1
             cdf_clipped = np.clip(cdf_series.values, 1e-7, 1 - 1e-7) 
@@ -528,6 +511,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
