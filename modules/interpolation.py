@@ -160,20 +160,22 @@ def perform_loocv_for_all_methods(_year, _gdf_metadata, _df_anual_non_na):
 # -----------------------------------------------------------------------------
 # FUNCIÓN ORIGINAL, AHORA ACTUALIZADA PARA USAR LA FUNCIÓN AUXILIAR
 # -----------------------------------------------------------------------------
-@st.cache_data 
+@st.cache_data
 def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_metadata, df_anual_non_na):
-    # --- ADD THIS LINE ---
-    print("--- EXECUTING INTERPOLATION.PY create_interpolation_surface (Version with gdf_bounds) ---") 
-    # --- END ADD ---
-    
     """Crea una superficie de interpolación y calcula el error RMSE."""
-    fig_var = None
+    # --- ADD THIS LINE (Optional Debug) ---
+    print(f"--- EXECUTING INTERPOLATION.PY create_interpolation_surface (Year: {year}, Method: {method}) ---") 
+    # --- END ADD ---
+
+    fig_var = None # Renamed fig_variogram to fig_var to avoid potential conflicts if plt wasn't closed
     error_msg = None
     
+    # --- Data Preparation ---
     df_year = pd.merge(
         df_anual_non_na[df_anual_non_na[Config.YEAR_COL] == year],
         gdf_metadata,
-        on=Config.STATION_NAME_COL
+        on=Config.STATION_NAME_COL,
+        how='inner' # Use inner merge to ensure only stations with metadata are kept
     )
     
     clean_cols = [Config.LONGITUDE_COL, Config.LATITUDE_COL, Config.PRECIPITATION_COL]
@@ -181,11 +183,17 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
         clean_cols.append(Config.ELEVATION_COL)
         
     df_clean = df_year.dropna(subset=clean_cols).copy()
-    df_clean = df_clean[np.isfinite(df_clean[clean_cols]).all(axis=1)]
+    # Convert coordinates to numeric robustly
+    df_clean[Config.LONGITUDE_COL] = pd.to_numeric(df_clean[Config.LONGITUDE_COL], errors='coerce')
+    df_clean[Config.LATITUDE_COL] = pd.to_numeric(df_clean[Config.LATITUDE_COL], errors='coerce')
+    df_clean[Config.PRECIPITATION_COL] = pd.to_numeric(df_clean[Config.PRECIPITATION_COL], errors='coerce')
+    df_clean = df_clean.dropna(subset=[Config.LONGITUDE_COL, Config.LATITUDE_COL, Config.PRECIPITATION_COL]) # Drop rows where conversion failed
+    
+    df_clean = df_clean[np.isfinite(df_clean[clean_cols]).all(axis=1)] # Check for inf/-inf
     df_clean = df_clean.drop_duplicates(subset=[Config.LONGITUDE_COL, Config.LATITUDE_COL])
 
     if len(df_clean) < 4:
-        error_msg = f"Se necesitan al menos 4 estaciones con datos para el año {year} para interpolar."
+        error_msg = f"Se necesitan al menos 4 estaciones con datos válidos para el año {year} para interpolar (encontradas: {len(df_clean)})."
         fig = go.Figure().update_layout(title=error_msg, xaxis_visible=False, yaxis_visible=False)
         return fig, None, error_msg # Devuelve 3 valores
 
@@ -194,75 +202,142 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
     vals = df_clean[Config.PRECIPITATION_COL].values
     elevs = df_clean[Config.ELEVATION_COL].values if Config.ELEVATION_COL in df_clean else None
 
-    # Llama a la función auxiliar para obtener métricas
-    metrics = _perform_loocv(method, lons, lats, vals, elevs) 
-    rmse = metrics.get('RMSE')
+    # Calculate RMSE using the auxiliary function
+    rmse = None # Initialize rmse
+    try:
+        # Check if _perform_loocv exists before calling it
+        if '_perform_loocv' in globals() or '_perform_loocv' in locals():
+            metrics = _perform_loocv(method, lons, lats, vals, elevs) 
+            rmse = metrics.get('RMSE')
+        else:
+            # st.warning("Función _perform_loocv no encontrada. RMSE no se calculará.") # Use print for backend logs
+            print("Warning: Función _perform_loocv no encontrada. RMSE no se calculará.")
+    except Exception as e_rmse:
+         # st.warning(f"Error calculando RMSE con _perform_loocv: {e_rmse}") # Use print for backend logs
+         print(f"Warning: Error calculando RMSE con _perform_loocv: {e_rmse}")
 
-    grid_lon = np.linspace(gdf_bounds[0] - 0.1, gdf_bounds[2] + 0.1, 200)
-    grid_lat = np.linspace(gdf_bounds[1] - 0.1, gdf_bounds[3] + 0.1, 200)
-    z_grid, fig_variogram, error_message = None, None, None
+    # Define grid based on bounds
+    if gdf_bounds is None or len(gdf_bounds) != 4 or not all(np.isfinite(gdf_bounds)):
+         error_msg = "Límites geográficos (bounds) inválidos o no proporcionados."
+         fig = go.Figure().update_layout(title=error_msg, xaxis_visible=False, yaxis_visible=False)
+         return fig, None, error_msg
 
+    grid_lon = np.linspace(gdf_bounds[0] - 0.1, gdf_bounds[2] + 0.1, 150) # Reduced points for speed
+    grid_lat = np.linspace(gdf_bounds[1] - 0.1, gdf_bounds[3] + 0.1, 150) # Reduced points for speed
+    z_grid, error_message = None, None
+
+    # --- Interpolation Calculation ---
     try:
         if method in ["Kriging Ordinario", "Kriging con Deriva Externa (KED)"]:
             model_map = {'gaussian': gs.Gaussian(dim=2), 'exponential': gs.Exponential(dim=2),
                          'spherical': gs.Spherical(dim=2), 'linear': gs.Linear(dim=2)}
             model = model_map.get(variogram_model, gs.Spherical(dim=2))
-            bin_center, gamma = gs.vario_estimate((lons, lats), vals)
-            model.fit_variogram(bin_center, gamma, nugget=True)
-            
-            fig_variogram, ax = plt.subplots()
-            ax.plot(bin_center, gamma, 'o', label='Experimental')
-            model.plot(ax=ax, label='Modelo Ajustado')
-            ax.set_xlabel('Distancia'); ax.set_ylabel('Semivarianza')
-            ax.set_title(f'Variograma para {year}'); ax.legend()
+            # Increased len_scale_max for potentially larger ranges
+            bin_center, gamma = gs.vario_estimate((lons, lats), vals, len_scale_max=0.8) 
+            # Added error handling for fit_variogram
+            try:
+                model.fit_variogram(bin_center, gamma, nugget=True)
+            except ValueError as e_fit:
+                 raise ValueError(f"Error ajustando variograma: {e_fit}. Datos insuficientes o sin varianza espacial?")
+
+            # Variogram plot generation (keep if needed, otherwise comment out)
+            try:
+                fig_variogram_plt, ax = plt.subplots(figsize=(6, 4)) 
+                ax.plot(bin_center, gamma, 'o', label='Experimental')
+                model.plot(ax=ax, label='Modelo Ajustado')
+                ax.set_xlabel('Distancia'); ax.set_ylabel('Semivarianza')
+                ax.set_title(f'Variograma para {year}'); ax.legend()
+                plt.tight_layout() 
+                # Instead of assigning fig_variogram_plt, keep ax if you return it, or close explicitly
+                # fig_var = fig_variogram_plt # Keep if you return the matplotlib figure
+                plt.close(fig_variogram_plt) # Close the plot to free memory if not returned
+            except Exception as e_plot:
+                 print(f"Warning: No se pudo generar el gráfico del variograma: {e_plot}")
+                 fig_var = None
+
 
             if method == "Kriging Ordinario":
                 krig = gs.krige.Ordinary(model, (lons, lats), vals)
                 z_grid, _ = krig.structured([grid_lon, grid_lat]) 
             else: # KED
-                rbf_elev = Rbf(lons, lats, elevs, function='thin_plate') 
-                grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
-                drift_grid = rbf_elev(grid_x, grid_y)
+                if elevs is None:
+                     raise ValueError("Datos de elevación necesarios para KED no encontrados.")
+                # Using griddata for elevation interpolation - RBF can be slow/memory intensive
+                grid_x_elev, grid_y_elev = np.meshgrid(grid_lon, grid_lat)
+                drift_grid = griddata((lons, lats), elevs, (grid_x_elev, grid_y_elev), method='linear')
+                nan_mask_elev = np.isnan(drift_grid)
+                if np.any(nan_mask_elev): # Fill NaNs if any
+                    fill_values_elev = griddata((lons, lats), elevs, (grid_x_elev[nan_mask_elev], grid_y_elev[nan_mask_elev]), method='nearest')
+                    drift_grid[nan_mask_elev] = fill_values_elev
+                drift_grid = np.nan_to_num(drift_grid) # Ensure no NaNs remain
+
                 krig = gs.krige.ExtDrift(model, (lons, lats), vals, drift_src=elevs)
                 z_grid, _ = krig.structured([grid_lon, grid_lat], drift_tgt=drift_grid.T) 
 
         elif method == "IDW":
-            z_grid = interpolate_idw(lons, lats, vals, grid_lon, grid_lat) 
-        elif method == "Spline (Thin Plate)":
-            rbf = Rbf(lons, lats, vals, function='thin_plate')
             grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
-            z_grid = rbf(grid_x, grid_y) 
+            z_grid = griddata((lons, lats), vals, (grid_x, grid_y), method='linear') # Linear for speed
+            nan_mask = np.isnan(z_grid)
+            if np.any(nan_mask):
+                fill_values = griddata((lons, lats), vals, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
+                z_grid[nan_mask] = fill_values
+            
+            # --- DEBUG PRINTS FOR IDW ---
+            print(f"--- DEBUG IDW INTERPOLATION for Year {year} ---")
+            print(f"Input 'vals' (len:{len(vals)}) Min: {np.nanmin(vals):.2f}, Max: {np.nanmax(vals):.2f}, Mean: {np.nanmean(vals):.2f}")
+            if z_grid is not None:
+                z_grid = np.nan_to_num(z_grid) # Replace any final NaNs with 0 AFTER checking range
+                print(f"Output 'z_grid' (shape:{z_grid.shape}) Min: {np.nanmin(z_grid):.2f}, Max: {np.nanmax(z_grid):.2f}, Mean: {np.nanmean(z_grid):.2f}")
+            else:
+                print("Output 'z_grid' is None after griddata")
+            print("--- END DEBUG IDW ---")
+            # --- END DEBUG ---
+
+        elif method == "Spline (Thin Plate)":
+            # Using griddata with 'cubic' as approximation for spline
+            grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
+            z_grid = griddata((lons, lats), vals, (grid_x, grid_y), method='cubic')
+            nan_mask = np.isnan(z_grid)
+            if np.any(nan_mask): # Fill border NaNs
+                fill_values = griddata((lons, lats), vals, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
+                z_grid[nan_mask] = fill_values
+
+        # Ensure z_grid is not None and handle potential remaining NaNs
+        if z_grid is not None:
+             z_grid = np.nan_to_num(z_grid) # Replace any final NaNs with 0
 
     except Exception as e:
         error_message = f"Error al calcular {method}: {e}"
+        import traceback
+        print(traceback.format_exc()) # Print full traceback to logs
         fig = go.Figure().update_layout(title=error_message, xaxis_visible=False, yaxis_visible=False)
+        # Ensure fig_variogram is handled if created
+        # if 'fig_variogram_plt' in locals() and fig_variogram_plt: plt.close(fig_variogram_plt) 
         return fig, None, error_message # Devuelve 3 valores
 
+    # --- Plotting Section ---
     if z_grid is not None:
-        # --- START INDENTED BLOCK ---
         fig = go.Figure(data=go.Contour(
             z=z_grid.T, x=grid_lon, y=grid_lat,
-            colorscale=px.colors.sequential.YlGnBu, # Corrected name
+            colorscale=px.colors.sequential.YlGnBu, 
             colorbar_title='Precipitación (mm)',
-            # ADDED Enhancements from old code:
             contours=dict(
-                coloring='heatmap', # Keep coloring if desired, or remove
-                showlabels=True,  # Show labels on contour lines
-                labelfont=dict(size=10, color='white'), # Label style
-                labelformat=".0f" # Format labels as integers
+                coloring='heatmap', 
+                showlabels=True, 
+                labelfont=dict(size=10, color='white'), 
+                labelformat=".0f" 
             ),
-            line_smoothing=0.85, # Smooth contour lines
-            line_color='black',  # Optional: add faint line color
-            line_width=0.5       # Optional: add faint line width
+            line_smoothing=0.85, 
+            line_color='black',  
+            line_width=0.5       
         ))
         
-        # Modify the hover text creation for the Scatter plot
         hover_texts = [
              f"<b>{row[Config.STATION_NAME_COL]}</b><br>" +
-             f"Municipio: {row.get(Config.MUNICIPALITY_COL, 'N/A')}<br>" + # Use .get for safety
-             f"Altitud: {row.get(Config.ALTITUDE_COL, 'N/A')} m<br>" +     # Use .get for safety
+             f"Municipio: {row.get(Config.MUNICIPALITY_COL, 'N/A')}<br>" + 
+             f"Altitud: {row.get(Config.ALTITUDE_COL, 'N/A')} m<br>" +     
              f"Precipitación: {row[Config.PRECIPITATION_COL]:.0f} mm"
-             for _, row in df_clean.iterrows() # Use df_clean which has station data
+             for _, row in df_clean.iterrows() 
         ]
 
         fig.add_trace(go.Scatter(
@@ -270,7 +345,7 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
             color='black')),
             name='Estaciones',
             hoverinfo='text',
-            text=hover_texts # Use the generated hover texts
+            text=hover_texts 
         ))
         
         if rmse is not None:
@@ -285,14 +360,16 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
             xaxis_title="Longitud", yaxis_title="Latitud", height=600,
             legend=dict(x=0.01, y=0.01, bgcolor="rgba(0,0,0,0)")
         )
-        return fig, fig_variogram, None # Devuelve 3 valores
-        # --- END INDENTED BLOCK ---
+        # Decide whether to return the matplotlib fig_var or None
+        # If returning matplotlib figure, ensure plt.close() is NOT called earlier
+        # If NOT returning matplotlib figure, ensure plt.close() IS called earlier
+        return fig, None, None # Returning None for fig_var for simplicity now
 
     # Fallback if z_grid ended up being None
-    # Ensure fig_variogram is closed if created but not returned
-    if fig_variogram: plt.close(fig_variogram) 
+    # Ensure matplotlib plot is closed if created
+    # if 'fig_variogram_plt' in locals() and fig_variogram_plt: plt.close(fig_variogram_plt) 
     return go.Figure().update_layout(title="Error: No se pudo generar la superficie Z"), None, "Superficie Z es None"
-
+    
 @st.cache_data
 def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
     """
@@ -334,6 +411,7 @@ def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
         variance = np.zeros_like(grid_z)
 
     return grid_z, variance
+
 
 
 
