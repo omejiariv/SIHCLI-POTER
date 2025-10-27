@@ -595,6 +595,11 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                             value_name='Porcentaje'
                         )
 
+                        # --- AÑADIR DEBUG AQUÍ ---
+                        st.write("Debug Composición (visualizer): df_plot ANTES de px.bar (primeras 10):")
+                        st.dataframe(df_plot.head(10))
+                        # --- FIN DEBUG ---
+
                         fig_comp = px.bar(
                             df_plot,
                             x=Config.STATION_NAME_COL,
@@ -4280,6 +4285,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
