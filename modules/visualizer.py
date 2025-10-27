@@ -1151,96 +1151,6 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
             else:
                 st.info("No hay datos mensuales para descargar.")
 
-def create_interpolation_surface(year, method, variogram_model, bounds, gdf_metadata, df_anual):
-    """Crea una superficie de interpolación robusta, con etiquetas y suavizado, diferenciando entre IDW y Spline."""
-    try:
-        points_year = df_anual[df_anual[Config.YEAR_COL] == year]
-        if points_year.empty or points_year[Config.PRECIPITATION_COL].isnull().all():
-            return None, None, f"No hay datos para el año {year}."
-        
-        merged_data = pd.merge(gdf_metadata, points_year, on=Config.STATION_NAME_COL)
-        coords = np.array(merged_data[[Config.LONGITUDE_COL, Config.LATITUDE_COL]])
-        values = merged_data[Config.PRECIPITATION_COL].values
-        
-        if len(values) < 4:
-            return None, None, "Se necesitan al menos 4 estaciones."
-
-        grid_lon = np.linspace(bounds[0], bounds[2], 200)
-        grid_lat = np.linspace(bounds[1], bounds[3], 200)
-        grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
-        fig_variogram = None
-
-        if "Kriging" in method:
-            bin_center, gamma = gs.vario_estimate(coords.T, values)
-            model_class = {'linear': gs.Linear, 'spherical': gs.Spherical, 'exponential': gs.Exponential, 'gaussian': gs.Gaussian}.get(variogram_model, gs.Spherical)
-            model = model_class(dim=2)
-            model.fit_variogram(bin_center, gamma, nugget=True)
-            kriging = gs.krige.Ordinary(model, cond_pos=coords.T, cond_val=values)
-            grid_z, variance = kriging.structured((grid_lon, grid_lat))
-            rmse = np.sqrt(np.mean(variance))
-            ax = model.plot(x_max=max(bin_center))
-            fig_variogram = ax.get_figure()
-            fig_variogram.set_size_inches(6, 4)
-        else:
-            # Lógica diferenciada para IDW ('linear') y Spline ('cubic')
-            interp_method = 'cubic' if "Spline" in method else 'linear'
-            
-            try:
-                grid_z = griddata(coords, values, (grid_x, grid_y), method=interp_method)
-            except Exception:
-                grid_z = griddata(coords, values, (grid_x, grid_y), method='nearest') # Fallback
-
-            nan_mask = np.isnan(grid_z)
-            if np.any(nan_mask):
-                fill_values = griddata(coords, values, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
-                grid_z[nan_mask] = fill_values
-            
-            predicted_values = griddata(coords, values, coords, method=interp_method)
-            rmse = np.sqrt(np.mean((values - predicted_values)**2))
-        
-        merged_data['hover_text'] = merged_data.apply(
-            lambda row: f"<b>{row[Config.STATION_NAME_COL]}</b><br>"
-                        f"Municipio: {row[Config.MUNICIPALITY_COL]}<br>"
-                        f"Precipitación: {row[Config.PRECIPITATION_COL]:.0f} mm",
-            axis=1
-        )
-        
-        fig = go.Figure(data=go.Contour(
-            z=grid_z.T, x=grid_lon, y=grid_lat,
-            colorscale='viridis',
-            colorbar=dict(title='Precipitación (mm)'),
-            # --- MEJORA 1: ETIQUETAS EN ISOLÍNEAS ---
-            contours=dict(
-                coloring='heatmap',
-                showlabels=True,  # <-- Muestra las etiquetas
-                labelfont=dict(size=10, color='white') # Estilo de la etiqueta
-            ),
-            # --- MEJORA 2: SUAVIZADO DE LÍNEAS ---
-            line_smoothing=0.85, # <-- Suaviza las isolíneas
-            line_color='black',
-            line_width=0.5
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=coords[:, 0], y=coords[:, 1], mode='markers',
-            marker=dict(color='red', size=5),
-            hoverinfo='text', hovertext=merged_data['hover_text'],
-            showlegend=False
-        ))
-        
-        fig.update_layout(
-            title=f"Precipitación en {year} ({method})",
-            xaxis_title="Longitud", yaxis_title="Latitud",
-            annotations=[dict(x=0.05, y=0.95, xref='paper', yref='paper',
-                              text=f'RMSE: {rmse:.1f} mm', showarrow=False,
-                              font=dict(size=12, color="black"),
-                              bgcolor="yellow", opacity=0.8)]
-        )
-        return fig, fig_variogram, None
-    except Exception as e:
-        import traceback
-        return None, None, f"Error en la interpolación: {e}\n{traceback.format_exc()}"
-
 # --- OTRAS FUNCIONES AUXILIARES (create_climate_risk_map, etc.) ---
 @st.cache_data
 def create_climate_risk_map(df_anual, _gdf_stations): # Añadido _ para caché
@@ -4343,6 +4253,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
