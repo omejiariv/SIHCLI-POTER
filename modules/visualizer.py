@@ -1636,6 +1636,18 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 cols_metadata = [col for col in [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ELEVATION_COL] if col in gdf_filtered.columns]
                 gdf_metadata_reg = gdf_filtered[cols_metadata].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
+                # Calcula bounds ANTES de las llamadas
+                try:
+                    if not gdf_filtered.empty:
+                        gdf_bounds_reg = gdf_filtered.total_bounds
+                    else:
+                        gdf_bounds_reg = None # O maneja el caso de gdf_filtered vacío
+                        st.warning("No hay estaciones filtradas para definir los límites del mapa regional.")
+                        # Decide si quieres detenerte aquí o continuar con bounds=None
+                except Exception as e_bounds:
+                     st.error(f"Error al calcular los límites geográficos: {e_bounds}")
+                     gdf_bounds_reg = None
+                
                 # --- LLAMADA CORREGIDA (Error 1): Sin 'df_anual_non_na' (y sin gdf_bounds) ---
                 fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
                 
@@ -4335,6 +4347,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
