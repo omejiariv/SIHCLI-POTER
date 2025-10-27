@@ -70,7 +70,7 @@ class Config:
     MONTH_COL = 'mes'
     ORIGIN_COL = 'origin'
     CELL_COL = 'celda_xy'
-    ET_COL = 'ET_mmy'
+    ET_COL = 'et_mmy'
     ELEVATION_COL = 'elevation_dem'
     ENSO_ONI_COL = 'anomalia_oni'
     SOI_COL = 'soi'
@@ -112,6 +112,7 @@ class Config:
         for key, value in default_state.items():
             if key not in st.session_state:
                 st.session_state[key] = value
+
 
 
 
