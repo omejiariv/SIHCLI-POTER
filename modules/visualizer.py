@@ -577,16 +577,18 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                     data_composition['total'] = data_composition['Original'] + data_composition['Completado']
                     data_composition = data_composition[data_composition['total'] > 0] 
 
+                    # Nivel 4 de indentación
                     if not data_composition.empty: 
-                        data_composition['% Original'] = (data_composition['Original'] / data_composition['total']) * 100
-                        data_composition['% Completado'] = (data_composition['Completado'] / data_composition['total']) * 100
+                        # Nivel 5 de indentación
+                        data_composition['% Original'] = ...
+                        data_composition['% Completado'] = ...
 
-                    # --- AÑADIR DEBUG AQUÍ ---
-                    st.write("Debug Composición (visualizer): data_composition AFTER % calc (primeras 5):")
-                    st.dataframe(data_composition.head())
-                    st.write("Debug Composición (visualizer): Describe % Completado column:")
-                    st.dataframe(data_composition['% Completado'].describe())
-                    # --- FIN DEBUG ---                       
+                        # Debug (Nivel 5)
+                        st.write("Debug Composición...")
+                        st.dataframe(data_composition.head())
+                        st.write("Debug Composición...")
+                        st.dataframe(data_composition['% Completado'].describe())
+                        # --- FIN DEBUG ---                       
 
                         sort_order_comp = st.radio("Ordenar por:", ["% Datos Originales (Mayor a Menor)", "% Datos Originales (Menor a Mayor)", "Alfabético"], horizontal=True,
                                                    key="sort_comp")
@@ -4292,6 +4294,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
