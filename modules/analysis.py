@@ -152,7 +152,7 @@ def calculate_spei(precip_series, et_series, scale):
             spei_calculated = norm.ppf(cdf_clipped)
 
             # Asignar los valores calculados al índice correcto en la serie de salida 'spei'
-            spei.loc[cdf_series.index] = spi_calculated 
+            spei.loc[cdf_series.index] = spei_calculated
 
         except Exception as e:
              st.error(f"SPEI-{scale}: Falló el ajuste Log-Laplace o cálculo CDF. Error: {e}")
@@ -528,6 +528,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
