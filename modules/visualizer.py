@@ -539,46 +539,53 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
             if analysis_mode == "Completar series (interpolación)":
                 
                 # Nivel 3 de indentación: Código para el modo "Completar"
-                # --- Debug Prints (Indentados Nivel 3) ---
-                st.write("Debug Composición: Datos entrando al gráfico (primeras 5 filas):")
-                st.dataframe(df_monthly_filtered.head())
-                st.write(f"Debug Composición: Conteo de valores en '{Config.ORIGIN_COL}':")
+                # --- Debug Prints INICIALES (Indentados Nivel 3) ---
+                st.write("Debug Composición (visualizer): Datos entrando (primeras 5 filas df_monthly_filtered):")
+                st.dataframe(df_monthly_filtered.head()) 
+                st.write(f"Debug Composición (visualizer): Conteo 'origin' ENTRANDO a la función:")
                 if Config.ORIGIN_COL in df_monthly_filtered.columns:
-                    st.dataframe(df_monthly_filtered[Config.ORIGIN_COL].value_counts())
+                     st.dataframe(df_monthly_filtered[Config.ORIGIN_COL].value_counts())
                 else:
-                    st.warning(f"La columna '{Config.ORIGIN_COL}' NO está en df_monthly_filtered aquí.")
-                # --- Fin Debug ---
+                     st.warning(f"'{Config.ORIGIN_COL}' NO está en df_monthly_filtered al entrar a visualizer.")
+                # --- Fin Debug Inicial ---
 
                 st.info("Mostrando la composición de datos originales vs. completados para el período seleccionado.")
 
                 # Nivel 3 de indentación: Comprobar si hay datos y la columna 'origin'
                 if not df_monthly_filtered.empty and Config.ORIGIN_COL in df_monthly_filtered.columns:
 
+                    # --- AÑADIR DEBUG ANTES DEL GROUPBY ---
+                    st.write("Debug Composición (visualizer): df_monthly_filtered ANTES del groupby (primeras 5):")
+                    # Mostrar solo columnas clave para evitar tablas enormes
+                    st.dataframe(df_monthly_filtered[[Config.STATION_NAME_COL, Config.ORIGIN_COL, Config.PRECIPITATION_COL]].head()) 
+                    # --- FIN DEBUG ---
+
                     # Nivel 4 de indentación: Calcular composición
                     data_composition = \
                         df_monthly_filtered.groupby([Config.STATION_NAME_COL,
                                                      Config.ORIGIN_COL]).size().unstack(fill_value=0)
+                    
+                    # --- AÑADIR DEBUG DESPUÉS DEL GROUPBY ---
+                    st.write("Debug Composición (visualizer): data_composition DESPUÉS del groupby/unstack (primeras 5):")
+                    st.dataframe(data_composition.head())
+                    # --- FIN DEBUG ---
 
+                    # --- El resto del código para calcular % y crear el gráfico ---
                     if 'Original' not in data_composition: data_composition['Original'] = 0
                     if 'Completado' not in data_composition: data_composition['Completado'] = 0
 
-                    # Asegurar que total no sea cero para evitar división por cero
                     data_composition['total'] = data_composition['Original'] + data_composition['Completado']
-                    data_composition = data_composition[data_composition['total'] > 0] # Filtrar filas sin datos
+                    data_composition = data_composition[data_composition['total'] > 0] 
 
-                    if not data_composition.empty: # Proceder solo si quedan datos
-                        data_composition['% Original'] = (data_composition['Original'] /
-                                                         data_composition['total']) * 100
-                        data_composition['% Completado'] = (data_composition['Completado'] /
-                                                           data_composition['total']) * 100
+                    if not data_composition.empty: 
+                        data_composition['% Original'] = (data_composition['Original'] / data_composition['total']) * 100
+                        data_composition['% Completado'] = (data_composition['Completado'] / data_composition['total']) * 100
 
                         sort_order_comp = st.radio("Ordenar por:", ["% Datos Originales (Mayor a Menor)", "% Datos Originales (Menor a Mayor)", "Alfabético"], horizontal=True,
                                                    key="sort_comp")
 
-                        if "Mayor a Menor" in sort_order_comp: data_composition = \
-                            data_composition.sort_values("% Original", ascending=False)
-                        elif "Menor a Mayor" in sort_order_comp: data_composition = \
-                            data_composition.sort_values("% Original", ascending=True)
+                        if "Mayor a Menor" in sort_order_comp: data_composition = data_composition.sort_values("% Original", ascending=False)
+                        elif "Menor a Mayor" in sort_order_comp: data_composition = data_composition.sort_values("% Original", ascending=True)
                         else: data_composition = data_composition.sort_index(ascending=True)
 
                         df_plot = data_composition.reset_index().melt(
@@ -599,9 +606,7 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                             color_discrete_map={'% Original': '#1f77b4', '% Completado': '#ff7f0e'} # Azul y Naranja
                         )
 
-                        fig_comp.update_layout(height=500, xaxis={'categoryorder': 'trace'},
-                                               barmode='stack')
-
+                        fig_comp.update_layout(height=500, xaxis={'categoryorder': 'trace'}, barmode='stack')
                         st.plotly_chart(fig_comp, use_container_width=True)
                     else:
                         st.warning("No hay datos válidos para calcular la composición después del filtrado inicial.")
@@ -609,7 +614,8 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                 else:
                     st.warning("No hay datos mensuales procesados o falta la columna 'origin' para mostrar la composición.")
 
-            # Nivel 2 de indentación: Else para 'if analysis_mode == ...'
+            # Nivel 2 de indentación: Else para 'if analysis_mode == ...' (Este bloque no se modifica)
+
             else: 
                 st.info("Mostrando el porcentaje de disponibilidad de datos según el archivo de estaciones.")
 
@@ -4274,6 +4280,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
