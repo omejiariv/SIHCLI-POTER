@@ -95,7 +95,6 @@ def calculate_spei(precip_series, et_series, scale):
          return pd.Series(dtype=float)
 
     if et_series is not None and et_series.notna().any():
-        st.write(f"Debug calculate_spei: Stats descriptivos de et_series:", et_series.describe().to_dict())
 
     scale = int(scale)
     # Asegurar alineación de índices y frecuencia mensual
@@ -509,6 +508,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
