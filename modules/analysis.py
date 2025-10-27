@@ -94,7 +94,6 @@ def calculate_spei(precip_series, et_series, scale):
          st.warning(f"SPEI-{scale}: precip_series o et_series está vacía.")
          return pd.Series(dtype=float)
 
-    st.write(f"Debug calculate_spei: Recibida et_series. Es None? {et_series is None}, Tiene valores? {et_series.notna().any()}")
     if et_series is not None and et_series.notna().any():
         st.write(f"Debug calculate_spei: Stats descriptivos de et_series:", et_series.describe().to_dict())
 
@@ -147,7 +146,6 @@ def calculate_spei(precip_series, et_series, scale):
          st.warning(f"SPEI-{scale}: Todos los valores en data_for_fit son iguales ({data_for_fit.iloc[0]}). No se puede ajustar la distribución.")
 
     spei.replace([np.inf, -np.inf], np.nan, inplace=True)
-    st.write(f"--- Debug SPEI-{scale} Fin ---") # Mensaje de fin
     return spei
     
 @st.cache_data
@@ -511,6 +509,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
