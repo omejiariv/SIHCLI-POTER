@@ -79,63 +79,67 @@ def load_shapefile(file_uploader_object):
         st.error(f"Error al procesar el shapefile: {e}")
         return None
 
-
 @st.cache_data
 def complete_series(_df):
-    """Completa las series de tiempo mensuales para cada estación mediante interpolación, preservando metadatos."""
-    all_resampled_dfs = []
+    """Completa series mensuales rellenando huecos internos con interpolación lineal."""
+    all_completed_dfs = []
     
-    # Define columnas esenciales
+    # Define columnas esenciales y de metadatos
     id_cols = [Config.STATION_NAME_COL, Config.DATE_COL]
     value_col = Config.PRECIPITATION_COL
     origin_col = Config.ORIGIN_COL
-    
-    # Columnas de metadatos a preservar
     metadata_cols_to_keep = [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL] 
                              if col in _df.columns]
     cols_needed = id_cols + [value_col] + metadata_cols_to_keep
     
     # Trabajar con una copia limpia
     df_input = _df[cols_needed].copy() 
-
     station_list = df_input[Config.STATION_NAME_COL].unique()
-
+    
     # Pre-crear DataFrame de metadatos únicos para eficiencia
     df_metadata = df_input[[Config.STATION_NAME_COL] + metadata_cols_to_keep].drop_duplicates(subset=[Config.STATION_NAME_COL])
 
     for station in station_list:
-        # Filtra datos de la estación (¡importante usar .copy() aquí!)
+        # Filtra datos de la estación
         df_station = df_input[df_input[Config.STATION_NAME_COL] == station].copy()
         
-        # Asegura tipo datetime y maneja errores, elimina filas sin fecha válida
+        # Asegura tipo datetime, elimina filas sin fecha válida
         df_station[Config.DATE_COL] = pd.to_datetime(df_station[Config.DATE_COL], errors='coerce')
         df_station.dropna(subset=[Config.DATE_COL], inplace=True)
-        if df_station.empty: continue # Saltar si no quedan datos
+        if df_station.empty: continue 
 
         # Establece índice de fecha y elimina duplicados
         df_station.set_index(Config.DATE_COL, inplace=True)
         if not df_station.index.is_unique:
             df_station = df_station[~df_station.index.duplicated(keep='first')]
-        if df_station.empty: continue # Saltar si después de quitar duplicados no queda nada
+        if df_station.empty: continue 
 
-        # Crear el rango completo de fechas
+        # Crear el rango completo de fechas ENTRE el mínimo y máximo real
         start_date, end_date = df_station.index.min(), df_station.index.max()
         if pd.isna(start_date) or pd.isna(end_date): continue 
         date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
              
         # Reindexar para crear el DataFrame completo con huecos (NaN)
-        # Selecciona solo la columna de precipitación ANTES de reindexar
-        df_precip_only = df_station[[value_col]] 
-        df_resampled = df_precip_only.reindex(date_range)
-        
-        # --- NUEVA LÓGICA DE ORIGEN basada en NaN ---
-        # 1. Crea la columna 'origin' AHORA, basado en si 'precipitation' ES NaN
-        #    Las filas nuevas tendrán NaN aquí, las originales tendrán un valor.
-        df_resampled[origin_col] = np.where(df_resampled[value_col].isna(), 'Completado', 'Original')
+        df_resampled = df_station[[value_col]].reindex(date_range) # Solo reindexar precipitación
+
+        # --- NUEVA LÓGICA DE INTERPOLACIÓN Y ORIGEN ---
+        # 1. Guarda una máscara de dónde están los NaNs AHORA (antes de interpolar)
+        nan_mask_before_interp = df_resampled[value_col].isna()
+
+        # 2. Interpola usando 'linear' y limitando la dirección
+        #    limit_direction='both': Solo rellena huecos ENTRE datos válidos.
+        #    limit_area='inside': Asegura que no rellene fuera del rango original (aunque 'both' ya lo hace).
+        df_resampled[value_col] = df_resampled[value_col].interpolate(
+            method='linear', 
+            limit_direction='both', 
+            limit_area='inside' 
+        )
+
+        # 3. Asigna origen basado en la máscara guardada
+        #    Si ERA NaN (nan_mask_before_interp es True), ahora es 'Completado'
+        #    Si NO ERA NaN (nan_mask_before_interp es False), es 'Original'
+        df_resampled[origin_col] = np.where(nan_mask_before_interp, 'Completado', 'Original')
         # --- FIN NUEVA LÓGICA ---
-        
-        # Interpolar la precipitación DESPUÉS de asignar el origen
-        df_resampled[value_col] = df_resampled[value_col].interpolate(method='linear')
         
         # Añadir nombre de estación de nuevo
         df_resampled[Config.STATION_NAME_COL] = station
@@ -148,19 +152,22 @@ def complete_series(_df):
         df_resampled.reset_index(inplace=True)
         df_resampled.rename(columns={'index': Config.DATE_COL}, inplace=True)
         
-        # Selecciona solo las columnas procesadas explícitamente HASTA AHORA
         processed_cols = [Config.STATION_NAME_COL, Config.DATE_COL, value_col, origin_col, Config.YEAR_COL, Config.MONTH_COL]
-        all_resampled_dfs.append(df_resampled[processed_cols]) 
+        # Guardamos solo las columnas procesadas explícitamente HASTA AHORA
+        all_completed_dfs.append(df_resampled[processed_cols]) 
 
-    if not all_resampled_dfs:
+    if not all_completed_dfs:
         st.warning("No se encontraron datos válidos para completar series.")
         return pd.DataFrame()
         
-    df_completed_core = pd.concat(all_resampled_dfs, ignore_index=True)
+    df_completed_core = pd.concat(all_completed_dfs, ignore_index=True)
 
     # Une los datos completados ('core') con la metadata usando el nombre de la estación
-    # Asegúrate que df_metadata tenga las columnas correctas
     df_final_completed = pd.merge(df_completed_core, df_metadata, on=Config.STATION_NAME_COL, how='left')
+
+    # Eliminar las líneas de depuración si aún estaban aquí
+    # st.write(...)
+    # st.dataframe(...)
 
     return df_final_completed
     
@@ -315,6 +322,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
