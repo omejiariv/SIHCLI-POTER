@@ -5,7 +5,7 @@ import geopandas as gpd
 import pandas as pd
 import requests
 import numpy as np
-from scipy.stats import gamma, norm
+from scipy.stats import gamma, loglaplace, norm
 from modules.config import Config
 import rasterio
 from rasterstats import zonal_stats
@@ -528,6 +528,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
