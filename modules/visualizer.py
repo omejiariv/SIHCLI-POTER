@@ -1648,14 +1648,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                      st.error(f"Error al calcular los límites geográficos: {e_bounds}")
                      gdf_bounds_reg = None
                 
-                # --- LLAMADA CORREGIDA (Error 1): Sin 'df_anual_non_na' (y sin gdf_bounds) ---
                 fig1_reg, fig_var1_reg, error1_reg = None, None, "No ejecutado"; fig2_reg, fig_var2_reg, error2_reg = None, None, "No ejecutado"
                 
-                # ¡¡IMPORTANTE!! El error indica que 'df_anual_non_na' es inesperado.
-                # Esto significa que tu definición de 'create_interpolation_surface' en 
-                # 'interpolation.py' probablemente NO coincide con la del PDF y 
-                # NO acepta 'df_anual_non_na'.
-                # La llamada se ajusta para OMITIRLO.
+            if gdf_bounds_reg is not None:
                 try:
                     gdf_bounds_reg = gdf_filtered.total_bounds
                     fig1_reg, fig_var1_reg, error1_reg = create_interpolation_surface(
@@ -1670,6 +1665,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                      error1_reg = str(te1)
                 except Exception as e1: st.error(f"Error Mapa 1: {e1}"); error1_reg = str(e1)
 
+            if gdf_bounds_reg is not None:
                 try:
                     fig2_reg, fig_var2_reg, error2_reg = create_interpolation_surface(
                         year=year2_reg, method=method2_reg, variogram_model=variogram_model2_reg,
@@ -4347,6 +4343,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
