@@ -533,10 +533,10 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
         st.subheader("Disponibilidad y Composición de Datos por Estación")
 
         if not gdf_display.empty:
-            if analysis_mode == "Completar series (interpolación)":
-            # --- AÑADIR DEBUG AQUÍ ---
+        if analysis_mode == "Completar series (interpolación)":
+            # --- BLOQUE INDENTADO CORRECTAMENTE ---
             st.write("Debug Composición: Datos entrando al gráfico (primeras 5 filas):")
-            st.dataframe(df_monthly_filtered.head()) # df_monthly_filtered viene de display_args
+            st.dataframe(df_monthly_filtered.head()) 
             st.write(f"Debug Composición: Conteo de valores en '{Config.ORIGIN_COL}':")
             if Config.ORIGIN_COL in df_monthly_filtered.columns:
                  st.dataframe(df_monthly_filtered[Config.ORIGIN_COL].value_counts())
@@ -4263,6 +4263,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
