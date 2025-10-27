@@ -1121,7 +1121,7 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
             st.subheader("Descargar Datos de la Pestaña Gráficos")
             st.markdown("Descarga los datos procesados y enriquecidos utilizados en esta pestaña de visualización.")
 
-            @st.cache_data
+            # @st.cache_data
             def convert_df_to_csv_local(df):
                 return df.to_csv(index=False, sep=';').encode('utf-8')
 
@@ -3202,7 +3202,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
 
 def display_downloads_tab(df_anual_melted, df_monthly_filtered, stations_for_analysis,
                              analysis_mode):
-    @st.cache_data
+    # @st.cache_data
     def convert_df_to_csv(df):
         return df.to_csv(index=False).encode('utf-8')
     st.header("Opciones de Descarga")
@@ -3680,7 +3680,7 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
         st.subheader("Descargar Datos Climáticos")
         
         # Use a helper function (or define one if needed) to convert DataFrame to CSV
-        @st.cache_data # Cache the conversion
+        # @st.cache_data # Cache the conversion
         def convert_df_to_csv_bytes(df):
             return df.to_csv(index=False, sep=';').encode('utf-8') # Use semicolon separator
 
@@ -4253,6 +4253,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
