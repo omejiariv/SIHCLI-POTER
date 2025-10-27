@@ -233,7 +233,7 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
                          'spherical': gs.Spherical(dim=2), 'linear': gs.Linear(dim=2)}
             model = model_map.get(variogram_model, gs.Spherical(dim=2))
             # Increased len_scale_max for potentially larger ranges
-            bin_center, gamma = gs.vario_estimate((lons, lats), vals, len_scale_max=0.8) 
+            bin_center, gamma = gs.vario_estimate((lons, lats), vals)
             # Added error handling for fit_variogram
             try:
                 model.fit_variogram(bin_center, gamma, nugget=True)
@@ -411,6 +411,7 @@ def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
         variance = np.zeros_like(grid_z)
 
     return grid_z, variance
+
 
 
 
