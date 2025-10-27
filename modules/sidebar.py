@@ -9,7 +9,7 @@ import rasterio # Importación necesaria
 # --- Ruta al DEM base ---
 # (Asegúrate que 'DemAntioquiaWgs84.tif' esté en 'modules/data/')
 _THIS_FILE_DIR_SB = os.path.dirname(__file__)
-BASE_DEM_FILENAME = "DemAntioquiaWgs84.tif"
+BASE_DEM_FILENAME = "DemAntioquia_EPSG3116.tif"
 BASE_DEM_PATH = os.path.abspath(os.path.join(_THIS_FILE_DIR_SB, '..', 'data', BASE_DEM_FILENAME))
 
 # Guardar la ruta y estado del CRS del DEM base en la sesión
@@ -188,3 +188,4 @@ def create_sidebar(gdf_stations, df_long):
         "selected_municipios": selected_municipios,
         "selected_altitudes": selected_altitudes
     }
+
