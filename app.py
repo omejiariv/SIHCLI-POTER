@@ -249,12 +249,22 @@ def main():
     if sidebar_filters["exclude_zeros"]:
         df_monthly_filtered = df_monthly_filtered[df_monthly_filtered[Config.PRECIPITATION_COL] > 0]
 
+    
+    st.write("Debug app.py: Columns in df_monthly_filtered BEFORE annual aggregation:", df_monthly_filtered.columns.tolist())
+    st.write("Debug app.py: Month values BEFORE annual aggregation (unique):", df_monthly_filtered[Config.MONTH_COL].unique())
+    
     annual_agg = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).agg(
         precipitation_sum=(Config.PRECIPITATION_COL, 'sum'),
         meses_validos=(Config.MONTH_COL, 'nunique')
     ).reset_index()
     annual_agg.loc[annual_agg['meses_validos'] < 10, 'precipitation_sum'] = np.nan
     df_anual_melted = annual_agg.rename(columns={'precipitation_sum': Config.PRECIPITATION_COL})
+
+    # Analisis de depuración
+    st.write("Debug app.py: Columns in df_anual_melted AFTER aggregation:", df_anual_melted.columns.tolist())
+    # Check if 'month' accidentally got created or modified
+    if Config.MONTH_COL in df_anual_melted.columns:
+         st.write("Debug app.py: Month values AFTER annual aggregation (unique):", df_anual_melted[Config.MONTH_COL].unique())
 
     display_args = {
         "gdf_filtered": gdf_filtered,
@@ -584,6 +594,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
