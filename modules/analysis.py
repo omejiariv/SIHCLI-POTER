@@ -82,6 +82,12 @@ def calculate_spi(series, window):
 
 @st.cache_data
 def calculate_spei(precip_series, et_series, scale):
+
+    st.write(f"Debug calculate_spei: Recibida et_series. Es None? {et_series is None}")
+    if et_series is not None:
+        st.write(f"Debug calculate_spei: Primeros valores de et_series:\n{et_series.head()}")
+        st.write(f"Debug calculate_spei: Hay valores no nulos en et_series? {et_series.notna().any()}")
+        
     """
     Calcula el Índice de Precipitación y Evapotranspiración Estandarizado (SPEI).
     """
@@ -469,4 +475,5 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
