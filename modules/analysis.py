@@ -94,8 +94,6 @@ def calculate_spei(precip_series, et_series, scale):
          st.warning(f"SPEI-{scale}: precip_series o et_series está vacía.")
          return pd.Series(dtype=float)
 
-    if et_series is not None and et_series.notna().any():
-
     scale = int(scale)
     # Asegurar alineación de índices y frecuencia mensual
     df = pd.DataFrame({'precip': precip_series, 'et': et_series}).sort_index()
@@ -508,6 +506,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
