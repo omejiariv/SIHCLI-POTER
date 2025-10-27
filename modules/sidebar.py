@@ -162,15 +162,20 @@ def create_sidebar(gdf_stations, df_long):
         st.markdown("---")
         st.markdown("##### Modelo de Elevación Digital (DEM)")
 
-        # Lógica SIMPLIFICADA: Solo informa sobre el DEM base
-        if st.session_state.get('dem_file_path') and os.path.exists(st.session_state['dem_file_path']):
-            st.info(f"Usando DEM base: {BASE_DEM_FILENAME}")
-            # La advertencia (Error 2) se mostrará aquí
-            if st.session_state.get('dem_crs_is_geographic', False):
-                 st.warning("El DEM base está en grados geográficos. El cálculo de áreas (ej. Zonas de Vida) será impreciso.")
+        # --- INICIO DEL CÓDIGO MODIFICADO ---
+        # Simplemente lee la ruta y el flag del session_state (que se definirán en app.py)
+        dem_path_from_state = st.session_state.get('dem_file_path', None)
+        dem_is_geo_from_state = st.session_state.get('dem_crs_is_geographic', True) # Asume True si no está
+
+        if dem_path_from_state:
+            dem_filename = os.path.basename(dem_path_from_state)
+            st.info(f"Usando DEM base: {dem_filename}")
+            if dem_is_geo_from_state:
+                st.warning("El DEM base está en grados geográficos. El cálculo de áreas será impreciso.")
         else:
-            st.error(f"DEM base no encontrado en {BASE_DEM_PATH}. Funciones DEM no calcularán áreas.")
-            st.session_state['dem_file_path'] = None # Asegurar que esté None si no se encuentra
+            # Muestra un error más genérico si la ruta no se encontró al inicio en app.py
+            st.error("DEM base no encontrado al iniciar la app. Funciones DEM no calcularán áreas.")
+        # --- FIN DEL CÓDIGO MODIFICADO ---
         # --- Fin Lógica DEM ---
 
     # Retornar los valores FINALES
@@ -188,4 +193,5 @@ def create_sidebar(gdf_stations, df_long):
         "selected_municipios": selected_municipios,
         "selected_altitudes": selected_altitudes
     }
+
 
