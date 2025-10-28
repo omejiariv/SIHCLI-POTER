@@ -290,24 +290,6 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
         # Config.LATITUDE_COL, Config.LONGITUDE_COL 
     ]
     
-    # Depuración: Ver columnas del input _df
-    st.write("--- Debug `complete_series` Metadata Merge ---")
-    st.write("Columnas disponibles en _df (input de complete_series):", _df.columns.tolist())
-    st.write("Valor de Config.ET_COL:", Config.ET_COL)
-    st.write("Columnas deseadas (station_metadata_cols):", station_metadata_cols) # Using your variable name
-    
-    # Filtrar columnas deseadas que REALMENTE existen en _df
-    metadata_cols_to_use = []
-    for col in station_metadata_cols: # Using your variable name
-        col_exists = col in _df.columns
-        st.write(f"Chequeando metadato: '{col}' -> Existe en _df? {col_exists}")
-        if col_exists:
-            metadata_cols_to_use.append(col)
-        # Forzar inclusión si es ET_COL y no se encontró (último recurso)
-        elif col == Config.ET_COL:
-             st.warning(f"'{Config.ET_COL}' no se encontró con 'in', pero se intentará incluir forzadamente.")
-             # Intentar añadirlo de todos modos si sabemos que debería estar
-             # Check again casting column names to string maybe? Redundant if previous check failed reliably.
              # Let's trust the first check for now, but keep this logic in mind if needed.
              # if Config.ET_COL in _df.columns.astype(str): 
              #      metadata_cols_to_use.append(Config.ET_COL)
@@ -332,6 +314,7 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
         st.warning("No se pudo crear df_metadata, el resultado no tendrá metadatos extra.")
 
     # Depuración FINAL antes de retornar
+    
     st.write("Columnas en df_final_completed ANTES de retornar:", df_final_completed.columns.tolist())
     st.write(f"¿Está '{Config.ET_COL}' en el resultado final?", Config.ET_COL in df_final_completed.columns)
     st.write("--- Fin Debug Metadata Merge ---")
@@ -428,3 +411,4 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
