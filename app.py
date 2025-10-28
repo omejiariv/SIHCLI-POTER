@@ -236,7 +236,7 @@ def main():
                      st.info("Para comenzar, seleccione al menos una estación en el panel de la izquierda.")
         st.stop()
 
-    #--- Procesamiento de Datos Post-Filtros (Lógica Revisada) ---
+    # --- Procesamiento de Datos Post-Filtros (Lógica Revisada) ---
 
     # 1. Determinar el DataFrame base según el modo
     if analysis_mode == "Completar series (interpolación)":
@@ -252,7 +252,18 @@ def main():
                 base_df_monthly = st.session_state.df_long # Fallback
     else:
         base_df_monthly = st.session_state.df_long # Usar original
+        # --- Ensure 'origin' column exists in original mode for consistency ---
+        if Config.ORIGIN_COL not in base_df_monthly.columns:
+             base_df_monthly[Config.ORIGIN_COL] = 'Original'
 
+    # --- ADD DEBUG for base_df_monthly ---
+    st.write("--- Debug app.py Base DF Check ---")
+    st.write("Current analysis_mode:", analysis_mode)
+    st.write("Columns in base_df_monthly:", base_df_monthly.columns.tolist())
+    st.write(f"Is '{Config.ET_COL}' in base_df_monthly?", Config.ET_COL in base_df_monthly.columns)
+    st.write("--- End Base DF Check ---")
+    # --- END DEBUG ---
+    
     # 2. Aplicar filtros de FECHA y MESES al DataFrame base seleccionado
     #    (El filtro de ESTACIONES ya se aplicó antes de 'complete_series' o se aplica aquí si es original)
     df_monthly_filtered_intermediate = base_df_monthly[
@@ -640,6 +651,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
