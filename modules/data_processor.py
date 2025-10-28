@@ -254,30 +254,80 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
     df_long[Config.STATION_NAME_COL] = df_long['id_estacion'].map(station_mapping)
     df_long.dropna(subset=[Config.STATION_NAME_COL], inplace=True)
 
+# --- INICIO BLOQUE CON DEBUG DETALLADO ---
+    # Define la lista de columnas deseadas
     station_metadata_cols = [
         Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.REGION_COL,
         Config.ALTITUDE_COL, Config.CELL_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ET_COL
     ]
-    existing_metadata_cols = [col for col in station_metadata_cols if col in gdf_stations.columns]
-    gdf_metadata_unique = gdf_stations[existing_metadata_cols].drop_duplicates(subset=[Config.STATION_NAME_COL])
+    
+    # Debug ANTES del bucle
+    st.write("--- Debug Filtro Columnas Metadata ---")
+    st.write("Columnas en gdf_stations ANTES del filtro:", gdf_stations.columns.tolist())
+    st.write("Valor de Config.ET_COL:", Config.ET_COL)
+    st.write("Columnas deseadas (station_metadata_cols):", station_metadata_cols)
+    
+    existing_metadata_cols = []
+    # Bucle para filtrar y depurar cada columna
+    for col in station_metadata_cols:
+        col_exists = col in gdf_stations.columns
+        st.write(f"Chequeando columna: '{col}' -> Existe? {col_exists}")
+        if col_exists:
+            existing_metadata_cols.append(col)
+            
+    # Debug DESPUÉS del bucle
+    st.write("Columnas que SÍ existen y se guardaron (existing_metadata_cols):", existing_metadata_cols)
+    st.write(f"¿Está '{Config.ET_COL}' en la lista final? {Config.ET_COL in existing_metadata_cols}")
+    st.write("--- Fin Debug Filtro ---")
+    
+    # Asegurar que la columna clave (Station Name) esté presente si existe en el original
+    if Config.STATION_NAME_COL not in existing_metadata_cols and Config.STATION_NAME_COL in gdf_stations.columns:
+         existing_metadata_cols.insert(0, Config.STATION_NAME_COL) # Ponerla al principio si faltaba
 
+    # Crear gdf_metadata_unique usando la lista verificada
+    if Config.STATION_NAME_COL in existing_metadata_cols:
+         # Asegurar que Station Name es la primera columna para drop_duplicates
+         cols_for_unique = [Config.STATION_NAME_COL] + [c for c in existing_metadata_cols if c != Config.STATION_NAME_COL]
+         gdf_metadata_unique = gdf_stations[cols_for_unique].drop_duplicates(subset=[Config.STATION_NAME_COL])
+    else:
+         st.error(f"Error Crítico: La columna clave '{Config.STATION_NAME_COL}' no se encontró en gdf_stations después de cargar.")
+         gdf_metadata_unique = pd.DataFrame() # Crear DF vacío para evitar error
+
+    # Drop potential duplicate columns from df_long BEFORE merging
+    # Usar la lista verificada 'existing_metadata_cols'
     cols_to_drop_from_long = [c for c in existing_metadata_cols if c != Config.STATION_NAME_COL and c in df_long.columns]
     df_long.drop(columns=cols_to_drop_from_long, inplace=True, errors='ignore')
 
-    df_long = pd.merge(df_long, gdf_metadata_unique, on=Config.STATION_NAME_COL, how='left')
+    # THE MERGE
+    if not gdf_metadata_unique.empty: # Solo hacer merge si tenemos metadata válida
+        df_long = pd.merge(df_long, gdf_metadata_unique, on=Config.STATION_NAME_COL, how='left')
+        # Debug AFTER merge (optional but good to keep for now)
+        st.write("Debug: Columns in df_long AFTER merge:", df_long.columns.tolist())
+        if Config.ET_COL in df_long.columns:
+            st.write(f"Debug: First 5 non-null values of {Config.ET_COL} after merge:", df_long[Config.ET_COL].dropna().head().tolist())
+        else:
+            st.warning(f"Debug: Column '{Config.ET_COL}' NOT FOUND in df_long after merge!")
 
+    # --- FIN BLOQUE CON DEBUG DETALLADO ---
+
+    # --- ENSO Data Processing (Mantener esta parte) ---
     enso_cols = ['id', Config.DATE_COL, Config.ENSO_ONI_COL, 'temp_sst', 'temp_media']
-    existing_enso_cols = [col for col in enso_cols if col in df_precip_raw.columns]
-    df_enso = df_precip_raw[existing_enso_cols].drop_duplicates().copy()
+    # Check against df_precip_raw columns as originally intended
+    existing_enso_cols = [col for col in enso_cols if col in df_precip_raw.columns] 
+    if existing_enso_cols: # Only proceed if columns exist in the original precip file
+        df_enso = df_precip_raw[existing_enso_cols].drop_duplicates().copy()
 
-    if Config.DATE_COL in df_enso.columns:
-        df_enso[Config.DATE_COL] = parse_spanish_dates(df_enso[Config.DATE_COL])
-        df_enso.dropna(subset=[Config.DATE_COL], inplace=True)
-    
-    for col in [Config.ENSO_ONI_COL, 'temp_sst', 'temp_media']:
-        if col in df_enso.columns:
-            df_enso[col] = standardize_numeric_column(df_enso[col])
-
+        if Config.DATE_COL in df_enso.columns:
+            df_enso[Config.DATE_COL] = parse_spanish_dates(df_enso[Config.DATE_COL])
+            df_enso.dropna(subset=[Config.DATE_COL], inplace=True)
+        
+        for col in [Config.ENSO_ONI_COL, 'temp_sst', 'temp_media']:
+            if col in df_enso.columns:
+                df_enso[col] = standardize_numeric_column(df_enso[col])
+    else:
+         st.warning("No se encontraron columnas ENSO en el archivo de precipitación original. df_enso estará vacío.")
+         df_enso = pd.DataFrame()
+        
     return gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas
 
 def extract_elevation_from_dem(gdf_stations, dem_data_source):
@@ -322,6 +372,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
