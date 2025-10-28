@@ -163,9 +163,6 @@ def perform_loocv_for_all_methods(_year, _gdf_metadata, _df_anual_non_na):
 @st.cache_data
 def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_metadata, df_anual_non_na):
     """Crea una superficie de interpolación y calcula el error RMSE."""
-    # --- ADD THIS LINE (Optional Debug) ---
-    print(f"--- EXECUTING INTERPOLATION.PY create_interpolation_surface (Year: {year}, Method: {method}) ---") 
-    # --- END ADD ---
 
     fig_var = None # Renamed fig_variogram to fig_var to avoid potential conflicts if plt wasn't closed
     error_msg = None
@@ -282,16 +279,11 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
                 fill_values = griddata((lons, lats), vals, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
                 z_grid[nan_mask] = fill_values
             
-            # --- DEBUG PRINTS FOR IDW ---
-            print(f"--- DEBUG IDW INTERPOLATION for Year {year} ---")
-            print(f"Input 'vals' (len:{len(vals)}) Min: {np.nanmin(vals):.2f}, Max: {np.nanmax(vals):.2f}, Mean: {np.nanmean(vals):.2f}")
             if z_grid is not None:
                 z_grid = np.nan_to_num(z_grid) # Replace any final NaNs with 0 AFTER checking range
                 print(f"Output 'z_grid' (shape:{z_grid.shape}) Min: {np.nanmin(z_grid):.2f}, Max: {np.nanmax(z_grid):.2f}, Mean: {np.nanmean(z_grid):.2f}")
             else:
                 print("Output 'z_grid' is None after griddata")
-            print("--- END DEBUG IDW ---")
-            # --- END DEBUG ---
 
         elif method == "Spline (Thin Plate)":
             # Using griddata with 'cubic' as approximation for spline
@@ -411,6 +403,7 @@ def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
         variance = np.zeros_like(grid_z)
 
     return grid_z, variance
+
 
 
 
