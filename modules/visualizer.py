@@ -1684,64 +1684,147 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
     with morph_tab:
         st.subheader("Análisis Morfométrico de Cuenca(s)")
         st.info("Calcula métricas y curva hipsométrica para la(s) cuenca(s) seleccionadas en 'Superficies -> Por Cuenca'. Usa el DEM base.")
-        unified_basin_gdf_morph = st.session_state.get('unified_basin_gdf'); morph_results_morph = st.session_state.get('morph_results')
+        
+        # Obtener datos de la sesión
+        unified_basin_gdf_morph = st.session_state.get('unified_basin_gdf')
+        morph_results_morph = st.session_state.get('morph_results')
         basin_title_morph = st.session_state.get('selected_basins_title', 'Cuenca no seleccionada')
-        dem_fixed_path_morph = st.session_state.get('dem_file_path') # Usar ruta base
+        dem_fixed_path_morph = st.session_state.get('dem_file_path') # Usar ruta base validada
 
+        # Proceder solo si hay una cuenca seleccionada
         if unified_basin_gdf_morph is not None and not unified_basin_gdf_morph.empty:
             st.markdown(f"**Cuenca(s):** {basin_title_morph}")
-            recalculate_morph = False
+            recalculate_morph = False # Bandera para recalcular si es necesario
             
+            # Verificar si los resultados ya existen o si hay error previo
             if morph_results_morph is None or morph_results_morph.get("error"):
+                 # Intentar recalcular solo si tenemos un DEM válido
                  if dem_fixed_path_morph and os.path.exists(dem_fixed_path_morph): 
                      recalculate_morph = True
                  else: 
-                     st.warning("DEM base no encontrado. No se puede calcular morfometría.")
+                     # Mostrar advertencia si no hay DEM pero sí hay cuenca
+                     st.warning("DEM base no encontrado o inválido. No se puede calcular morfometría.")
+                     # Asegurarse de que no se intente mostrar resultados viejos o erróneos
+                     morph_results_morph = None 
 
+            # Recalcular morfometría si es necesario
             if recalculate_morph and dem_fixed_path_morph:
                  st.info("Calculando morfometría...")
                  try:
+                     # Llamar a la función de cálculo (asegúrate que esté importada)
+                     # from modules.analysis import calculate_morphometry 
                      morph_results_morph = calculate_morphometry(unified_basin_gdf_morph, dem_fixed_path_morph)
-                     st.session_state['morph_results'] = morph_results_morph
+                     st.session_state['morph_results'] = morph_results_morph # Guardar resultado
+                 except ImportError:
+                      morph_results_morph = {"error": "Función 'calculate_morphometry' no encontrada."}
+                      st.session_state['morph_results'] = morph_results_morph
                  except Exception as e_morph_tab: 
                      morph_results_morph = {"error": f"Error calculando morfometría: {e_morph_tab}"}
                      st.session_state['morph_results'] = morph_results_morph
 
+            # Mostrar resultados de morfometría si existen y no hay error
             if morph_results_morph is not None:
-                if morph_results_morph.get("error"): st.error(morph_results_morph["error"])
+                if morph_results_morph.get("error"): 
+                    st.error(morph_results_morph["error"]) # Mostrar error si lo hubo
                 else:
+                    # Mostrar métricas principales
                     st.markdown("##### Métricas Principales")
-                    c1m, c2m, c3m = st.columns(3); c1m.metric("Área", f"{morph_results_morph.get('area_km2', 'N/A'):.2f} km²"); c2m.metric("Perímetro", f"{morph_results_morph.get('perimetro_km', 'N/A'):.2f} km"); c3m.metric("Índice de Forma", f"{morph_results_morph.get('indice_forma', 'N/A'):.2f}")
-                    c4m, c5m, c6m = st.columns(3); alt_max=morph_results_morph.get('alt_max_m'); alt_min=morph_results_morph.get('alt_min_m'); alt_prom=morph_results_morph.get('alt_prom_m')
-                    c4m.metric("Altitud Máxima", f"{alt_max:.0f} m" if alt_max is not None else "N/A"); c5m.metric("Altitud Mínima", f"{alt_min:.0f} m" if alt_min is not None else "N/A"); c6m.metric("Altitud Promedio", f"{alt_prom:.1f} m" if alt_prom is not None else "N/A")
+                    c1m, c2m, c3m = st.columns(3)
+                    c1m.metric("Área", f"{morph_results_morph.get('area_km2', 'N/A'):.2f} km²")
+                    c2m.metric("Perímetro", f"{morph_results_morph.get('perimetro_km', 'N/A'):.2f} km")
+                    c3m.metric("Índice de Forma", f"{morph_results_morph.get('indice_forma', 'N/A'):.2f}")
+                    
+                    c4m, c5m, c6m = st.columns(3)
+                    alt_max=morph_results_morph.get('alt_max_m')
+                    alt_min=morph_results_morph.get('alt_min_m')
+                    alt_prom=morph_results_morph.get('alt_prom_m')
+                    c4m.metric("Altitud Máxima", f"{alt_max:.0f} m" if alt_max is not None else "N/A")
+                    c5m.metric("Altitud Mínima", f"{alt_min:.0f} m" if alt_min is not None else "N/A")
+                    c6m.metric("Altitud Promedio", f"{alt_prom:.1f} m" if alt_prom is not None else "N/A")
 
+                    # --- INICIO BLOQUE CURVA HIPSOMÉTRICA CORREGIDO ---
+                    # Proceder solo si tenemos un DEM válido
                     if dem_fixed_path_morph and os.path.exists(dem_fixed_path_morph):
                         st.markdown("##### Curva Hipsométrica")
+                        fig_hypso_plot = None # Inicializar figura como None
                         with st.spinner("Calculando curva hipsométrica..."):
                              try:
-                                 # --- CORRECCIÓN ERROR 'elevations' (Error 3) ---
-                                 fig_hypso = calculate_hypsometric_curve(unified_basin_gdf_morph, dem_fixed_path_morph)
-                                 if fig_hypso: 
-                                     st.plotly_chart(fig_hypso, use_container_width=True)
-                                 else: 
-                                     st.warning("No se pudo generar la curva hipsométrica.")
+                                 # 1. Obtener el DICCIONARIO de datos
+                                 # Asegúrate de importar: from modules.analysis import calculate_hypsometric_curve
+                                 hypso_data = calculate_hypsometric_curve(unified_basin_gdf_morph, dem_fixed_path_morph)
+
+                                 # 2. Verificar si hubo un error en el cálculo
+                                 if hypso_data and hypso_data.get("error"):
+                                     st.error(f"Error calculando curva: {hypso_data['error']}")
+                                 # 3. Verificar si se obtuvieron datos válidos
+                                 elif hypso_data and 'cumulative_area_percent' in hypso_data and 'elevations' in hypso_data:
+                                     # 4. CREAR la figura Plotly usando los datos del diccionario
+                                     fig_hypso_plot = go.Figure()
+                                     # Añadir curva original
+                                     fig_hypso_plot.add_trace(go.Scatter(
+                                         x=hypso_data['cumulative_area_percent'],
+                                         y=hypso_data['elevations'],
+                                         mode='lines',
+                                         name='Curva Hipsométrica',
+                                         fill='tozeroy' # Rellenar área bajo la curva
+                                     ))
+                                     # Añadir curva ajustada (si existe)
+                                     if 'fit_x' in hypso_data and 'fit_y' in hypso_data:
+                                          fig_hypso_plot.add_trace(go.Scatter(
+                                              x=hypso_data['fit_x'],
+                                              y=hypso_data['fit_y'],
+                                              mode='lines',
+                                              name='Ajuste Polinomial',
+                                              line=dict(color='red', dash='dash')
+                                          ))
+                                     # Configurar layout
+                                     fig_hypso_plot.update_layout(
+                                         title="Curva Hipsométrica",
+                                         xaxis_title="Área Acumulada sobre Elevación (%)",
+                                         yaxis_title="Elevación (m)",
+                                         xaxis=dict(range=[0, 100]), 
+                                         yaxis=dict(rangemode='tozero'), # Asegurar que Y empiece en 0
+                                         legend=dict(x=0.01, y=0.99)
+                                     )
+                                     # Añadir anotaciones para ecuación y R² (si existen)
+                                     annotation_text = []
+                                     if hypso_data.get("equation"):
+                                          annotation_text.append(f"Ecuación: {hypso_data['equation']}")
+                                     if hypso_data.get("r_squared") is not None:
+                                           annotation_text.append(f"R²: {hypso_data['r_squared']:.3f}")
+                                     if annotation_text:
+                                          fig_hypso_plot.add_annotation(
+                                                x=0.98, y=0.02, xref="paper", yref="paper",
+                                                text="<br>".join(annotation_text), 
+                                                showarrow=False, align='right',
+                                                font=dict(size=10, color="black"),
+                                                bgcolor="rgba(255, 255, 255, 0.7)",
+                                                bordercolor="black", borderwidth=1
+                                          )
+                                 else: # Si hypso_data está vacío o None por alguna razón
+                                     st.warning("No se pudieron obtener datos válidos para la curva hipsométrica.")
+
                              except ImportError: 
                                  st.error("Función 'calculate_hypsometric_curve' no encontrada.")
-                             except ValueError as e_hypso_ve: 
-                                 if 'elevations' in str(e_hypso_ve):
-                                     st.error("Error al generar la figura de la curva hipsométrica: Propiedad 'elevations' inválida. Revisa la función 'calculate_hypsometric_curve'.")
-                                     st.error(f"Detalle: {e_hypso_ve}")
-                                 else:
-                                      st.error(f"Error en datos para curva hipsométrica: {e_hypso_ve}")
                              except Exception as e_hypso: 
-                                 st.error(f"Error inesperado calculando curva hipsométrica: {e_hypso}")
+                                 st.error(f"Error inesperado preparando curva hipsométrica: {e_hypso}")
                                  import traceback
                                  st.error(traceback.format_exc())
-                             # --- FIN CORRECCIÓN ---
+                        
+                        # 5. Mostrar la figura Plotly (si se creó)
+                        if fig_hypso_plot is not None: 
+                            st.plotly_chart(fig_hypso_plot, use_container_width=True)
+                        # (Si no se creó, ya se mostró un error o advertencia arriba)
+
+                    # Else para 'if dem_fixed_path_morph...'
                     else: 
                         st.info("DEM base no encontrado, no se puede generar curva hipsométrica.")
+            # Else para 'if morph_results_morph is not None:'
+            # (No es necesario un else aquí, si morph_results es None, no se muestra nada)
+
+        # Else para 'if unified_basin_gdf_morph is not None...'
         else: 
-            st.info("Selecciona cuenca(s) en 'Superficies -> Por Cuenca' para ver morfometría.")
+            st.info("Selecciona una o más cuenca(s) en 'Mapas Avanzados -> Superficies -> Por Cuenca Específica' y genera el mapa para ver la morfometría aquí.")
 
     # --- Pestaña Mapa de Riesgo Climático ---
     with risk_map_tab:
@@ -4320,6 +4403,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
