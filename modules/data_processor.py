@@ -283,50 +283,43 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
 
     # Define la lista de columnas deseadas (USING YOUR VARIABLE NAME)
     station_metadata_cols = [
-        Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, 
-        Config.REGION_COL, Config.CELL_COL, Config.ET_COL 
-        # Add LATITUDE_COL and LONGITUDE_COL if needed for other tabs, 
-        # otherwise keep it minimal for the merge
-        # Config.LATITUDE_COL, Config.LONGITUDE_COL 
+        Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.REGION_COL,
+        Config.ALTITUDE_COL, Config.CELL_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ET_COL
     ]
     
-             # Let's trust the first check for now, but keep this logic in mind if needed.
-             # if Config.ET_COL in _df.columns.astype(str): 
-             #      metadata_cols_to_use.append(Config.ET_COL)
-
-    st.write("Columnas de metadatos que se usarán para el merge:", metadata_cols_to_use)
-
-    # Crear un DataFrame de metadatos únicos por estación
-    if Config.STATION_NAME_COL in metadata_cols_to_use:
-        # Asegurar STATION_NAME_COL primero
-        unique_cols = [Config.STATION_NAME_COL] + [c for c in metadata_cols_to_use if c != Config.STATION_NAME_COL]
-        # Make sure to select FROM _df (the original input with all columns)
-        df_metadata = _df[unique_cols].drop_duplicates(subset=[Config.STATION_NAME_COL]) 
-    else:
-        st.error("La columna STATION_NAME_COL falta en los metadatos a usar!")
-        df_metadata = pd.DataFrame() # Evitar error en merge
-
-    # Une los datos completados ('core') con la metadata
-    if not df_metadata.empty:
-        df_final_completed = pd.merge(df_completed_core, df_metadata, on=Config.STATION_NAME_COL, how='left')
-    else:
-        df_final_completed = df_completed_core # No hacer merge si no hay metadata válida
-        st.warning("No se pudo crear df_metadata, el resultado no tendrá metadatos extra.")
-
-    # Depuración FINAL antes de retornar
+    # Debug ANTES del bucle
+    st.write("--- Debug Filtro Columnas Metadata ---")
+    st.write("Columnas en gdf_stations ANTES del filtro:", gdf_stations.columns.tolist())
+    st.write("Valor de Config.ET_COL:", Config.ET_COL)
+    st.write("Columnas deseadas (station_metadata_cols):", station_metadata_cols)
     
-    st.write("Columnas en df_final_completed ANTES de retornar:", df_final_completed.columns.tolist())
-    st.write(f"¿Está '{Config.ET_COL}' en el resultado final?", Config.ET_COL in df_final_completed.columns)
-    st.write("--- Fin Debug Metadata Merge ---")
+    existing_metadata_cols = [] # Usar este nombre consistentemente
+    # Bucle para filtrar y depurar cada columna
+    for col in station_metadata_cols:
+        col_exists = col in gdf_stations.columns
+        st.write(f"Chequeando columna: '{col}' -> Existe? {col_exists}")
+        if col_exists:
+            existing_metadata_cols.append(col) # Usar este nombre
+        # Forzar inclusión si es ET_COL y no se encontró (último recurso)
+        elif col == Config.ET_COL:
+             st.warning(f"'{Config.ET_COL}' no se encontró con 'in', pero se intentará incluir forzadamente.")
+             # Check again just in case
+             if Config.ET_COL in gdf_stations.columns.astype(str): 
+                  existing_metadata_cols.append(Config.ET_COL) # Usar este nombre
+
+    # Debug DESPUÉS del bucle
+    st.write("Columnas que SÍ existen y se guardaron (existing_metadata_cols):", existing_metadata_cols) # Usar este nombre
+    st.write(f"¿Está '{Config.ET_COL}' en la lista final? {Config.ET_COL in existing_metadata_cols}") # Usar este nombre
+    st.write("--- Fin Debug Filtro ---")
     
     # Asegurar que la columna clave (Station Name) esté presente si existe en el original
     if Config.STATION_NAME_COL not in existing_metadata_cols and Config.STATION_NAME_COL in gdf_stations.columns:
          existing_metadata_cols.insert(0, Config.STATION_NAME_COL) # Ponerla al principio si faltaba
 
     # Crear gdf_metadata_unique usando la lista verificada
-    if Config.STATION_NAME_COL in existing_metadata_cols:
+    if Config.STATION_NAME_COL in existing_metadata_cols: # Usar este nombre
          # Asegurar que Station Name es la primera columna para drop_duplicates
-         cols_for_unique = [Config.STATION_NAME_COL] + [c for c in existing_metadata_cols if c != Config.STATION_NAME_COL]
+         cols_for_unique = [Config.STATION_NAME_COL] + [c for c in existing_metadata_cols if c != Config.STATION_NAME_COL] # Usar este nombre
          gdf_metadata_unique = gdf_stations[cols_for_unique].drop_duplicates(subset=[Config.STATION_NAME_COL])
     else:
          st.error(f"Error Crítico: La columna clave '{Config.STATION_NAME_COL}' no se encontró en gdf_stations después de cargar.")
@@ -334,7 +327,7 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
 
     # Drop potential duplicate columns from df_long BEFORE merging
     # Usar la lista verificada 'existing_metadata_cols'
-    cols_to_drop_from_long = [c for c in existing_metadata_cols if c != Config.STATION_NAME_COL and c in df_long.columns]
+    cols_to_drop_from_long = [c for c in existing_metadata_cols if c != Config.STATION_NAME_COL and c in df_long.columns] # Usar este nombre
     df_long.drop(columns=cols_to_drop_from_long, inplace=True, errors='ignore')
 
     # THE MERGE
@@ -346,7 +339,7 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
             st.write(f"Debug: First 5 non-null values of {Config.ET_COL} after merge:", df_long[Config.ET_COL].dropna().head().tolist())
         else:
             st.warning(f"Debug: Column '{Config.ET_COL}' NOT FOUND in df_long after merge!")
-
+            
     # --- FIN BLOQUE CON DEBUG DETALLADO ---
 
     # --- ENSO Data Processing (Mantener esta parte) ---
@@ -411,4 +404,5 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
