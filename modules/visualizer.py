@@ -539,10 +539,7 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
             if analysis_mode == "Completar series (interpolación)":
                 
                 # Nivel 3 de indentación: Código para el modo "Completar"
-                # --- Debug Prints INICIALES (Indentados Nivel 3) ---
-                st.write("Debug Composición (visualizer): Datos entrando (primeras 5 filas df_monthly_filtered):")
-                st.dataframe(df_monthly_filtered.head()) 
-                st.write(f"Debug Composición (visualizer): Conteo 'origin' ENTRANDO a la función:")
+
                 if Config.ORIGIN_COL in df_monthly_filtered.columns:
                      st.dataframe(df_monthly_filtered[Config.ORIGIN_COL].value_counts())
                 else:
@@ -554,21 +551,11 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                 # Nivel 3 de indentación: Comprobar si hay datos y la columna 'origin'
                 if not df_monthly_filtered.empty and Config.ORIGIN_COL in df_monthly_filtered.columns:
 
-                    # --- AÑADIR DEBUG ANTES DEL GROUPBY ---
-                    st.write("Debug Composición (visualizer): df_monthly_filtered ANTES del groupby (primeras 5):")
-                    # Mostrar solo columnas clave para evitar tablas enormes
-                    st.dataframe(df_monthly_filtered[[Config.STATION_NAME_COL, Config.ORIGIN_COL, Config.PRECIPITATION_COL]].head()) 
-                    # --- FIN DEBUG ---
-
                     # Nivel 4 de indentación: Calcular composición
                     data_composition = \
                         df_monthly_filtered.groupby([Config.STATION_NAME_COL,
                                                      Config.ORIGIN_COL]).size().unstack(fill_value=0)
                     
-                    # (Optional Debug AFTER groupby/unstack)
-                    # st.write("Debug Composición (visualizer): data_composition DESPUÉS del groupby/unstack (primeras 5):")
-                    # st.dataframe(data_composition.head())
-
                     # Asegurar que las columnas 'Original' y 'Completado' existan
                     if 'Original' not in data_composition: data_composition['Original'] = 0
                     if 'Completado' not in data_composition: data_composition['Completado'] = 0
@@ -600,15 +587,6 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                     data_composition.replace([np.inf, -np.inf, np.nan], 0.0, inplace=True)
                     # --- END CORRECTION for INF ---
 
-                    # --- Debug AFTER % calc and BEFORE sorting ---
-                    st.write("Debug Sort: data_composition BEFORE sorting (first 5 rows):")
-                    st.dataframe(data_composition.head())
-                    st.write("Debug Sort: Data types BEFORE sorting:")
-                    st.write(data_composition.dtypes)
-                    st.write("Debug Sort: Describe % Completado column BEFORE sorting:")
-                    st.dataframe(data_composition['% Completado'].describe()) # Describe after potential inf/nan replace
-                    # --- END DEBUG ---
-
                     # Ordenamiento
                     sort_order_comp = st.radio("Ordenar por:", ["% Datos Originales (Mayor a Menor)", "% Datos Originales (Menor a Mayor)", "Alfabético"], horizontal=True,
                                                key="sort_comp")
@@ -626,11 +604,6 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                         value_name='Porcentaje'
                     )
                     
-                    # --- Debug ANTES de px.bar ---
-                    st.write("Debug Composición (visualizer): df_plot ANTES de px.bar (primeras 10):")
-                    st.dataframe(df_plot.head(10))
-                    # --- FIN DEBUG ---
-
                     # Crear el gráfico (este código no cambia)
                     fig_comp = px.bar(
                         df_plot,
@@ -2169,10 +2142,6 @@ def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_anal
         df_station_idx = pd.DataFrame()
         if station_to_analyze_idx:
             df_station_idx = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] == station_to_analyze_idx].copy().set_index(Config.DATE_COL).sort_index()
-
-            # --- LÍNEA DE DEBUG ---
-            st.write(f"!!! Debug SPEI Tab (visualizer): Columns in df_station_idx just before calculate_spei:", df_station_idx.columns.tolist())
-            # --- FIN DEBUG ---
 
         with col2_idx:
             if not df_station_idx.empty:
@@ -4403,6 +4372,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
