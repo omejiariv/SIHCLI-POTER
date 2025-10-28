@@ -160,14 +160,19 @@ def complete_series(_df):
         st.warning("No se encontraron datos válidos para completar series.")
         return pd.DataFrame()
         
-    df_completed_core = pd.concat(all_completed_dfs, ignore_index=True)
+df_completed_core = pd.concat(all_resampled_dfs, ignore_index=True)
 
+    # --- Unir (Merge) Metadatos de VUELTA al FINAL ---
+    # Selecciona las columnas de metadatos del DataFrame ORIGINAL (_df)
+    metadata_cols = [Config.STATION_NAME_COL] + \
+                    [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL, Config.ET_COL] # <-- ET_COL ESTÁ AQUÍ
+                     if col in _df.columns] # <-- ¿ESTÁ FALLANDO ESTE CHECK?
+    
+    # Crea un DataFrame de metadatos únicos por estación
+    df_metadata = _df[metadata_cols].drop_duplicates(subset=[Config.STATION_NAME_COL])
+    
     # Une los datos completados ('core') con la metadata usando el nombre de la estación
     df_final_completed = pd.merge(df_completed_core, df_metadata, on=Config.STATION_NAME_COL, how='left')
-
-    # Eliminar las líneas de depuración si aún estaban aquí
-    # st.write(...)
-    # st.dataframe(...)
 
     return df_final_completed
     
@@ -254,31 +259,60 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
     df_long[Config.STATION_NAME_COL] = df_long['id_estacion'].map(station_mapping)
     df_long.dropna(subset=[Config.STATION_NAME_COL], inplace=True)
 
-    # --- INICIO BLOQUE CON DEBUG DETALLADO ---
-    # Define la lista de columnas deseadas
+    # Define la lista de columnas deseadas (USING YOUR VARIABLE NAME)
     station_metadata_cols = [
-        Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.REGION_COL,
-        Config.ALTITUDE_COL, Config.CELL_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ET_COL
+        Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, 
+        Config.REGION_COL, Config.CELL_COL, Config.ET_COL 
+        # Add LATITUDE_COL and LONGITUDE_COL if needed for other tabs, 
+        # otherwise keep it minimal for the merge
+        # Config.LATITUDE_COL, Config.LONGITUDE_COL 
     ]
     
-    # Debug ANTES del bucle
-    st.write("--- Debug Filtro Columnas Metadata ---")
-    st.write("Columnas en gdf_stations ANTES del filtro:", gdf_stations.columns.tolist())
+    # Depuración: Ver columnas del input _df
+    st.write("--- Debug `complete_series` Metadata Merge ---")
+    st.write("Columnas disponibles en _df (input de complete_series):", _df.columns.tolist())
     st.write("Valor de Config.ET_COL:", Config.ET_COL)
-    st.write("Columnas deseadas (station_metadata_cols):", station_metadata_cols)
+    st.write("Columnas deseadas (station_metadata_cols):", station_metadata_cols) # Using your variable name
     
-    existing_metadata_cols = []
-    # Bucle para filtrar y depurar cada columna
-    for col in station_metadata_cols:
-        col_exists = col in gdf_stations.columns
-        st.write(f"Chequeando columna: '{col}' -> Existe? {col_exists}")
+    # Filtrar columnas deseadas que REALMENTE existen en _df
+    metadata_cols_to_use = []
+    for col in station_metadata_cols: # Using your variable name
+        col_exists = col in _df.columns
+        st.write(f"Chequeando metadato: '{col}' -> Existe en _df? {col_exists}")
         if col_exists:
-            existing_metadata_cols.append(col)
-            
-    # Debug DESPUÉS del bucle
-    st.write("Columnas que SÍ existen y se guardaron (existing_metadata_cols):", existing_metadata_cols)
-    st.write(f"¿Está '{Config.ET_COL}' en la lista final? {Config.ET_COL in existing_metadata_cols}")
-    st.write("--- Fin Debug Filtro ---")
+            metadata_cols_to_use.append(col)
+        # Forzar inclusión si es ET_COL y no se encontró (último recurso)
+        elif col == Config.ET_COL:
+             st.warning(f"'{Config.ET_COL}' no se encontró con 'in', pero se intentará incluir forzadamente.")
+             # Intentar añadirlo de todos modos si sabemos que debería estar
+             # Check again casting column names to string maybe? Redundant if previous check failed reliably.
+             # Let's trust the first check for now, but keep this logic in mind if needed.
+             # if Config.ET_COL in _df.columns.astype(str): 
+             #      metadata_cols_to_use.append(Config.ET_COL)
+
+    st.write("Columnas de metadatos que se usarán para el merge:", metadata_cols_to_use)
+
+    # Crear un DataFrame de metadatos únicos por estación
+    if Config.STATION_NAME_COL in metadata_cols_to_use:
+        # Asegurar STATION_NAME_COL primero
+        unique_cols = [Config.STATION_NAME_COL] + [c for c in metadata_cols_to_use if c != Config.STATION_NAME_COL]
+        # Make sure to select FROM _df (the original input with all columns)
+        df_metadata = _df[unique_cols].drop_duplicates(subset=[Config.STATION_NAME_COL]) 
+    else:
+        st.error("La columna STATION_NAME_COL falta en los metadatos a usar!")
+        df_metadata = pd.DataFrame() # Evitar error en merge
+
+    # Une los datos completados ('core') con la metadata
+    if not df_metadata.empty:
+        df_final_completed = pd.merge(df_completed_core, df_metadata, on=Config.STATION_NAME_COL, how='left')
+    else:
+        df_final_completed = df_completed_core # No hacer merge si no hay metadata válida
+        st.warning("No se pudo crear df_metadata, el resultado no tendrá metadatos extra.")
+
+    # Depuración FINAL antes de retornar
+    st.write("Columnas en df_final_completed ANTES de retornar:", df_final_completed.columns.tolist())
+    st.write(f"¿Está '{Config.ET_COL}' en el resultado final?", Config.ET_COL in df_final_completed.columns)
+    st.write("--- Fin Debug Metadata Merge ---")
     
     # Asegurar que la columna clave (Station Name) esté presente si existe en el original
     if Config.STATION_NAME_COL not in existing_metadata_cols and Config.STATION_NAME_COL in gdf_stations.columns:
@@ -372,6 +406,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
