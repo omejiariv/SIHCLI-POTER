@@ -272,6 +272,16 @@ def main():
         # Añade otras columnas si son necesarias (ENSO, etc.)
     ]
     existing_cols_to_keep = [col for col in cols_to_keep if col in df_monthly_filtered_intermediate.columns]
+
+    # --- AÑADIR DEBUG AQUÍ ---
+    st.write("--- Debug `app.py` Column Selection ---")
+    st.write("`Config.ET_COL` value:", Config.ET_COL)
+    st.write("Columns in `df_monthly_filtered_intermediate`:", df_monthly_filtered_intermediate.columns.tolist())
+    st.write("Columns defined in `cols_to_keep`:", cols_to_keep)
+    st.write("Columns found and kept (`existing_cols_to_keep`):", existing_cols_to_keep)
+    st.write(f"Is '{Config.ET_COL}' in `existing_cols_to_keep`?", Config.ET_COL in existing_cols_to_keep)
+    st.write("--- Fin Debug ---")
+    # --- FIN DEBUG ---
     
     # Crear el df_monthly_filtered final con las columnas correctas
     df_monthly_filtered = df_monthly_filtered_intermediate[existing_cols_to_keep].copy() # Ahora usar .copy()
@@ -630,6 +640,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
