@@ -298,7 +298,7 @@ def main():
     with tabs[8]:
         display_anomalies_tab(**display_args)
     with tabs[9]:
-        display_drought_analysis_tab(df_long=st.session_state.df_long, **display_args)
+        display_drought_analysis_tab(**display_args)
     with tabs[10]:
         display_stats_tab(**display_args)
     with tabs[11]:
@@ -595,6 +595,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
