@@ -2300,7 +2300,7 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis,
             st.dataframe(humedos.rename(columns=col_rename_dict).round(0),
                          use_container_width=True)
 
-def display_stats_tab(df_anual_melted, df_monthly_filtered, 
+def display_stats_tab(df_long, df_anual_melted, df_monthly_filtered, 
                       stations_for_analysis, gdf_filtered, analysis_mode, selected_regions, 
                       selected_municipios, selected_altitudes, **kwargs):
     st.header("Estadísticas de Precipitación")
@@ -4316,6 +4316,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
