@@ -2087,6 +2087,10 @@ def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_anal
         if station_to_analyze_idx:
             df_station_idx = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] == station_to_analyze_idx].copy().set_index(Config.DATE_COL).sort_index()
 
+            # --- LÍNEA DE DEBUG ---
+            st.write(f"!!! Debug SPEI Tab (visualizer): Columns in df_station_idx just before calculate_spei:", df_station_idx.columns.tolist())
+            # --- FIN DEBUG ---
+
         with col2_idx:
             if not df_station_idx.empty:
                 with st.spinner(f"Calculando {index_type}-{index_window}..."):
@@ -4316,6 +4320,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
