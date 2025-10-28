@@ -194,8 +194,6 @@ def complete_series(_df):
          if Config.YEAR_COL not in df_final_completed.columns: df_final_completed[Config.YEAR_COL] = None
          if Config.MONTH_COL not in df_final_completed.columns: df_final_completed[Config.MONTH_COL] = None
     
-    # Eliminar cualquier línea de depuración st.write/st.dataframe residual si la hubiera
-
     return df_final_completed
     
 @st.cache_data
@@ -286,18 +284,12 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
         Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.REGION_COL,
         Config.ALTITUDE_COL, Config.CELL_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ET_COL
     ]
-    
-    # Debug ANTES del bucle
-    st.write("--- Debug Filtro Columnas Metadata ---")
-    st.write("Columnas en gdf_stations ANTES del filtro:", gdf_stations.columns.tolist())
-    st.write("Valor de Config.ET_COL:", Config.ET_COL)
-    st.write("Columnas deseadas (station_metadata_cols):", station_metadata_cols)
-    
+      
     existing_metadata_cols = [] # Usar este nombre consistentemente
     # Bucle para filtrar y depurar cada columna
     for col in station_metadata_cols:
         col_exists = col in gdf_stations.columns
-        st.write(f"Chequeando columna: '{col}' -> Existe? {col_exists}")
+
         if col_exists:
             existing_metadata_cols.append(col) # Usar este nombre
         # Forzar inclusión si es ET_COL y no se encontró (último recurso)
@@ -306,12 +298,7 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
              # Check again just in case
              if Config.ET_COL in gdf_stations.columns.astype(str): 
                   existing_metadata_cols.append(Config.ET_COL) # Usar este nombre
-
-    # Debug DESPUÉS del bucle
-    st.write("Columnas que SÍ existen y se guardaron (existing_metadata_cols):", existing_metadata_cols) # Usar este nombre
-    st.write(f"¿Está '{Config.ET_COL}' en la lista final? {Config.ET_COL in existing_metadata_cols}") # Usar este nombre
-    st.write("--- Fin Debug Filtro ---")
-    
+ 
     # Asegurar que la columna clave (Station Name) esté presente si existe en el original
     if Config.STATION_NAME_COL not in existing_metadata_cols and Config.STATION_NAME_COL in gdf_stations.columns:
          existing_metadata_cols.insert(0, Config.STATION_NAME_COL) # Ponerla al principio si faltaba
@@ -333,14 +320,11 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
     # THE MERGE
     if not gdf_metadata_unique.empty: # Solo hacer merge si tenemos metadata válida
         df_long = pd.merge(df_long, gdf_metadata_unique, on=Config.STATION_NAME_COL, how='left')
-        # Debug AFTER merge (optional but good to keep for now)
-        st.write("Debug: Columns in df_long AFTER merge:", df_long.columns.tolist())
+
         if Config.ET_COL in df_long.columns:
-            st.write(f"Debug: First 5 non-null values of {Config.ET_COL} after merge:", df_long[Config.ET_COL].dropna().head().tolist())
+           
         else:
             st.warning(f"Debug: Column '{Config.ET_COL}' NOT FOUND in df_long after merge!")
-            
-    # --- FIN BLOQUE CON DEBUG DETALLADO ---
 
     # --- ENSO Data Processing (Mantener esta parte) ---
     enso_cols = ['id', Config.DATE_COL, Config.ENSO_ONI_COL, 'temp_sst', 'temp_media']
@@ -404,5 +388,6 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
