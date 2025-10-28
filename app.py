@@ -271,6 +271,7 @@ def main():
         "stations_for_analysis": stations_for_analysis,
         "df_anual_melted": df_anual_melted,
         "df_monthly_filtered": df_monthly_filtered,
+        "df_long": st.session_state.df_long,
         "analysis_mode": sidebar_filters["analysis_mode"],
         "selected_regions": sidebar_filters["selected_regions"],
         "selected_municipios": sidebar_filters["selected_municipios"],
@@ -594,6 +595,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
