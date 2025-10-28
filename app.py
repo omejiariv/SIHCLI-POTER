@@ -256,13 +256,6 @@ def main():
         if Config.ORIGIN_COL not in base_df_monthly.columns:
              base_df_monthly[Config.ORIGIN_COL] = 'Original'
 
-    # --- ADD DEBUG for base_df_monthly ---
-    st.write("--- Debug app.py Base DF Check ---")
-    st.write("Current analysis_mode:", analysis_mode)
-    st.write("Columns in base_df_monthly:", base_df_monthly.columns.tolist())
-    st.write(f"Is '{Config.ET_COL}' in base_df_monthly?", Config.ET_COL in base_df_monthly.columns)
-    st.write("--- End Base DF Check ---")
-    # --- END DEBUG ---
     
     # 2. Aplicar filtros de FECHA y MESES al DataFrame base seleccionado
     #    (El filtro de ESTACIONES ya se aplicó antes de 'complete_series' o se aplica aquí si es original)
@@ -651,6 +644,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
