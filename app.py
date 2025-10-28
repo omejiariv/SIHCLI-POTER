@@ -216,63 +216,98 @@ def main():
     # Llamada a la función que crea los filtros
     sidebar_filters = create_sidebar(st.session_state.gdf_stations, st.session_state.df_long)
     
-    # Extraemos los valores del diccionario retornado
+# Extraemos los valores del diccionario retornado
     gdf_filtered = sidebar_filters["gdf_filtered"]
     stations_for_analysis = sidebar_filters["selected_stations"]
     year_range = sidebar_filters["year_range"]
     meses_numeros = sidebar_filters["meses_numeros"]
+    analysis_mode = sidebar_filters["analysis_mode"] # Capturar el modo aquí
+    exclude_na = sidebar_filters["exclude_na"]
+    exclude_zeros = sidebar_filters["exclude_zeros"]
     
-    # Detener si no hay estaciones seleccionadas
+    # Detener si no hay estaciones seleccionadas después de filtrar
     if not stations_for_analysis:
+        # (Tu código para mostrar mensaje de bienvenida y st.stop() aquí - SIN CAMBIOS)
         with tabs[0]:
             display_welcome_tab()
         for i, tab in enumerate(tabs):
-            if i > 0:
-                with tab:
-                    st.info("Para comenzar, seleccione al menos una estación en el panel de la izquierda.")
+             if i > 0:
+                 with tab:
+                     st.info("Para comenzar, seleccione al menos una estación en el panel de la izquierda.")
         st.stop()
 
-    #--- Procesamiento de Datos Post-Filtros ---
-    df_monthly_filtered = st.session_state.df_long[
-        (st.session_state.df_long[Config.STATION_NAME_COL].isin(stations_for_analysis)) &
-        (st.session_state.df_long[Config.DATE_COL].dt.year >= year_range[0]) &
-        (st.session_state.df_long[Config.DATE_COL].dt.year <= year_range[1]) &
-        (st.session_state.df_long[Config.DATE_COL].dt.month.isin(meses_numeros))
-    ].copy()
+    #--- Procesamiento de Datos Post-Filtros (Lógica Revisada) ---
 
-    if sidebar_filters["analysis_mode"] == "Completar series (interpolación)":
+    # 1. Determinar el DataFrame base según el modo
+    if analysis_mode == "Completar series (interpolación)":
         with st.spinner("Interpolando series, por favor espera..."):
-            df_monthly_filtered = complete_series(df_monthly_filtered)
+            # Llama a complete_series usando el df_long ORIGINAL filtrado PRELIMINARMENTE por estaciones
+            # Esto evita pasar datos innecesarios a complete_series
+            pre_filtered_df = st.session_state.df_long[
+                st.session_state.df_long[Config.STATION_NAME_COL].isin(stations_for_analysis)
+            ].copy()
+            base_df_monthly = complete_series(pre_filtered_df)
+            if base_df_monthly.empty:
+                st.warning("La completación de series no produjo resultados, usando datos originales.")
+                base_df_monthly = st.session_state.df_long # Fallback
+    else:
+        base_df_monthly = st.session_state.df_long # Usar original
 
-    if sidebar_filters["exclude_na"]:
+    # 2. Aplicar filtros de FECHA y MESES al DataFrame base seleccionado
+    #    (El filtro de ESTACIONES ya se aplicó antes de 'complete_series' o se aplica aquí si es original)
+    df_monthly_filtered_intermediate = base_df_monthly[
+        (base_df_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)) & # Aplicar filtro estación de nuevo por seguridad
+        (base_df_monthly[Config.DATE_COL].dt.year >= year_range[0]) &
+        (base_df_monthly[Config.DATE_COL].dt.year <= year_range[1]) &
+        (base_df_monthly[Config.DATE_COL].dt.month.isin(meses_numeros))
+    ] # No usar .copy() todavía
+
+    # 3. Seleccionar explícitamente las columnas necesarias (incluyendo ET_COL)
+    cols_to_keep = [
+        Config.STATION_NAME_COL, Config.DATE_COL, Config.PRECIPITATION_COL, 
+        Config.ORIGIN_COL, Config.YEAR_COL, Config.MONTH_COL,
+        Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, 
+        Config.CELL_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, 
+        Config.ET_COL # Asegurar que ET_COL esté aquí
+        # Añade otras columnas si son necesarias (ENSO, etc.)
+    ]
+    existing_cols_to_keep = [col for col in cols_to_keep if col in df_monthly_filtered_intermediate.columns]
+    
+    # Crear el df_monthly_filtered final con las columnas correctas
+    df_monthly_filtered = df_monthly_filtered_intermediate[existing_cols_to_keep].copy() # Ahora usar .copy()
+
+    # 4. Aplicar exclusión de NaN y Ceros
+    if exclude_na:
         df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
-    if sidebar_filters["exclude_zeros"]:
+    if exclude_zeros:
+        # Asegurar que la columna sea numérica antes de comparar
+        df_monthly_filtered[Config.PRECIPITATION_COL] = pd.to_numeric(df_monthly_filtered[Config.PRECIPITATION_COL], errors='coerce')
         df_monthly_filtered = df_monthly_filtered[df_monthly_filtered[Config.PRECIPITATION_COL] > 0]
 
-    
-    st.write("Debug app.py: Columns in df_monthly_filtered BEFORE annual aggregation:", df_monthly_filtered.columns.tolist())
-    st.write("Debug app.py: Month values BEFORE annual aggregation (unique):", df_monthly_filtered[Config.MONTH_COL].unique())
-    
-    annual_agg = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).agg(
-        precipitation_sum=(Config.PRECIPITATION_COL, 'sum'),
-        meses_validos=(Config.MONTH_COL, 'nunique')
-    ).reset_index()
-    annual_agg.loc[annual_agg['meses_validos'] < 10, 'precipitation_sum'] = np.nan
-    df_anual_melted = annual_agg.rename(columns={'precipitation_sum': Config.PRECIPITATION_COL})
+    # 5. Calcular datos anuales a partir del df_monthly_filtered FINAL
+    #    Asegurar que las columnas para agregar existan
+    if Config.PRECIPITATION_COL in df_monthly_filtered.columns and Config.MONTH_COL in df_monthly_filtered.columns:
+        annual_agg = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).agg(
+            precipitation_sum=(Config.PRECIPITATION_COL, 'sum'),
+            meses_validos=(Config.MONTH_COL, 'nunique') # nunique cuenta meses distintos
+        ).reset_index()
+        # Invalidar suma si no hay suficientes meses (ej. < 10 o < 12)
+        annual_agg.loc[annual_agg['meses_validos'] < 10, 'precipitation_sum'] = np.nan 
+        df_anual_melted = annual_agg.rename(columns={'precipitation_sum': Config.PRECIPITATION_COL})
+    else:
+        st.warning("Columnas necesarias para agregación anual no encontradas en df_monthly_filtered.")
+        df_anual_melted = pd.DataFrame(columns=[Config.STATION_NAME_COL, Config.YEAR_COL, Config.PRECIPITATION_COL]) # DataFrame vacío
 
-    # Analisis de depuración
-    st.write("Debug app.py: Columns in df_anual_melted AFTER aggregation:", df_anual_melted.columns.tolist())
-    # Check if 'month' accidentally got created or modified
-    if Config.MONTH_COL in df_anual_melted.columns:
-         st.write("Debug app.py: Month values AFTER annual aggregation (unique):", df_anual_melted[Config.MONTH_COL].unique())
-
+    # --- FIN LÓGICA REVISADA ---
+    
+    # Preparar argumentos para las pestañas (código original tuyo)
     display_args = {
         "gdf_filtered": gdf_filtered,
         "stations_for_analysis": stations_for_analysis,
         "df_anual_melted": df_anual_melted,
         "df_monthly_filtered": df_monthly_filtered,
-        "df_long": st.session_state.df_long,
-        "analysis_mode": sidebar_filters["analysis_mode"],
+        "df_long": st.session_state.df_long, # Pasamos el original para funciones que lo necesiten
+        "analysis_mode": analysis_mode, # Usar la variable capturada al inicio
         "selected_regions": sidebar_filters["selected_regions"],
         "selected_municipios": sidebar_filters["selected_municipios"],
         "selected_altitudes": sidebar_filters["selected_altitudes"]
@@ -595,6 +630,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
