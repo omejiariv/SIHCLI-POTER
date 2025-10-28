@@ -254,7 +254,7 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
     df_long[Config.STATION_NAME_COL] = df_long['id_estacion'].map(station_mapping)
     df_long.dropna(subset=[Config.STATION_NAME_COL], inplace=True)
 
-# --- INICIO BLOQUE CON DEBUG DETALLADO ---
+    # --- INICIO BLOQUE CON DEBUG DETALLADO ---
     # Define la lista de columnas deseadas
     station_metadata_cols = [
         Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.REGION_COL,
@@ -372,6 +372,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
