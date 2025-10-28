@@ -320,11 +320,14 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
     # THE MERGE
     if not gdf_metadata_unique.empty: # Solo hacer merge si tenemos metadata válida
         df_long = pd.merge(df_long, gdf_metadata_unique, on=Config.STATION_NAME_COL, how='left')
-
+        # Debug AFTER merge (optional but good to keep for now)
+        # st.write("Debug: Columns in df_long AFTER merge:", df_long.columns.tolist()) # Keep commented unless debugging
         if Config.ET_COL in df_long.columns:
-           
+            # st.write(f"Debug: First 5 non-null values of {Config.ET_COL} after merge:", df_long[Config.ET_COL].dropna().head().tolist()) # Keep commented unless debugging
+            pass # Placeholder if no action needed when ET_COL exists
         else:
-            st.warning(f"Debug: Column '{Config.ET_COL}' NOT FOUND in df_long after merge!")
+            # st.warning(f"Debug: Column '{Config.ET_COL}' NOT FOUND in df_long after merge!") # Keep commented unless debugging
+            pass # Placeholder if no action needed when ET_COL missing
 
     # --- ENSO Data Processing (Mantener esta parte) ---
     enso_cols = ['id', Config.DATE_COL, Config.ENSO_ONI_COL, 'temp_sst', 'temp_media']
@@ -342,8 +345,10 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
                 df_enso[col] = standardize_numeric_column(df_enso[col])
     else:
          st.warning("No se encontraron columnas ENSO en el archivo de precipitación original. df_enso estará vacío.")
-         df_enso = pd.DataFrame()
-        
+         df_enso = pd.DataFrame() # Create empty DataFrame if no ENSO columns found
+    # --- End ENSO Data Processing ---
+
+    # Final return statement should be aligned with the start of the function blocks
     return gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas
 
 def extract_elevation_from_dem(gdf_stations, dem_data_source):
@@ -388,3 +393,4 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
