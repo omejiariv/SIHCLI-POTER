@@ -272,7 +272,10 @@ def main():
         Config.ORIGIN_COL, Config.YEAR_COL, Config.MONTH_COL,
         Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, 
         Config.CELL_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, 
-        Config.ET_COL # Asegurar que ET_COL esté aquí
+        Config.ET_COL,
+        Config.ENSO_ONI_COL,
+        Config.ENSO_SOI_COL
+        Config.ENSO_SST_COL
         # Añade otras columnas si son necesarias (ENSO, etc.)
     ]
     existing_cols_to_keep = [col for col in cols_to_keep if col in df_monthly_filtered_intermediate.columns]
@@ -635,6 +638,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
