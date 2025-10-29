@@ -3121,42 +3121,80 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                                                            "{:.2f}"}).applymap(style_p_value, subset=['Valor p (Lineal)', 'Valor p (MK)']),
                                  use_container_width=True)
 
-    with descomposicion_tab:
+with descomposicion_tab: # Asegúrate que 'descomposicion_tab' sea el nombre correcto de tu variable
         st.subheader("Descomposición de Series de Tiempo Mensual")
-        station_to_decompose = st.selectbox("Seleccione una estación para la descomposición:",
-                                            options=stations_for_analysis, key="decompose_station_select")
+        
+        # Widget para seleccionar la estación
+        station_to_decompose = st.selectbox(
+            "Seleccione una estación para la descomposición:",
+            options=stations_for_analysis, 
+            key="decompose_station_select" # Asegúrate que la key sea única
+        )
+        
+        # Procesar SOLO si se seleccionó una estación
         if station_to_decompose:
-            df_station = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] ==
-                                            station_to_decompose].copy()
+            # Filtrar datos para la estación seleccionada
+            df_station_decomp = df_monthly_filtered[
+                df_monthly_filtered[Config.STATION_NAME_COL] == station_to_decompose
+            ].copy()
 
-            # --- INICIO DEBUG ACF/PACF ---
-            st.write(f"Debug ACF/PACF: Datos para {station_to_analyze_acf} (primeras 10 filas):")
-            st.dataframe(df_station[[Config.DATE_COL, Config.PRECIPITATION_COL]].head(10))
-            st.write(f"Debug ACF/PACF: Descripción de datos de precipitación (sin NaNs):")
-            st.dataframe(df_station[Config.PRECIPITATION_COL].dropna().describe())
-            # --- FIN DEBUG ACF/PACF ---
-            
-            if not df_station.empty:
-                df_station.set_index(Config.DATE_COL, inplace=True)
-                try:
-                    from modules.forecasting import get_decomposition_results
-                    series_for_decomp = \
-                        df_station[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time')
-                    result = get_decomposition_results(series_for_decomp)
-                    fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
-                                        subplot_titles=("Observado", "Tendencia", "Estacionalidad", "Residuo"))
-                    fig.add_trace(go.Scatter(x=result.observed.index, y=result.observed,
-                                             mode='lines', name='Observado'), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=result.trend.index, y=result.trend, mode='lines',
-                                             name='Tendencia'), row=2, col=1)
-                    fig.add_trace(go.Scatter(x=result.seasonal.index, y=result.seasonal,
-                                             mode='lines', name='Estacionalidad'), row=3, col=1)
-                    fig.add_trace(go.Scatter(x=result.resid.index, y=result.resid, mode='markers',
-                                             name='Residuo'), row=4, col=1)
-                    fig.update_layout(height=700, title_text=f"Descomposición de la Serie para {station_to_decompose}", showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
-                except Exception as e:
-                    st.error(f"No se pudo realizar la descomposición. Error: {e}")
+            # Verificar si hay datos después de filtrar
+            if not df_station_decomp.empty:
+                # Preparar la serie de tiempo (índice de fecha, asegurar frecuencia, interpolar)
+                df_station_decomp.set_index(Config.DATE_COL, inplace=True)
+                # Usar asfreq('MS') para asegurar frecuencia mensual
+                # Usar 'linear' para consistencia con complete_series
+                series_for_decomp = df_station_decomp[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear') 
+                series_for_decomp.dropna(inplace=True) # Eliminar NaNs al principio/final después de interpolar
+
+                # Proceder solo si hay suficientes datos para descomponer (ej. > 2 periodos)
+                period = 12 # Asumiendo estacionalidad anual
+                if len(series_for_decomp) >= period * 2:
+                    try:
+                        # Asegúrate que las funciones estén importadas al principio de visualizer.py
+                        # from modules.forecasting import get_decomposition_results
+                        # from plotly.subplots import make_subplots
+                        # import plotly.graph_objects as go
+                        
+                        # Realizar la descomposición
+                        result = get_decomposition_results(series_for_decomp, period=period) # Pasar el periodo
+                        
+                        # Crear la figura con subplots
+                        fig = make_subplots(
+                            rows=4, cols=1, 
+                            shared_xaxes=True,
+                            subplot_titles=("Observado", "Tendencia", "Estacionalidad", "Residuo")
+                        )
+                        # Añadir trazas
+                        if result.observed is not None:
+                             fig.add_trace(go.Scatter(x=result.observed.index, y=result.observed, mode='lines', name='Observado'), row=1, col=1)
+                        if result.trend is not None:
+                             fig.add_trace(go.Scatter(x=result.trend.index, y=result.trend, mode='lines', name='Tendencia'), row=2, col=1)
+                        if result.seasonal is not None:
+                             fig.add_trace(go.Scatter(x=result.seasonal.index, y=result.seasonal, mode='lines', name='Estacionalidad'), row=3, col=1)
+                        if result.resid is not None:
+                             fig.add_trace(go.Scatter(x=result.resid.index, y=result.resid, mode='markers', name='Residuo'), row=4, col=1)
+                        
+                        # Actualizar layout
+                        fig.update_layout(
+                            height=700, 
+                            title_text=f"Descomposición de la Serie para {station_to_decompose}", 
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                    except ImportError:
+                        st.error("Función 'get_decomposition_results' o 'make_subplots' no encontrada.")
+                    except ValueError as e_decomp:
+                         st.error(f"Error durante la descomposición: {e_decomp}") # Mostrar errores específicos (ej. serie muy corta)
+                    except Exception as e:
+                        st.error(f"No se pudo realizar la descomposición. Error inesperado: {e}")
+                # Else para if len(series_for_decomp) >= period * 2:
+                else:
+                    st.warning(f"No hay suficientes datos ({len(series_for_decomp)} meses) para realizar la descomposición estacional con periodo {period}.")
+            # Else para if not df_station_decomp.empty:
+            else:
+                st.warning(f"No se encontraron datos mensuales para la estación '{station_to_decompose}' con los filtros actuales.")
 
     with autocorrelacion_tab: # Ajusta el nombre de la variable 'autocorrelacion_tab' si es diferente
         st.subheader("Análisis de Autocorrelación (ACF) y Autocorrelación Parcial (PACF)")
@@ -4417,6 +4455,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
