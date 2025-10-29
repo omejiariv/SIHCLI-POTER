@@ -3190,7 +3190,8 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 # Preparar la serie de tiempo (índice de fecha, interpolar, quitar NaNs)
                 df_station_acf.set_index(Config.DATE_COL, inplace=True)
                 # Usar asfreq para asegurar frecuencia mensual y luego interpolar
-                series_acf = df_station_acf[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear')
+                # Usar 'linear' para consistencia con complete_series
+                series_acf = df_station_acf[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear') 
                 series_acf.dropna(inplace=True) # Quitar NaNs restantes (al principio/final)
 
                 # --- DEBUG ACF/PACF (AHORA DENTRO DEL IF y DESPUÉS de preparar series_acf) ---
@@ -4416,6 +4417,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
