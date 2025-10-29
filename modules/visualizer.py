@@ -3121,7 +3121,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                                                            "{:.2f}"}).applymap(style_p_value, subset=['Valor p (Lineal)', 'Valor p (MK)']),
                                  use_container_width=True)
 
-with descomposicion_tab: # Asegúrate que 'descomposicion_tab' sea el nombre correcto de tu variable
+    with descomposicion_tab: # Asegúrate que 'descomposicion_tab' sea el nombre correcto de tu variable
         st.subheader("Descomposición de Series de Tiempo Mensual")
         
         # Widget para seleccionar la estación
@@ -3196,7 +3196,7 @@ with descomposicion_tab: # Asegúrate que 'descomposicion_tab' sea el nombre cor
             else:
                 st.warning(f"No se encontraron datos mensuales para la estación '{station_to_decompose}' con los filtros actuales.")
 
-    with autocorrelacion_tab: # Ajusta el nombre de la variable 'autocorrelacion_tab' si es diferente
+    with autocorrelacion_tab: # Asegúrate que 'autocorrelacion_tab' sea el nombre correcto
         st.subheader("Análisis de Autocorrelación (ACF) y Autocorrelación Parcial (PACF)")
         
         # Widget para seleccionar la estación
@@ -3228,16 +3228,10 @@ with descomposicion_tab: # Asegúrate que 'descomposicion_tab' sea el nombre cor
                 # Preparar la serie de tiempo (índice de fecha, interpolar, quitar NaNs)
                 df_station_acf.set_index(Config.DATE_COL, inplace=True)
                 # Usar asfreq para asegurar frecuencia mensual y luego interpolar
-                # Usar 'linear' para consistencia con complete_series
                 series_acf = df_station_acf[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear') 
                 series_acf.dropna(inplace=True) # Quitar NaNs restantes (al principio/final)
 
-                # --- DEBUG ACF/PACF (AHORA DENTRO DEL IF y DESPUÉS de preparar series_acf) ---
-                st.write(f"Debug ACF/PACF: Datos para {station_to_analyze_acf} (primeras 10 filas de la serie procesada):")
-                st.dataframe(series_acf.head(10))
-                st.write(f"Debug ACF/PACF: Descripción de datos de precipitación (serie procesada):")
-                st.dataframe(series_acf.describe())
-                # --- FIN DEBUG ACF/PACF ---
+                # --- DEBUG ELIMINADO ---
 
                 # Verificar si hay suficientes datos DESPUÉS de procesar
                 if len(series_acf) > max_lag:
@@ -4455,6 +4449,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
