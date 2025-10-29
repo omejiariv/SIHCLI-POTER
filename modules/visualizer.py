@@ -3158,35 +3158,71 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 except Exception as e:
                     st.error(f"No se pudo realizar la descomposición. Error: {e}")
 
-    with autocorrelacion_tab:
+    with autocorrelacion_tab: # Ajusta el nombre de la variable 'autocorrelacion_tab' si es diferente
         st.subheader("Análisis de Autocorrelación (ACF) y Autocorrelación Parcial (PACF)")
-        station_to_analyze_acf = st.selectbox("Seleccione una estación:",
-                                                options=stations_for_analysis, key="acf_station_select")
-        max_lag = st.slider("Número máximo de rezagos (meses):", min_value=12,
-                            max_value=60, value=24, step=12)
+        
+        # Widget para seleccionar la estación
+        station_to_analyze_acf = st.selectbox(
+            "Seleccione una estación:",
+            options=stations_for_analysis, 
+            key="acf_station_select" # Asegúrate que la key sea única
+        )
+        
+        # Widget para seleccionar el número de rezagos
+        max_lag = st.slider(
+            "Número máximo de rezagos (meses):", 
+            min_value=12,
+            max_value=60, 
+            value=24, 
+            step=12,
+            key="acf_max_lag_slider" # Asegúrate que la key sea única
+        )
+
+        # Procesar SOLO si se seleccionó una estación
         if station_to_analyze_acf:
+            # Filtrar datos para la estación seleccionada
             df_station_acf = \
                 df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] ==
                                     station_to_analyze_acf].copy()
+            
+            # Verificar si hay datos después de filtrar
             if not df_station_acf.empty:
+                # Preparar la serie de tiempo (índice de fecha, interpolar, quitar NaNs)
                 df_station_acf.set_index(Config.DATE_COL, inplace=True)
-                df_station_acf = df_station_acf.asfreq('MS')
-                df_station_acf[Config.PRECIPITATION_COL] = \
-                    df_station_acf[Config.PRECIPITATION_COL].interpolate(method='time').dropna()
-                if len(df_station_acf) > max_lag:
+                # Usar asfreq para asegurar frecuencia mensual y luego interpolar
+                series_acf = df_station_acf[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear')
+                series_acf.dropna(inplace=True) # Quitar NaNs restantes (al principio/final)
+
+                # --- DEBUG ACF/PACF (AHORA DENTRO DEL IF y DESPUÉS de preparar series_acf) ---
+                st.write(f"Debug ACF/PACF: Datos para {station_to_analyze_acf} (primeras 10 filas de la serie procesada):")
+                st.dataframe(series_acf.head(10))
+                st.write(f"Debug ACF/PACF: Descripción de datos de precipitación (serie procesada):")
+                st.dataframe(series_acf.describe())
+                # --- FIN DEBUG ACF/PACF ---
+
+                # Verificar si hay suficientes datos DESPUÉS de procesar
+                if len(series_acf) > max_lag:
                     try:
-                        from modules.forecasting import create_acf_chart, create_pacf_chart
-                        fig_acf = create_acf_chart(df_station_acf[Config.PRECIPITATION_COL],
-                                                   max_lag)
+                        # Asegúrate de que las funciones estén importadas al principio de visualizer.py
+                        # from modules.forecasting import create_acf_chart, create_pacf_chart 
+                        
+                        fig_acf = create_acf_chart(series_acf, max_lag)
                         st.plotly_chart(fig_acf, use_container_width=True)
-                        fig_pacf = create_pacf_chart(df_station_acf[Config.PRECIPITATION_COL],
-                                                     max_lag)
+                        
+                        fig_pacf = create_pacf_chart(series_acf, max_lag)
                         st.plotly_chart(fig_pacf, use_container_width=True)
+                        
+                    except ImportError:
+                         st.error("Funciones 'create_acf_chart' o 'create_pacf_chart' no encontradas.")
                     except Exception as e:
                         st.error(f"No se pudieron generar los gráficos de autocorrelación. Error: {e}")
+                # Else para if len(series_acf) > max_lag:
                 else:
-                    st.warning(f"No hay suficientes datos para el análisis de autocorrelación.")
-
+                    st.warning(f"No hay suficientes datos ({len(series_acf)}) para el análisis de autocorrelación con {max_lag} rezagos después de procesar la serie.")
+            # Else para if not df_station_acf.empty:
+            else:
+                st.warning(f"No se encontraron datos mensuales para la estación '{station_to_analyze_acf}' con los filtros actuales.")
+                
     with pronostico_sarima_tab:
         st.subheader("Pronóstico (Modelo SARIMA)")
         st.info("Los pronósticos se generan utilizando los datos procesados...")
@@ -4380,6 +4416,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
