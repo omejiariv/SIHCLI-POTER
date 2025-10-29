@@ -274,7 +274,7 @@ def main():
         Config.CELL_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, 
         Config.ET_COL,
         Config.ENSO_ONI_COL,
-        Config.ENSO_SOI_COL
+        Config.ENSO_SOI_COL,
         Config.ENSO_SST_COL
         # Añade otras columnas si son necesarias (ENSO, etc.)
     ]
@@ -638,6 +638,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
