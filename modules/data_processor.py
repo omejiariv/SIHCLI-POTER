@@ -85,35 +85,33 @@ def complete_series(_df):
     Completa series mensuales rellenando huecos INTERNOS,
     detiene la extrapolación y asigna etiquetas de origen correctas.
     """
-    all_completed_dfs = []
     
     # Define columnas de metadatos a preservar
     metadata_cols = [Config.STATION_NAME_COL] + \
-                    [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL, Config.ET_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL] 
+                    [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL, Config.ET_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL] 
                      if col in _df.columns]
     
     # Pre-crear DataFrame de metadatos únicos para eficiencia
     try:
         df_metadata = _df[metadata_cols].drop_duplicates(subset=[Config.STATION_NAME_COL])
     except KeyError:
-         st.error("Error al preparar metadatos. Asegúrese que 'nom_est' (STATION_NAME_COL) esté en los datos.")
+         st.error(f"Error al preparar metadatos. Asegúrese que '{Config.STATION_NAME_COL}' (STATION_NAME_COL) esté en los datos.")
          return pd.DataFrame()
          
-    # Get only essential columns for processing
-    df_proc = _df[[Config.STATION_NAME_COL, Config.DATE_COL, Config.PRECIPITATION_COL]].copy()
+    # Obtener solo las columnas esenciales para el procesamiento
+    cols_to_proc = [Config.STATION_NAME_COL, Config.DATE_COL, Config.PRECIPITATION_COL]
+    df_proc = _df[cols_to_proc].copy()
     df_proc[Config.DATE_COL] = pd.to_datetime(df_proc[Config.DATE_COL], errors='coerce')
     df_proc = df_proc.dropna(subset=[Config.DATE_COL, Config.STATION_NAME_COL])
     if df_proc.empty:
          return pd.DataFrame()
 
-    # Usar groupby().apply() es más limpio y eficiente que un bucle for
+    # --- Función interna para procesar cada estación ---
     def fill_station_gaps(station_df):
         station_df = station_df.set_index(Config.DATE_COL).sort_index()
         if not station_df.index.is_unique:
             station_df = station_df[~station_df.index.duplicated(keep='first')]
         
-        # Guardar el índice original
-        original_index = station_df.index
         # Guardar el último dato real
         last_valid_date = station_df[Config.PRECIPITATION_COL].last_valid_index()
         
@@ -130,34 +128,41 @@ def complete_series(_df):
         original_data_mask = ~df_resampled[Config.PRECIPITATION_COL].isna()
         
         # 2. Interpolar TODOS los huecos (incluyendo extrapolación temporal)
-        df_resampled[Config.PRECIPITATION_COL] = df_resampled[Config.PRECIPITATION_COL].interpolate(method='linear')
+        df_resampled[Config.PRECIPITATION_COL] = df_resampled[Config.PRECIPITATION_COL].interpolate(method='linear', limit_area='inside')
         
-        # 3. ¡CRUCIAL! Detener la extrapolación no deseada
-        #    Poner NaN en todos los valores después del último dato real
-        if last_valid_date is not None and last_valid_date in df_resampled.index:
-            df_resampled.loc[df_resampled.index > last_valid_date, Config.PRECIPITATION_COL] = np.nan
-        
-        # 4. Asignar Origen
+        # 3. Asignar Origen
         #    'Original' donde había datos (máscara)
-        #    'Completado' donde no había (y ahora podría haber, si no fue extrapolación)
+        #    'Completado' donde no había (y ahora fue interpolado)
         df_resampled[Config.ORIGIN_COL] = np.where(original_data_mask, 'Original', 'Completado')
         
-        # 5. Eliminar filas que siguen siendo NaN (la extrapolación que acabamos de borrar)
+        # 4. Eliminar filas que siguen siendo NaN (huecos al principio/final que 'limit_area' no llenó)
         df_resampled.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
         
         df_resampled.reset_index(inplace=True)
         df_resampled.rename(columns={'index': Config.DATE_COL}, inplace=True)
         return df_resampled
+    # --- Fin de la función interna ---
 
-    # Aplicar la función a cada grupo de estación
-    completed_list = list(df_proc.groupby(Config.STATION_NAME_COL).apply(fill_station_gaps))
-    completed_list = [df for df in completed_list if df is not None and not df.empty] # Filtrar Nones/Empties
+    # --- LÓGICA DE BUCLE CORREGIDA (Reemplaza el groupby.apply) ---
+    completed_dfs_list = [] # Crear una lista vacía
+    
+    # Iterar manualmente sobre cada grupo de estación
+    for station_name, station_group_df in df_proc.groupby(Config.STATION_NAME_COL):
+        # Llamar a la función interna para este grupo
+        filled_df = fill_station_gaps(station_group_df)
+        
+        # Añadir el resultado a la lista (si no está vacío)
+        if filled_df is not None and not filled_df.empty:
+            filled_df[Config.STATION_NAME_COL] = station_name # Re-añadir el nombre de la estación
+            completed_dfs_list.append(filled_df)
+    # --- FIN DE LA LÓGICA CORREGIDA ---
 
-    if not completed_list:
+    if not completed_dfs_list:
         st.warning("No se pudieron completar series para las estaciones seleccionadas.")
         return pd.DataFrame()
 
-    df_completed_core = pd.concat(completed_list, ignore_index=True)
+    # Concatenar la lista de DataFrames
+    df_completed_core = pd.concat(completed_dfs_list, ignore_index=True)
 
     # --- Unir (Merge) metadatos de vuelta al final ---
     df_final_completed = pd.DataFrame() # Inicializar
@@ -371,6 +376,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
