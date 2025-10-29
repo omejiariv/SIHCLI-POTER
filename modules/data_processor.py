@@ -81,118 +81,96 @@ def load_shapefile(file_uploader_object):
 
 @st.cache_data
 def complete_series(_df):
-    """Completa series mensuales rellenando huecos internos con interpolación lineal."""
+    """
+    Completa series mensuales rellenando huecos INTERNOS,
+    detiene la extrapolación y asigna etiquetas de origen correctas.
+    """
     all_completed_dfs = []
     
-    # Define columnas esenciales y de metadatos a intentar preservar
-    id_cols = [Config.STATION_NAME_COL, Config.DATE_COL]
-    value_col = Config.PRECIPITATION_COL
-    origin_col = Config.ORIGIN_COL
-    metadata_cols_to_keep = [
-        Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, 
-        Config.CELL_COL, Config.ET_COL, # Incluir ET_COL aquí
-        Config.LATITUDE_COL, Config.LONGITUDE_COL # Incluir Lat/Lon si son necesarios después
-    ]
-    # Filtrar solo las columnas que realmente existen en el DataFrame de entrada _df
-    actual_metadata_cols = [col for col in metadata_cols_to_keep if col in _df.columns]
-    cols_needed_input = id_cols + [value_col] + actual_metadata_cols
+    # Define columnas de metadatos a preservar
+    metadata_cols = [Config.STATION_NAME_COL] + \
+                    [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL, Config.REGION_COL, Config.CELL_COL, Config.ET_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL] 
+                     if col in _df.columns]
     
-    # Trabajar con una copia limpia solo de las columnas necesarias
-    df_input = _df[cols_needed_input].copy() 
-    station_list = df_input[Config.STATION_NAME_COL].unique()
-    
-    # Pre-crear DataFrame de metadatos únicos para eficiencia (desde la copia limpia)
-    df_metadata = df_input[[Config.STATION_NAME_COL] + actual_metadata_cols].drop_duplicates(subset=[Config.STATION_NAME_COL])
+    # Pre-crear DataFrame de metadatos únicos para eficiencia
+    try:
+        df_metadata = _df[metadata_cols].drop_duplicates(subset=[Config.STATION_NAME_COL])
+    except KeyError:
+         st.error("Error al preparar metadatos. Asegúrese que 'nom_est' (STATION_NAME_COL) esté en los datos.")
+         return pd.DataFrame()
+         
+    # Get only essential columns for processing
+    df_proc = _df[[Config.STATION_NAME_COL, Config.DATE_COL, Config.PRECIPITATION_COL]].copy()
+    df_proc[Config.DATE_COL] = pd.to_datetime(df_proc[Config.DATE_COL], errors='coerce')
+    df_proc = df_proc.dropna(subset=[Config.DATE_COL, Config.STATION_NAME_COL])
+    if df_proc.empty:
+         return pd.DataFrame()
 
-    for station in station_list:
-        # Filtra datos de la estación desde df_input
-        df_station = df_input[df_input[Config.STATION_NAME_COL] == station].copy()
+    # Usar groupby().apply() es más limpio y eficiente que un bucle for
+    def fill_station_gaps(station_df):
+        station_df = station_df.set_index(Config.DATE_COL).sort_index()
+        if not station_df.index.is_unique:
+            station_df = station_df[~station_df.index.duplicated(keep='first')]
         
-        # Asegura tipo datetime, elimina filas sin fecha válida
-        df_station[Config.DATE_COL] = pd.to_datetime(df_station[Config.DATE_COL], errors='coerce')
-        df_station.dropna(subset=[Config.DATE_COL], inplace=True)
-        if df_station.empty: continue 
-
-        # Establece índice de fecha y elimina duplicados
-        df_station.set_index(Config.DATE_COL, inplace=True)
-        if not df_station.index.is_unique:
-            df_station = df_station[~df_station.index.duplicated(keep='first')]
-        if df_station.empty: continue 
-
-        # Crear el rango completo de fechas ENTRE el mínimo y máximo real
-        start_date, end_date = df_station.index.min(), df_station.index.max()
-        if pd.isna(start_date) or pd.isna(end_date): continue 
+        # Guardar el índice original
+        original_index = station_df.index
+        # Guardar el último dato real
+        last_valid_date = station_df[Config.PRECIPITATION_COL].last_valid_index()
+        
+        start_date, end_date = station_df.index.min(), station_df.index.max()
+        if pd.isna(start_date) or pd.isna(end_date):
+            return None # Saltar estación si las fechas son inválidas
+            
         date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
-             
-        # Reindexar para crear el DataFrame completo con huecos (NaN)
-        # Selecciona solo la columna de precipitación ANTES de reindexar
-        df_precip_only = df_station[[value_col]]
-        df_resampled = df_precip_only.reindex(date_range)
-
-        # --- Lógica de Interpolación y Origen ---
-        # 1. Guarda una máscara de dónde están los NaNs AHORA (antes de interpolar)
-        nan_mask_before_interp = df_resampled[value_col].isna()
-
-        # 2. Interpola usando 'linear' y limitando la dirección para rellenar solo huecos internos
-        df_resampled[value_col] = df_resampled[value_col].interpolate(
-            method='linear', 
-            limit_direction='both', 
-            limit_area='inside' 
-        )
-
-        # 3. Asigna origen basado en la máscara guardada
-        df_resampled[origin_col] = np.where(nan_mask_before_interp, 'Completado', 'Original')
-        # --- FIN Lógica ---
         
-        # Añadir nombre de estación de nuevo
-        df_resampled[Config.STATION_NAME_COL] = station
+        # Reindexar *solo* la columna de precipitación
+        df_resampled = station_df[[Config.PRECIPITATION_COL]].reindex(date_range)
         
-        # Añadir columnas de Año/Mes
-        df_resampled[Config.YEAR_COL] = df_resampled.index.year
-        df_resampled[Config.MONTH_COL] = df_resampled.index.month
-
-        # Resetear índice
+        # 1. Guardar máscara de dónde estaban los datos originales
+        original_data_mask = ~df_resampled[Config.PRECIPITATION_COL].isna()
+        
+        # 2. Interpolar TODOS los huecos (incluyendo extrapolación temporal)
+        df_resampled[Config.PRECIPITATION_COL] = df_resampled[Config.PRECIPITATION_COL].interpolate(method='linear')
+        
+        # 3. ¡CRUCIAL! Detener la extrapolación no deseada
+        #    Poner NaN en todos los valores después del último dato real
+        if last_valid_date is not None and last_valid_date in df_resampled.index:
+            df_resampled.loc[df_resampled.index > last_valid_date, Config.PRECIPITATION_COL] = np.nan
+        
+        # 4. Asignar Origen
+        #    'Original' donde había datos (máscara)
+        #    'Completado' donde no había (y ahora podría haber, si no fue extrapolación)
+        df_resampled[Config.ORIGIN_COL] = np.where(original_data_mask, 'Original', 'Completado')
+        
+        # 5. Eliminar filas que siguen siendo NaN (la extrapolación que acabamos de borrar)
+        df_resampled.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
+        
         df_resampled.reset_index(inplace=True)
         df_resampled.rename(columns={'index': Config.DATE_COL}, inplace=True)
-        
-        # Seleccionar solo las columnas procesadas explícitamente HASTA AHORA
-        processed_cols = [Config.STATION_NAME_COL, Config.DATE_COL, value_col, origin_col, Config.YEAR_COL, Config.MONTH_COL]
-        # Guardamos solo las columnas que hemos procesado explícitamente en el bucle
-        # ¡IMPORTANTE! No incluir metadatos aquí, se añaden al final.
-        all_completed_dfs.append(df_resampled[processed_cols]) 
+        return df_resampled
 
-    if not all_completed_dfs:
-        st.warning("No se encontraron datos válidos para completar series.")
+    # Aplicar la función a cada grupo de estación
+    completed_list = list(df_proc.groupby(Config.STATION_NAME_COL).apply(fill_station_gaps))
+    completed_list = [df for df in completed_list if df is not None and not df.empty] # Filtrar Nones/Empties
+
+    if not completed_list:
+        st.warning("No se pudieron completar series para las estaciones seleccionadas.")
         return pd.DataFrame()
-        
-    # Concatenar todos los DataFrames procesados (solo con columnas esenciales)
-    df_completed_core = pd.concat(all_completed_dfs, ignore_index=True)
 
-    # Une los datos completados ('core') con la metadata usando el nombre de la estación
-    if not df_metadata.empty and not df_completed_core.empty: # Check both are non-empty
-        # Asegurarse que la columna de merge exista en ambos
-        if Config.STATION_NAME_COL in df_completed_core.columns and Config.STATION_NAME_COL in df_metadata.columns:
-            df_final_completed = pd.merge(df_completed_core, df_metadata, on=Config.STATION_NAME_COL, how='left')
-        else:
-             st.error("La columna clave para el merge de metadatos no existe en uno de los DataFrames.")
-             df_final_completed = df_completed_core # Devolver sin metadatos si falla el merge
-    elif not df_completed_core.empty: # If only core exists, use that
-        df_final_completed = df_completed_core 
-        st.warning("No se pudo crear df_metadata o estaba vacío, el resultado no tendrá metadatos extra.")
-    else: # If core is also empty, return empty
-         df_final_completed = pd.DataFrame()
+    df_completed_core = pd.concat(completed_list, ignore_index=True)
 
-    # (Añadir Año/Mes al DataFrame final - MOVIDO desde dentro del bucle)
-    # Hacerlo aquí asegura que existan incluso si el merge falló
-    if not df_final_completed.empty and Config.DATE_COL in df_final_completed.columns: 
-        # Calcular solo si no existen ya (evita recalcular si estaban en df_completed_core)
-        if Config.YEAR_COL not in df_final_completed.columns:
-             df_final_completed[Config.YEAR_COL] = df_final_completed[Config.DATE_COL].dt.year
-        if Config.MONTH_COL not in df_final_completed.columns:
-             df_final_completed[Config.MONTH_COL] = df_final_completed[Config.DATE_COL].dt.month
-    elif not df_final_completed.empty: # Si no está vacío pero falta fecha
-         if Config.YEAR_COL not in df_final_completed.columns: df_final_completed[Config.YEAR_COL] = None
-         if Config.MONTH_COL not in df_final_completed.columns: df_final_completed[Config.MONTH_COL] = None
+    # --- Unir (Merge) metadatos de vuelta al final ---
+    df_final_completed = pd.DataFrame() # Inicializar
+    if not df_metadata.empty:
+        df_final_completed = pd.merge(df_completed_core, df_metadata, on=Config.STATION_NAME_COL, how='left')
+    else:
+        df_final_completed = df_completed_core
+        st.warning("No se pudo crear df_metadata, el resultado no tendrá metadatos extra.")
+
+    # Añadir columnas de Año/Mes
+    if not df_final_completed.empty and Config.DATE_COL in df_final_completed.columns:
+        df_final_completed[Config.YEAR_COL] = df_final_completed[Config.DATE_COL].dt.year
+        df_final_completed[Config.MONTH_COL] = df_final_completed[Config.DATE_COL].dt.month
     
     return df_final_completed
     
@@ -393,4 +371,5 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
