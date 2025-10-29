@@ -3128,6 +3128,14 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         if station_to_decompose:
             df_station = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] ==
                                             station_to_decompose].copy()
+
+            # --- INICIO DEBUG ACF/PACF ---
+            st.write(f"Debug ACF/PACF: Datos para {station_to_analyze_trends} (primeras 10 filas):")
+            st.dataframe(df_station[[Config.DATE_COL, Config.PRECIPITATION_COL]].head(10))
+            st.write(f"Debug ACF/PACF: Descripción de datos de precipitación (sin NaNs):")
+            st.dataframe(df_station[Config.PRECIPITATION_COL].dropna().describe())
+            # --- FIN DEBUG ACF/PACF ---
+            
             if not df_station.empty:
                 df_station.set_index(Config.DATE_COL, inplace=True)
                 try:
@@ -4372,6 +4380,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
