@@ -15,7 +15,7 @@ shapely==2.0.4
 altair==5.3.0
 plotly==5.22.0
 matplotlib==3.8.4
-prophet==1.1.5
+prophet>=1.1
 pymannkendall==1.4.3
 openpyxl
 gstools==1.6.1
@@ -32,4 +32,5 @@ rich==13.7.1
 rasterstats
 PyKrige
 cmdstanpy
+
 
