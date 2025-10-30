@@ -82,9 +82,8 @@ def load_shapefile(file_uploader_object):
 @st.cache_data
 def complete_series(_df):
     """
-    Completa series mensuales rellenando huecos INTERNOS,
-    detiene la extrapolación y asigna etiquetas de origen correctas.
-    Preserva TODAS las columnas de metadatos (et_mmy, anomalia_oni, etc.).
+    Completa series mensuales (SOLO precipitación y origen),
+    preservando TODAS las demás columnas (metadatos, ENSO, et_mmy, etc.).
     """
     
     # --- 1. Separar el DataFrame ---
@@ -92,62 +91,53 @@ def complete_series(_df):
     # Columnas clave para el merge
     merge_keys = [Config.STATION_NAME_COL, Config.DATE_COL]
     
-    # Columnas a procesar (solo precipitación)
-    cols_to_proc = [Config.PRECIPITATION_COL]
+    # Columna a procesar
+    value_col = Config.PRECIPITATION_COL
     
     # Columnas de metadatos (TODAS las demás)
     # Excluir 'origin' si existe, ya que la vamos a recalcular
-    metadata_cols = [col for col in _df.columns if col not in cols_to_proc and col != Config.ORIGIN_COL]
-    # Asegurarse que las claves de merge estén en la lista de metadatos
+    metadata_cols = [col for col in _df.columns if col not in [value_col, Config.ORIGIN_COL]]
+    # Asegurarse que las claves de merge estén
     for key in merge_keys:
         if key not in metadata_cols:
-             st.error(f"Error Crítico en complete_series: Falta la columna clave {key}.")
-             return _df # Devolver original si faltan claves
+            st.error(f"Error Crítico en complete_series: Falta la columna clave {key}.")
+            return _df # Devolver original si faltan claves
 
-    # Crear el DataFrame de metadatos (contiene ENSO, et_mmy, año, mes, etc.)
     df_metadata = _df[metadata_cols].copy()
     
-    # Crear el DataFrame de procesamiento (solo precip + claves)
-    # Asegurarse de que las claves de merge estén en df_proc
-    df_proc = _df[merge_keys + cols_to_proc].copy()
+    # DataFrame de procesamiento (solo precip + claves)
+    df_proc = _df[merge_keys + [value_col]].copy()
     df_proc[Config.DATE_COL] = pd.to_datetime(df_proc[Config.DATE_COL], errors='coerce')
     df_proc = df_proc.dropna(subset=[Config.DATE_COL, Config.STATION_NAME_COL])
     if df_proc.empty:
-         return _df # Devolver original si no hay nada que procesar
+         return _df 
 
     # --- 2. Función interna para rellenar huecos ---
-    def fill_station_gaps(station_df):
-        station_df = station_df.set_index(Config.DATE_COL).sort_index()
+    def fill_station_gaps(station_df_group): # Renamed to avoid confusion
+        station_df = station_df_group.set_index(Config.DATE_COL).sort_index()
         if not station_df.index.is_unique:
             station_df = station_df[~station_df.index.duplicated(keep='first')]
         if station_df.empty: return None
         
-        # Guardar el último dato real
-        last_valid_date = station_df[Config.PRECIPITATION_COL].last_valid_index()
-        
+        last_valid_date = station_df[value_col].last_valid_index()
         start_date, end_date = station_df.index.min(), station_df.index.max()
         if pd.isna(start_date) or pd.isna(end_date): return None
             
         date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
         
-        # Reindexar *solo* la columna de precipitación
-        df_resampled = station_df[[Config.PRECIPITATION_COL]].reindex(date_range)
+        df_resampled = station_df[[value_col]].reindex(date_range)
         
-        # 1. Guardar máscara de dónde estaban los datos originales
-        original_data_mask = ~df_resampled[Config.PRECIPITATION_COL].isna()
+        original_data_mask = ~df_resampled[value_col].isna()
         
-        # 2. Interpolar SÓLO HUECOS INTERNOS
-        df_resampled[Config.PRECIPITATION_COL] = df_resampled[Config.PRECIPITATION_COL].interpolate(
+        df_resampled[value_col] = df_resampled[value_col].interpolate(
             method='linear', 
             limit_direction='both', 
             limit_area='inside'
         )
         
-        # 3. Asignar Origen
         df_resampled[Config.ORIGIN_COL] = np.where(original_data_mask, 'Original', 'Completado')
         
-        # 4. Eliminar filas que siguen siendo NaN (extrapolación no deseada)
-        df_resampled.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
+        df_resampled.dropna(subset=[value_col], inplace=True)
         
         df_resampled.reset_index(inplace=True)
         return df_resampled.rename(columns={'index': Config.DATE_COL})
@@ -161,7 +151,7 @@ def complete_series(_df):
         filled_df = fill_station_gaps(station_group_df)
         
         if filled_df is not None and not filled_df.empty:
-            filled_df[Config.STATION_NAME_COL] = station_name # Re-añadir el nombre
+            filled_df[Config.STATION_NAME_COL] = station_name 
             completed_dfs_list.append(filled_df)
     # --- FIN LÓGICA CORREGIDA ---
 
@@ -169,35 +159,25 @@ def complete_series(_df):
         st.warning("No se pudieron completar series para las estaciones seleccionadas.")
         return _df # Devolver original si la completación falló
 
-    # Concatenar la lista de DataFrames
     df_completed_core = pd.concat(completed_dfs_list, ignore_index=True)
 
     # --- 4. Unir (Merge) metadatos de vuelta ---
-    df_final_completed = pd.DataFrame() # Inicializar
-    if not df_metadata.empty:
-        df_final_completed = pd.merge(
-            df_metadata, # El DataFrame original con TODAS las otras columnas
-            df_completed_core, # El DataFrame solo con los valores procesados
-            on=merge_keys, # Unir por Estación y Fecha
-            how='left' # Empezar con la metadata
-        )
-        
-        # Rellenar 'origin' con 'Original' para las filas que no fueron interpoladas
-        df_final_completed[Config.ORIGIN_COL] = df_final_completed[Config.ORIGIN_COL].fillna('Original')
-        
-        # Rellenar 'precipitation' (si es NaN) con la precipitación original
-        # (df_metadata debería tener la precipitación original, así que necesitamos fusionar eso también)
-        # Manera más simple: si 'precipitation_y' (del merge) es NaN, usar 'precipitation_x'
-        # Esta parte es compleja, simplifiquemos:
-        # La lógica de `dropna` en `fill_station_gaps` ya debería haber limpiado esto.
-        # Vamos a asegurarnos de que el 'how' del merge sea 'left' para conservar
-        # todas las filas de metadatos (incluyendo meses que no se interpolaron).
-        
-    else:
-        df_final_completed = df_completed_core
-        st.warning("No se pudo crear df_metadata, el resultado no tendrá metadatos extra.")
+    df_final_completed = pd.merge(
+        df_metadata, 
+        df_completed_core, 
+        on=merge_keys, 
+        how='left' 
+    )
+    
+    # Rellenar 'origin' con 'Original' para las filas que no fueron interpoladas
+    df_final_completed[Config.ORIGIN_COL] = df_final_completed[Config.ORIGIN_COL].fillna('Original')
+    
+    # Asegurarse que las columnas de precipitación y origen existan
+    if Config.PRECIPITATION_COL not in df_final_completed.columns:
+         df_final_completed[Config.PRECIPITATION_COL] = np.nan
+    if Config.ORIGIN_COL not in df_final_completed.columns:
+         df_final_completed[Config.ORIGIN_COL] = 'Original'
 
-    # El DataFrame final ahora debería tener TODAS las columnas, con 'precipitation' y 'origin' actualizadas
     return df_final_completed
     
 @st.cache_data
@@ -397,6 +377,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
