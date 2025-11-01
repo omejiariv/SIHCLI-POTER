@@ -99,19 +99,17 @@ def create_sidebar(gdf_stations, df_long):
         selected_regions = st.multiselect('Filtrar por Depto/Región', options=regions_list, key='regions_multiselect')
 
         # 2. Crear lista de Municipios DINÁMICAMENTE
+        # Filtrar el DataFrame base ANTES de obtener las opciones de municipio
+        municipios_df_options = gdf_base_for_options
         if selected_regions:
-            # Si se seleccionó una región, filtrar municipios
-            municipios_filtrados_df = gdf_base_for_options[
-                gdf_base_for_options[Config.REGION_COL].isin(selected_regions)
+            municipios_df_options = municipios_df_options[
+                municipios_df_options[Config.REGION_COL].isin(selected_regions)
             ]
-            municipios_options = sorted(municipios_filtrados_df[Config.MUNICIPALITY_COL].dropna().unique())
-        else:
-            # Si no, mostrar todos los municipios
-            municipios_options = sorted(gdf_base_for_options[Config.MUNICIPALITY_COL].dropna().unique())
+        municipios_options = sorted(municipios_df_options[Config.MUNICIPALITY_COL].dropna().unique())
             
         selected_municipios = st.multiselect('Filtrar por Municipio', options=municipios_options, key='municipios_multiselect')
         
-        # 3. (Opcional) Filtrar Celdas dinámicamente también
+        # 3. Filtrar Celdas dinámicamente también
         celdas_df = gdf_base_for_options
         if selected_regions:
              celdas_df = celdas_df[celdas_df[Config.REGION_COL].isin(selected_regions)]
@@ -125,7 +123,7 @@ def create_sidebar(gdf_stations, df_long):
         selected_celdas = []
         if celdas_list:
              selected_celdas = st.multiselect('Filtrar por Celda_XY', options=celdas_list, key='celdas_multiselect')
-             
+            
         # --- FIN DE LA LÓGICA CORREGIDA ---
 
         gdf_filtered_geo_data = apply_filters_to_stations(
@@ -220,6 +218,7 @@ def create_sidebar(gdf_stations, df_long):
         "selected_municipios": selected_municipios,
         "selected_altitudes": selected_altitudes
     }
+
 
 
 
