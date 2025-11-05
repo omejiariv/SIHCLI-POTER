@@ -54,57 +54,44 @@ def interpolate_idw(lons, lats, vals, grid_lon, grid_lat, method='cubic'):
 # -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN INTERNA PARA REUTILIZAR LA LÓGICA DE VALIDACIÓN CRUZADA
 # -----------------------------------------------------------------------------
-def _perform_loocv(method, lons, lats, vals, elevs=None):
+@st.cache_data
+def perform_loocv_for_all_methods(year, gdf_metadata, df_anual_non_na):
     """
-    Función auxiliar interna que realiza la validación cruzada (LOOCV).
+    Ejecuta LOOCV para todos los métodos de interpolación para un año dado.
+    Parámetros:
+      - year: int o str del año a evaluar.
+      - gdf_metadata: GeoDataFrame con metadatos de estaciones (long, lat, opcional elev).
+      - df_anual_non_na: DataFrame anual con valores no nulos de precipitación.
+    Retorna:
+      - DataFrame con columnas: Método, Año, RMSE, MAE
     """
-    if len(vals) <= 1:
-        return {'RMSE': np.nan, 'MAE': np.nan}
+    # Lista de métodos disponibles (mantener consistencia con perform_loocv_for_year)
+    methods = ["Kriging Ordinario", "IDW", "Spline (Thin Plate)"]
+    try:
+        # Insertar KED si hay columna de elevación en el metadata
+        if Config.ELEVATION_COL in gdf_metadata.columns:
+            methods.insert(1, "Kriging con Deriva Externa (KED)")
+    except Exception:
+        # Si gdf_metadata es None o no tiene columnas, seguimos con la lista base
+        pass
 
-    loo = LeaveOneOut()
-    true_values, predicted_values = [], []
-
-    for train_index, test_index in loo.split(lons):
-        lons_train, lons_test = lons[train_index], lons[test_index]
-        lats_train, lats_test = lats[train_index], lats[test_index]
-        vals_train, vals_test = vals[train_index], vals[test_index]
-        
+    results = []
+    for method in methods:
         try:
-            z_pred = None
-            if method == "Kriging Ordinario" and len(lons_train) > 0:
-                model_cv = gs.Spherical(dim=2)
-                bin_center_cv, gamma_cv = gs.vario_estimate((lons_train, lats_train), vals_train)
-                model_cv.fit_variogram(bin_center_cv, gamma_cv, nugget=True)
-                krig_cv = gs.krige.Ordinary(model_cv, (lons_train, lats_train), vals_train)
-                z_pred, _ = krig_cv((lons_test[0], lats_test[0]))
-            
-            elif method == "Kriging con Deriva Externa (KED)" and elevs is not None and len(lons_train) > 0:
-                elevs_train, elevs_test = elevs[train_index], elevs[test_index]
-                model_cv = gs.Spherical(dim=2)
-                bin_center_cv, gamma_cv = gs.vario_estimate((lons_train, lats_train), vals_train)
-                model_cv.fit_variogram(bin_center_cv, gamma_cv, nugget=True)
-                krig_cv = gs.krige.ExtDrift(model_cv, (lons_train, lats_train), vals_train, drift_src=elevs_train)
-                z_pred, _ = krig_cv((lons_test[0], lats_test[0]), drift_tgt=elevs_test)
-
-            elif method == "IDW":
-                z_pred = interpolate_idw(lons_train, lats_train, vals_train, lons_test, lats_test)[0, 0]
-            
-            elif method == "Spline (Thin Plate)" and len(lons_train) > 2:
-                rbf_cv = Rbf(lons_train, lats_train, vals_train, function='thin_plate')
-                z_pred = rbf_cv(lons_test, lats_test)[0]
-
-            if z_pred is not None:
-                predicted_values.append(z_pred)
-                true_values.append(vals_test[0])
+            metrics = perform_loocv_for_year(year, method, gdf_metadata, df_anual_non_na)
+            # metrics puede ser dict o None
+            if metrics and (metrics.get('RMSE') is not None or metrics.get('MAE') is not None):
+                results.append({
+                    "Método": method,
+                    "Año": year,
+                    "RMSE": metrics.get('RMSE'),
+                    "MAE": metrics.get('MAE')
+                })
         except Exception:
+            # Si falla un método, continuar con los demás
             continue
-            
-    if true_values and predicted_values:
-        rmse = np.sqrt(mean_squared_error(true_values, predicted_values))
-        mae = mean_absolute_error(true_values, predicted_values)
-        return {'RMSE': rmse, 'MAE': mae}
-    else:
-        return {'RMSE': np.nan, 'MAE': np.nan}
+
+    return pd.DataFrame(results)
 
 # -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN PÚBLICA PARA LA PESTAÑA DE VALIDACIÓN
@@ -403,6 +390,7 @@ def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
         variance = np.zeros_like(grid_z)
 
     return grid_z, variance
+
 
 
 
