@@ -1,5 +1,276 @@
 # modules/visualizer.py
 
+# -- Añadir utilidades para limitar carga en mapas y gráficos (pegar en la parte superior del archivo visualizer.py) --
+
+import json
+import tempfile
+
+def _limit_markers_gdf(gdf, max_markers=500):
+    """
+    Devuelve una copia reducida del GeoDataFrame con como máximo max_markers filas.
+    Si hay más, selecciona una muestra estratificada por estación (o primeras max_markers si no es posible).
+    """
+    try:
+        n = len(gdf)
+        if n <= max_markers:
+            return gdf.copy()
+        # Si existe columna de estación, tomar muestra balanceada por estación
+        if Config.STATION_NAME_COL in gdf.columns:
+            # tomar primeras n unique stations hasta llenar el cupo por estación (simple)
+            unique_stations = gdf[Config.STATION_NAME_COL].unique().tolist()
+            per_station = max(1, max_markers // len(unique_stations))
+            parts = []
+            for stn in unique_stations:
+                sub = gdf[gdf[Config.STATION_NAME_COL] == stn]
+                if len(sub) > per_station:
+                    parts.append(sub.sample(min(len(sub), per_station), random_state=1))
+                else:
+                    parts.append(sub)
+            result = pd.concat(parts, ignore_index=True)
+            # si aún mayor a max_markers, recortamos por orden
+            return result.iloc[:max_markers].copy()
+        # fallback: primera N filas
+        return gdf.iloc[:max_markers].copy()
+    except Exception:
+        return gdf.iloc[:max_markers].copy()
+
+def _sample_for_plotly_xy(x, y, max_points=2000):
+    """
+    Si hay demasiados puntos, devuelve una muestra aleatoria reproducible.
+    """
+    try:
+        n = len(x)
+        if n <= max_points:
+            return x, y
+        idx = np.linspace(0, n-1, max_points).astype(int)
+        return np.array(x)[idx], np.array(y)[idx]
+    except Exception:
+        return x[:max_points], y[:max_points]
+
+def create_folium_map(location, zoom, base_map_config, overlays_config, fit_bounds_data=None):
+    """
+    Crea un mapa de folium base con capas y controles seguros para Streamlit Cloud:
+    - limita tamaño de GeoJSON añadido
+    - añade máximo de markers por defecto
+    """
+    import json
+    MAX_MARKERS = 500             # límite de markers a renderizar directamente
+    MAX_GEOJSON_BYTES = 400_000   # límite aproximado para GeoJSON en bytes
+
+    m = folium.Map(location=location, zoom_start=zoom, tiles=None)
+
+    # Añadir mapa base (fallback seguro)
+    if base_map_config and 'tiles' in base_map_config and 'attr' in base_map_config:
+        folium.TileLayer(tiles=base_map_config['tiles'], attr=base_map_config['attr'], name="Mapa Base").add_to(m)
+    else:
+        folium.TileLayer(tiles="cartodbpositron", attr="CartoDB").add_to(m)
+
+    # Lógica de Overlays (WMS, GeoJSON, etc.)
+    if overlays_config:
+        for layer_config in overlays_config:
+            if not isinstance(layer_config, dict):
+                continue
+            layer_type = layer_config.get("type", "tile")
+            url = layer_config.get("url")
+            if not url:
+                continue
+            layer_name = layer_config.get("attr", layer_config.get("name", "Overlay"))
+
+            try:
+                if layer_type == "wms":
+                    if "layers" not in layer_config:
+                        continue
+                    WmsTileLayer(
+                        url=url,
+                        layers=layer_config["layers"],
+                        fmt=layer_config.get("fmt", 'image/png'),
+                        transparent=layer_config.get("transparent", True),
+                        overlay=True, control=True, name=layer_name,
+                        attr=layer_name
+                    ).add_to(m)
+
+                elif layer_type == "geojson":
+                    geojson_data = load_geojson_from_url(url)
+                    if not geojson_data:
+                        continue
+                    try:
+                        geojson_bytes = json.dumps(geojson_data).encode('utf-8')
+                        if len(geojson_bytes) > MAX_GEOJSON_BYTES:
+                            folium.Marker(location=location,
+                                          popup=f"Capa '{layer_name}' omitida (demasiado grande).").add_to(m)
+                            continue
+                    except Exception:
+                        pass
+                    style_function = lambda x: layer_config.get("style", {})
+                    folium.GeoJson(geojson_data, name=layer_name, style_function=style_function).add_to(m)
+
+                else:  # tile
+                    folium.TileLayer(
+                        tiles=url, attr=layer_name, name=layer_name,
+                        overlay=True, control=True, show=False
+                    ).add_to(m)
+
+            except Exception as e_layer:
+                folium.Marker(location=location,
+                              popup=f"No se pudo añadir la capa '{layer_name}': {e_layer}").add_to(m)
+                continue
+
+    # Ajuste de límites: si hay muchas geometrías, usar bounding box global
+    try:
+        if fit_bounds_data is not None and not fit_bounds_data.empty:
+            if len(fit_bounds_data) > 2000:
+                bounds = fit_bounds_data.total_bounds
+                if np.all(np.isfinite(bounds)):
+                    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+            else:
+                bounds = fit_bounds_data.total_bounds
+                if np.all(np.isfinite(bounds)):
+                    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    except Exception:
+        pass
+
+    return m
+
+# -- Reemplazar/ajustar create_hypsometric_figure_and_data para limitar datos pesados --
+def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader, max_pixels=200000):
+    """
+    Versión robusta que limita la extracción de valores del ráster para evitar envíos masivos.
+    Retorna (fig, csv_bytes) o (None, None) y escribe mensajes claros en st.
+    """
+    if basin_gdf is None or dem_file_uploader is None:
+        return None, None
+
+    # Guardar temporalmente el DEM (mínimo) para leer con rasterio
+    dem_path = os.path.join(tempfile.gettempdir(), f"tmp_dem_{os.getpid()}.tif")
+    try:
+        with open(dem_path, "wb") as f:
+            f.write(dem_file_uploader.getbuffer())
+    except Exception as e:
+        st.error(f"Error guardando DEM temporalmente: {e}")
+        return None, None
+
+    try:
+        hypsometric_data = calculate_hypsometric_curve(basin_gdf, dem_path)
+
+        # Si hay error explícito devuelto, reenviarlo
+        if not hypsometric_data or hypsometric_data.get("error"):
+            st.error(hypsometric_data.get("error", "Error al calcular la curva hipsométrica."))
+            return None, None
+
+        # Si elevations es muy grande, reducir muestreo para el gráfico y para descarga
+        elevations = np.array(hypsometric_data['elevations'])
+        cumulative = np.array(hypsometric_data['cumulative_area_percent'])
+
+        # Limitar número de puntos para graficar
+        MAX_POINTS_PLOT = 2000
+        if elevations.size > MAX_POINTS_PLOT:
+            idx = np.linspace(0, elevations.size - 1, MAX_POINTS_PLOT).astype(int)
+            elevations_plot = elevations[idx]
+            cumulative_plot = cumulative[idx]
+        else:
+            elevations_plot = elevations
+            cumulative_plot = cumulative
+
+        # Figura Plotly simple y ligera
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=cumulative_plot, y=elevations_plot, mode='lines', fill='tozeroy'))
+        fig.update_layout(title="Curva Hipsométrica (muestreada)", xaxis_title="Área Acumulada (%)", yaxis_title="Elevación (m)", height=500)
+
+        # Preparar CSV con muestreo controlado (no todo el raster si es gigante)
+        max_rows_csv = 50000
+        if elevations.size > max_rows_csv:
+            idx_csv = np.linspace(0, elevations.size - 1, max_rows_csv).astype(int)
+            df_hypso = pd.DataFrame({'Elevacion_m': elevations[idx_csv], 'Porcentaje_Area_Acumulada': cumulative[idx_csv]})
+        else:
+            df_hypso = pd.DataFrame({'Elevacion_m': elevations, 'Porcentaje_Area_Acumulada': cumulative})
+
+        csv_data = df_hypso.to_csv(index=False).encode('utf-8')
+
+        return fig, csv_data
+
+    except Exception as e:
+        st.error(f"Error preparando curva hipsométrica: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None, None
+    finally:
+        try:
+            if os.path.exists(dem_path):
+                os.remove(dem_path)
+        except Exception:
+            pass
+
+# -- Ajuste en display_station_table_tab: mostrar solo head + descarga --
+def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered,
+                              stations_for_analysis, **kwargs):
+    st.header("Información Detallada de las Estaciones")
+    if not stations_for_analysis:
+        st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
+        return
+
+    st.info("Presiona el botón para generar una tabla detallada con estadísticas calculadas para cada estación seleccionada.")
+
+    if st.button("Calcular Estadísticas Detalladas"):
+        with st.spinner("Realizando cálculos, por favor espera..."):
+            try:
+                @st.cache_data
+                def calculate_comprehensive_stats(_df_anual, _df_monthly, _stations):
+                    results = []
+                    import numpy as np
+                    from scipy import stats
+                    try:
+                        import pymannkendall as mk
+                    except Exception:
+                        mk = None
+                    for station in _stations:
+                        stats_dict = {"Estación": station}
+                        station_anual = _df_anual[_df_anual[Config.STATION_NAME_COL] == station].dropna(subset=[Config.PRECIPITATION_COL])
+                        station_monthly = _df_monthly[_df_monthly[Config.STATION_NAME_COL] == station].dropna(subset=[Config.PRECIPITATION_COL])
+                        if not station_anual.empty:
+                            stats_dict['Años con Datos'] = int(station_anual[Config.PRECIPITATION_COL].count())
+                            stats_dict['Ppt. Media Anual (mm)'] = station_anual[Config.PRECIPITATION_COL].mean()
+                            stats_dict['Desv. Estándar Anual (mm)'] = station_anual[Config.PRECIPITATION_COL].std()
+                            max_anual_row = station_anual.loc[station_anual[Config.PRECIPITATION_COL].idxmax()]
+                            stats_dict['Ppt. Máxima Anual (mm)'] = max_anual_row[Config.PRECIPITATION_COL]
+                            stats_dict['Año Ppt. Máxima'] = int(max_anual_row[Config.YEAR_COL])
+                            min_anual_row = station_anual.loc[station_anual[Config.PRECIPITATION_COL].idxmin()]
+                            stats_dict['Ppt. Mínima Anual (mm)'] = min_anual_row[Config.PRECIPITATION_COL]
+                            stats_dict['Año Ppt. Mínima'] = int(min_anual_row[Config.YEAR_COL])
+                            if len(station_anual) >= 4 and mk is not None:
+                                mk_result = mk.original_test(station_anual[Config.PRECIPITATION_COL])
+                                stats_dict['Tendencia (mm/año)'] = mk_result.slope
+                                stats_dict['Significancia (p-valor)'] = mk_result.p
+                            else:
+                                stats_dict['Tendencia (mm/año)'] = np.nan
+                                stats_dict['Significancia (p-valor)'] = np.nan
+                        if not station_monthly.empty:
+                            meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+                            monthly_means = station_monthly.groupby(station_monthly[Config.DATE_COL].dt.month)[Config.PRECIPITATION_COL].mean()
+                            for i, mes in enumerate(meses, 1):
+                                stats_dict[f'Ppt Media {mes} (mm)'] = monthly_means.get(i, 0)
+                        results.append(stats_dict)
+                    return pd.DataFrame(results)
+
+                detailed_stats_df = calculate_comprehensive_stats(df_anual_melted, df_monthly_filtered, stations_for_analysis)
+                base_info_df = gdf_filtered[[Config.STATION_NAME_COL, Config.ALTITUDE_COL, Config.MUNICIPALITY_COL, Config.REGION_COL]].copy()
+                base_info_df.rename(columns={Config.STATION_NAME_COL: 'Estación'}, inplace=True)
+                final_df = pd.merge(base_info_df.drop_duplicates(subset=['Estación']), detailed_stats_df, on="Estación", how="right")
+
+                # Mostrar solo los primeros 200 registros en UI para evitar "Bad message format"
+                if not final_df.empty:
+                    st.markdown("Mostrando los primeros 200 registros. Descarga completa disponible abajo.")
+                    st.dataframe(final_df.head(200).style.format("{:.2f}"), use_container_width=True)
+                    csv_bytes = final_df.to_csv(index=False).encode('utf-8')
+                    st.download_button("Descargar tabla completa (CSV)", data=csv_bytes, file_name="estadisticas_estaciones.csv", mime="text/csv")
+                else:
+                    st.info("No se generaron estadísticas (resultado vacío).")
+
+            except Exception as e:
+                st.error(f"Ocurrió un error al calcular las estadísticas: {e}")
+
+
+
+
 import streamlit as st
 import pandas as pd
 import base64
@@ -22,7 +293,6 @@ from scipy import stats
 # from prophet.plot import plot_plotly # Comentado si no se usa
 import io
 from datetime import datetime, timedelta, date
-import json
 import requests
 import traceback
 import openmeteo_requests
@@ -4485,6 +4755,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
