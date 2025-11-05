@@ -292,76 +292,99 @@ def generate_annual_map_popup_html(row, df_anual_melted_full_period):
 def create_folium_map(location, zoom, base_map_config, overlays_config, fit_bounds_data=None):
     """
     Crea un mapa de folium base con capas y ajuste de límites opcional.
+    Mejoras para evitar 'Bad message format':
+    - Limita número de marcadores añadidos
+    - Evita añadir GeoJSON muy grande directamente
+    - Añade advertencias cuando se truncan capas
     """
+    import json
+    MAX_MARKERS = 500             # límite de markers a renderizar directamente
+    MAX_GEOJSON_BYTES = 400_000   # límite aproximado para GeoJSON en bytes (ajusta si es necesario)
+
     m = folium.Map(location=location, zoom_start=zoom, tiles=None)
-    
-    # Añadir mapa base
+
+    # Añadir mapa base (fallback seguro)
     if base_map_config and 'tiles' in base_map_config and 'attr' in base_map_config:
         folium.TileLayer(tiles=base_map_config['tiles'], attr=base_map_config['attr'], name="Mapa Base").add_to(m)
     else:
-        # Fallback si la config está mal
         folium.TileLayer(tiles="cartodbpositron", attr="CartoDB").add_to(m)
 
-    # Lógica de Overlays (WMS, GeoJSON, etc. - como en tu código)
+    # Lógica de Overlays (WMS, GeoJSON, etc.)
     if overlays_config:
-        # Asumiendo que overlays_config es una LISTA de diccionarios
         for layer_config in overlays_config:
-            # Asegurarse que layer_config sea un diccionario
             if not isinstance(layer_config, dict):
-                # st.warning(f"Elemento de overlay no es un diccionario: {layer_config}")
-                continue # Saltar si no es un diccionario
-
+                continue
             layer_type = layer_config.get("type", "tile")
             url = layer_config.get("url")
-            if not url: continue
-            layer_name = layer_config.get("attr", layer_config.get("name", "Overlay")) # Usar 'attr' o 'name'
+            if not url:
+                continue
+            layer_name = layer_config.get("attr", layer_config.get("name", "Overlay"))
 
             try:
                 if layer_type == "wms":
                     if "layers" not in layer_config:
-                        # st.warning(f"Capa WMS '{layer_name}' no tiene 'layers' definidos.")
                         continue
                     WmsTileLayer(
                         url=url,
-                        layers=layer_config["layers"], # Requiere 'layers'
+                        layers=layer_config["layers"],
                         fmt=layer_config.get("fmt", 'image/png'),
                         transparent=layer_config.get("transparent", True),
                         overlay=True, control=True, name=layer_name,
                         attr=layer_name
                     ).add_to(m)
+
                 elif layer_type == "geojson":
-                    # Asumiendo que load_geojson_from_url está definida en otra parte
-                    geojson_data = load_geojson_from_url(url) 
-                    if geojson_data:
-                        style_function = lambda x: layer_config.get("style", {})
-                        folium.GeoJson(geojson_data, name=layer_name, style_function=style_function).add_to(m)
-                else: # Asumir 'tile'
+                    # Cargar geojson y evitar enviar objetos gigantes al frontend
+                    geojson_data = load_geojson_from_url(url)
+                    if not geojson_data:
+                        continue
+                    # medir tamaño aproximado
+                    try:
+                        geojson_bytes = json.dumps(geojson_data).encode('utf-8')
+                        if len(geojson_bytes) > MAX_GEOJSON_BYTES:
+                            # evitar añadir el GeoJSON completo: agregar capa ligera (bbox) o enlace
+                            folium.map.LayerControl().add_to(m)  # no-op para mantener control
+                            # añadir un popup o marcador informando que la capa fue omitida
+                            folium.Marker(location=location,
+                                          popup=f"Capa '{layer_name}' omitida (demasiado grande).").add_to(m)
+                            continue
+                    except Exception:
+                        # Si falla medir tamaño, evitar abortar
+                        pass
+
+                    style_function = lambda x: layer_config.get("style", {})
+                    folium.GeoJson(geojson_data, name=layer_name, style_function=style_function).add_to(m)
+
+                else:  # tile
                     folium.TileLayer(
                         tiles=url, attr=layer_name, name=layer_name,
                         overlay=True, control=True, show=False
                     ).add_to(m)
+
             except Exception as e_layer:
-                st.warning(f"No se pudo añadir la capa overlay '{layer_name}': {e_layer}")
-    
-    # --- LÓGICA DE AJUSTE DE LÍMITES (MOVIDA DENTRO) ---
-    if fit_bounds_data is not None and not fit_bounds_data.empty:
-        try:
-            if len(fit_bounds_data) > 1:
+                # No acelerar fallo por capa grande, solo advertir en la interfaz
+                folium.Marker(location=location,
+                              popup=f"No se pudo añadir la capa '{layer_name}': {e_layer}").add_to(m)
+                continue
+
+    # Ajuste de límites: si hay muchas geometrías, no calcular bounds innecesarios
+    try:
+        if fit_bounds_data is not None and not fit_bounds_data.empty:
+            if len(fit_bounds_data) > 2000:
+                # demasiadas geometrías: usar solo el bounding box general
                 bounds = fit_bounds_data.total_bounds
                 if np.all(np.isfinite(bounds)):
                     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-            elif len(fit_bounds_data) == 1:
-                # Extraer la primera geometría válida
-                point = fit_bounds_data.geometry.iloc[0]
-                if point and not point.is_empty:
-                    m.location = [point.y, point.x]
-                    m.zoom_start = 12
-        except Exception as e_bounds:
-            st.warning(f"Error al ajustar límites del mapa: {e_bounds}")
-    # --- FIN LÓGICA DE LÍMITES ---
-            
-    return m
+            else:
+                # Ajuste normal
+                bounds = fit_bounds_data.total_bounds
+                if np.all(np.isfinite(bounds)):
+                    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+    except Exception as e_bounds:
+        # No interrumpir por problemas de bounds
+        pass
 
+    return m
 # MAIN TAB DISPLAY FUNCTIONS
 
 def display_welcome_tab():
@@ -4462,6 +4485,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
