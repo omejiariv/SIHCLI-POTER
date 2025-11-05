@@ -110,11 +110,12 @@ class PDF(FPDF):
                 self.image(io.BytesIO(img_bytes), w=width)
                 self.ln(5)
             except Exception:
-                # Fallback: generar HTML embebido (más ligero para Streamlit) y colocar mensaje
-                html = fig.to_html(include_plotlyjs='cdn')
-                # Guardar temporalmente la imagen HTML y mostrar una nota (no siempre útil en PDF, pero evita crash en Cloud)
-                self.add_body_text("Se incluye versión HTML del gráfico en vez de imagen en alta resolución.")
-                # No intentar insertar HTML binario en PDF si falla; deja la imagen fuera
+                # Fallback: generar HTML embebido (más ligero para Streamlit) y colocar nota en el PDF
+                try:
+                    html = fig.to_html(include_plotlyjs='cdn')
+                    self.add_body_text("Se incluye una versión HTML del gráfico (formato interactivo) en la interfaz; la imagen en PDF fue omitida por tamaño.")
+                except Exception as e_html:
+                    self.add_body_text(f"Error alternativo al generar imagen/HTML del gráfico: {e_html}")
         except Exception as e:
             self.add_body_text(f"Error al generar imagen del gráfico: {e}")
 
@@ -290,5 +291,6 @@ def generate_pdf_report(report_title, sections_to_include, summary_data, df_anom
         )
 
     return bytes(pdf.output(dest='S'))
+
 
 
