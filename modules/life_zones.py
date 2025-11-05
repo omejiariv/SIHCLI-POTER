@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.warp import reproject, Resampling
-from rasterio.mask import mask as rio_mask
+from rasterio.mask import mask
 from rasterio.transform import Affine
 from rasterio.features import rasterize
 import streamlit as st
@@ -88,13 +88,17 @@ def classify_life_zone_alt_ppt(altitude, ppt):
     return 22
 
 
-def _resample_raster_to_shape(src_dataset, dst_shape, dst_transform, resampling=Resampling.average):
+def _resample_raster_to_shape(src_dataset, dst_shape, dst_transform, dst_crs=None, resampling=Resampling.average):
     """
     Reproyecta/resamplea la banda 1 del dataset src_dataset a un array con
-    dimensión dst_shape y transform dst_transform. Retorna array y nodata.
+    dimensión dst_shape y transform dst_transform. Si dst_crs es None usa src_dataset.crs.
+    Retorna el array resampleado (float32).
     """
     dest = np.empty(dst_shape, dtype=np.float32)
     src_nodata = src_dataset.nodata
+    if dst_crs is None:
+        dst_crs = src_dataset.crs
+
     reproject(
         source=rasterio.band(src_dataset, 1),
         destination=dest,
@@ -102,7 +106,7 @@ def _resample_raster_to_shape(src_dataset, dst_shape, dst_transform, resampling=
         src_crs=src_dataset.crs,
         src_nodata=src_nodata,
         dst_transform=dst_transform,
-        dst_crs=src_dataset.crs,
+        dst_crs=dst_crs,
         dst_nodata=np.nan,
         resampling=resampling
     )
@@ -113,39 +117,38 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
     """
     Genera un mapa raster clasificado de Zonas de Vida usando Altitud (DEM) y PPT (raster de precipitación).
     - dem_path, precip_raster_path: rutas a GeoTIFFs.
-    - mask_geometry: GeoDataFrame (opcional) con geometría para recortar (en CRS del raster).
+    - mask_geometry: GeoDataFrame (opcional) con geometría para recortar (en CRS del DEM).
     - downscale_factor: entero >=1; mayor valor = resolución más baja (menos memoria).
     Retorna: (classified_raster (2D numpy int16), output_profile (dict), mapping int->name)
     """
-
     try:
         if downscale_factor is None or downscale_factor <= 0:
             downscale_factor = 1
 
-        # Abrir DEM
+        # --- Abrir DEM y calcular rejilla destino ---
         with rasterio.open(dem_path) as dem_src:
             src_width = dem_src.width
             src_height = dem_src.height
             src_transform = dem_src.transform
-            src_crs = dem_src.crs
+            dem_crs = dem_src.crs
             nodata_dem = dem_src.nodata
 
-            # Target (resampled) shape
             dst_width = max(1, src_width // downscale_factor)
             dst_height = max(1, src_height // downscale_factor)
 
-            # Nuevo transform escalado
+            # nuevo transform escalado correctamente
             scale_x = src_width / dst_width
             scale_y = src_height / dst_height
             dst_transform = src_transform * Affine.scale(scale_x, scale_y)
 
-            dem_resampled = _resample_raster_to_shape(dem_src, (dst_height, dst_width), dst_transform, resampling=Resampling.bilinear)
+            dem_resampled = _resample_raster_to_shape(dem_src, (dst_height, dst_width), dst_transform, dst_crs=dem_crs, resampling=Resampling.bilinear)
 
-        # Abrir precipitación y re-muestrear a la misma grilla/transform
+        # --- Abrir precipitación y remuestrear a la misma rejilla y CRS del DEM ---
         with rasterio.open(precip_raster_path) as ppt_src:
-            ppt_resampled = _resample_raster_to_shape(ppt_src, (dst_height, dst_width), dst_transform, resampling=Resampling.average)
+            # Nota crítica: forzamos dst_crs = dem_crs para que ambos arrays estén alineados espacialmente
+            ppt_resampled = _resample_raster_to_shape(ppt_src, (dst_height, dst_width), dst_transform, dst_crs=dem_crs, resampling=Resampling.average)
 
-        # Valid mask for pixels where both dem and ppt are finite
+        # --- Valid mask para píxeles donde tanto DEM como PPT tienen valores válidos ---
         dem_mask = np.isnan(dem_resampled)
         ppt_mask = np.isnan(ppt_resampled)
         valid_mask = (~dem_mask) & (~ppt_mask) & np.isfinite(ppt_resampled)
@@ -156,21 +159,19 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
             alt_values = dem_resampled[valid_mask]
             ppt_values = ppt_resampled[valid_mask]
 
-            # Vectorizar clasificación (más rápido)
+            # Vectorizar clasificación
             vectorized_classify = np.vectorize(classify_life_zone_alt_ppt)
             zone_ints = vectorized_classify(alt_values, ppt_values)
             classified_raster[valid_mask] = zone_ints.astype(np.int16)
 
         # Aplicar máscara de geometría (si se provee)
         if mask_geometry is not None and not mask_geometry.empty:
-            # Asegurar que mask_geometry está en CRS del raster (tratar de reproyectar si tiene CRS)
             try:
-                # Si mask_geometry tiene crs diferente, reprojectar
-                if hasattr(mask_geometry, "crs") and mask_geometry.crs and src_crs and mask_geometry.crs != src_crs:
-                    mask_reproj = mask_geometry.to_crs(src_crs)
+                # Reproyectar la geometría al CRS del DEM si es necesario
+                if hasattr(mask_geometry, "crs") and mask_geometry.crs and dem_crs and mask_geometry.crs != dem_crs:
+                    mask_reproj = mask_geometry.to_crs(dem_crs)
                 else:
                     mask_reproj = mask_geometry
-                # Rasterizar la geometría en la misma transform/shape
                 shapes = [(geom, 1) for geom in mask_reproj.geometry]
                 mask_raster = rasterize(
                     shapes,
@@ -179,12 +180,10 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
                     fill=0,
                     dtype=np.uint8
                 )
-                # Mantener solo dentro de la máscara
                 classified_raster = np.where(mask_raster == 1, classified_raster, 0)
             except Exception as e_mask:
                 st.warning(f"No se pudo aplicar la máscara de geometría: {e_mask}")
 
-        # Preparar perfil de salida (basado en DEM origen)
         output_profile = {
             'driver': 'GTiff',
             'dtype': rasterio.int16,
@@ -192,7 +191,7 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
             'width': dst_width,
             'height': dst_height,
             'count': 1,
-            'crs': src_crs,
+            'crs': dem_crs,
             'transform': dst_transform
         }
 
