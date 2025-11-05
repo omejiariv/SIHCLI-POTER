@@ -101,7 +101,12 @@ class PDF(FPDF):
             import io
             # Intentar generar imagen con tamaño moderado
             try:
+                # generar imagen con tamaño controlado
                 img_bytes = fig.to_image(format="png", width=800, height=400, scale=1)
+                # Evitar enviar imágenes > ~2MB al PDF en memoria: comprobar tamaño
+                if len(img_bytes) > 2_500_000:
+                    # Reducir resolución si es muy grande
+                    img_bytes = fig.to_image(format="png", width=600, height=300, scale=1)
                 self.image(io.BytesIO(img_bytes), w=width)
                 self.ln(5)
             except Exception:
@@ -285,4 +290,5 @@ def generate_pdf_report(report_title, sections_to_include, summary_data, df_anom
         )
 
     return bytes(pdf.output(dest='S'))
+
 
