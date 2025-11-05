@@ -48,6 +48,96 @@ def _sample_for_plotly_xy(x, y, max_points=2000):
         return x[:max_points], y[:max_points]
 
 
+# --- helper: añadir capa de Estaciones (FeatureGroup + MarkerCluster) ---
+from folium.plugins import MarkerCluster
+
+def add_stations_layer(m, stations_gdf, popup_fields=None, max_markers=1000, cluster=True, show=True, icon_color="green"):
+    """
+    Añade las estaciones al mapa `m` dentro de un FeatureGroup llamado "Estaciones".
+    - stations_gdf: GeoDataFrame con geometría puntual en lat/lon (o en CRS del mapa).
+    - popup_fields: lista de columnas a mostrar en popup (por ejemplo ['station_name','altitude']).
+    - max_markers: número máximo de marcadores a añadir (para evitar payload gigante).
+    - cluster: si True añade MarkerCluster dentro del FeatureGroup.
+    - show: si True la capa aparece visible por defecto en LayerControl.
+    NOTA: llamar a folium.LayerControl() tras añadir esta capa para registrar el grupo.
+    """
+    try:
+        if stations_gdf is None or len(stations_gdf) == 0:
+            return m  # nada que añadir
+
+        # Limitar número de puntos para evitar envíos/overload
+        n = len(stations_gdf)
+        if n > max_markers:
+            # tomar una muestra reproducible por índice (simple)
+            stations_gdf = stations_gdf.sample(n=max_markers, random_state=1).reset_index(drop=True)
+
+        # Crear FeatureGroup para las estaciones (nombre fijo para LayerControl)
+        fg = folium.FeatureGroup(name="Estaciones", show=bool(show))
+
+        if cluster:
+            cluster_group = MarkerCluster(name="Cluster Estaciones")
+            # Añadir markers al cluster
+            for idx, row in stations_gdf.iterrows():
+                try:
+                    # geopandas geometry puntos: obtener lat/lon
+                    geom = row.geometry
+                    lon, lat = (geom.x, geom.y) if hasattr(geom, "x") else (geom[0], geom[1])
+                    popup_html = ""
+                    if popup_fields:
+                        parts = []
+                        for f in popup_fields:
+                            val = row.get(f, "")
+                            parts.append(f"<b>{f}:</b> {val}")
+                        popup_html = "<br>".join(parts)
+                    else:
+                        # fallback: mostrar index y coords
+                        popup_html = f"#{idx} - ({lat:.4f}, {lon:.4f})"
+                    folium.Marker(location=[lat, lon],
+                                  popup=folium.Popup(popup_html, max_width=300),
+                                  icon=folium.Icon(color=icon_color)).add_to(cluster_group)
+                except Exception:
+                    # no detener el loop por un punto con problemas
+                    continue
+            fg.add_child(cluster_group)
+        else:
+            # añadir markers uno a uno sin cluster
+            for idx, row in stations_gdf.iterrows():
+                try:
+                    geom = row.geometry
+                    lon, lat = (geom.x, geom.y) if hasattr(geom, "x") else (geom[0], geom[1])
+                    popup_html = ""
+                    if popup_fields:
+                        parts = []
+                        for f in popup_fields:
+                            val = row.get(f, "")
+                            parts.append(f"<b>{f}:</b> {val}")
+                        popup_html = "<br>".join(parts)
+                    else:
+                        popup_html = f"#{idx} - ({lat:.4f}, {lon:.4f})"
+                    folium.Marker(location=[lat, lon],
+                                  popup=folium.Popup(popup_html, max_width=300),
+                                  icon=folium.Icon(color=icon_color)).add_to(fg)
+                except Exception:
+                    continue
+
+        fg.add_to(m)
+        return m
+
+    except Exception as e:
+        # No romper la app: devolver el mapa tal cual y loguear en Streamlit (temporal)
+        try:
+            import streamlit as st
+            st.warning(f"Error al añadir capa de estaciones: {e}")
+        except Exception:
+            pass
+        return m
+
+# --- Ejemplo de uso (inserta esto en el lugar donde construyes el mapa en la UI) ---
+# m = create_folium_map(location=..., zoom=..., base_map_config=..., overlays_config=..., fit_bounds_data=...)
+# m = add_stations_layer(m, gdf_display, popup_fields=[Config.STATION_NAME_COL, Config.ALTITUDE_COL], max_markers=500, cluster=True, show=True)
+# folium.LayerControl().add_to(m)   # asegúrate de añadir LayerControl después de agregar la capa de estaciones
+
+
 # -- Reemplazar/ajustar create_hypsometric_figure_and_data para limitar datos pesados --
 def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader, max_pixels=200000):
     """
@@ -4688,6 +4778,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
