@@ -3,7 +3,9 @@ import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.warp import reproject, Resampling
-from rasterio.mask import mask
+from rasterio.mask import mask as rio_mask
+from rasterio.transform import Affine
+from rasterio.features import rasterize
 import streamlit as st
 import math
 import os
@@ -27,87 +29,173 @@ holdridge_zone_map_simplified = {
 }
 holdridge_int_to_name_simplified = {v: k for k, v in holdridge_zone_map_simplified.items()}
 
-# --- Función de Clasificación (Altitud y PPT) ---
+
 def classify_life_zone_alt_ppt(altitude, ppt):
-    if pd.isna(altitude) or pd.isna(ppt) or altitude < 0 or ppt <= 0: return 0
-    zone_id = 0
-    if altitude > 4200: zone_id = 1
-    elif altitude >= 3700:
-        if ppt >= 1500: zone_id = 2
-        elif ppt >= 750: zone_id = 3
-        else: zone_id = 4
-    elif altitude >= 3200:
-        if ppt >= 2000: zone_id = 5
-        elif ppt >= 1000: zone_id = 6
-        else: zone_id = 7
-    elif altitude >= 2000:
-        if ppt >= 4000: zone_id = 8
-        elif ppt >= 2000: zone_id = 9
-        elif ppt >= 1000: zone_id = 10
-        elif ppt >= 500: zone_id = 11
-        else: zone_id = 12
-    elif altitude >= 1000:
-        if ppt >= 4000: zone_id = 13
-        elif ppt >= 2000: zone_id = 14
-        elif ppt >= 1000: zone_id = 15
-        elif ppt >= 500: zone_id = 16
-        else: zone_id = 17
-    else: # altitude < 1000
-        if ppt >= 4000: zone_id = 18
-        elif ppt >= 2000: zone_id = 19
-        elif ppt >= 1000: zone_id = 20
-        elif ppt >= 500: zone_id = 21
-        else: zone_id = 22
-    return zone_id
+    """
+    Clasifica una celda según su altitud (m) y precipitacion anual (mm).
+    Devuelve el id de zona (int) o 0 si no aplicable.
+    """
+    if pd.isna(altitude) or pd.isna(ppt) or altitude < 0 or ppt <= 0:
+        return 0
 
-# --- Función Principal (SIN CACHÉ, SIN GUION BAJO) ---
-# @st.cache_data(show_spinner="Generando mapa de Zonas de Vida...") # Caché eliminado
-def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, downscale_factor=4): # <-- SIN GUION BAJO
-    """Genera un mapa raster clasificado de Zonas de Vida usando Altitud y PPT."""
+    if altitude > 4200:
+        return 1
+    if altitude >= 3700:
+        if ppt >= 1500:
+            return 2
+        elif ppt >= 750:
+            return 3
+        else:
+            return 4
+    if altitude >= 3200:
+        if ppt >= 2000:
+            return 5
+        elif ppt >= 1000:
+            return 6
+        else:
+            return 7
+    if altitude >= 2000:
+        if ppt >= 4000:
+            return 8
+        elif ppt >= 2000:
+            return 9
+        elif ppt >= 1000:
+            return 10
+        elif ppt >= 500:
+            return 11
+        else:
+            return 12
+    if altitude >= 1000:
+        if ppt >= 4000:
+            return 13
+        elif ppt >= 2000:
+            return 14
+        elif ppt >= 1000:
+            return 15
+        elif ppt >= 500:
+            return 16
+        else:
+            return 17
+    # altitude < 1000
+    if ppt >= 4000:
+        return 18
+    if ppt >= 2000:
+        return 19
+    if ppt >= 1000:
+        return 20
+    if ppt >= 500:
+        return 21
+    return 22
+
+
+def _resample_raster_to_shape(src_dataset, dst_shape, dst_transform, resampling=Resampling.average):
+    """
+    Reproyecta/resamplea la banda 1 del dataset src_dataset a un array con
+    dimensión dst_shape y transform dst_transform. Retorna array y nodata.
+    """
+    dest = np.empty(dst_shape, dtype=np.float32)
+    src_nodata = src_dataset.nodata
+    reproject(
+        source=rasterio.band(src_dataset, 1),
+        destination=dest,
+        src_transform=src_dataset.transform,
+        src_crs=src_dataset.crs,
+        src_nodata=src_nodata,
+        dst_transform=dst_transform,
+        dst_crs=src_dataset.crs,
+        dst_nodata=np.nan,
+        resampling=resampling
+    )
+    return dest
+
+
+def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, downscale_factor=4):
+    """
+    Genera un mapa raster clasificado de Zonas de Vida usando Altitud (DEM) y PPT (raster de precipitación).
+    - dem_path, precip_raster_path: rutas a GeoTIFFs.
+    - mask_geometry: GeoDataFrame (opcional) con geometría para recortar (en CRS del raster).
+    - downscale_factor: entero >=1; mayor valor = resolución más baja (menos memoria).
+    Retorna: (classified_raster (2D numpy int16), output_profile (dict), mapping int->name)
+    """
+
     try:
-        if downscale_factor <= 0: downscale_factor = 1
+        if downscale_factor is None or downscale_factor <= 0:
+            downscale_factor = 1
+
+        # Abrir DEM
         with rasterio.open(dem_path) as dem_src:
-            src_profile=dem_src.profile; src_crs=dem_src.crs; src_transform=dem_src.transform; nodata_dem=dem_src.nodata
-            dst_height=src_profile['height']//downscale_factor; dst_width=src_profile['width']//downscale_factor
-            dst_transform=src_transform*src_transform.scale((src_profile['width']/dst_width),(src_profile['height']/dst_height))
-            dst_profile=src_profile.copy(); dst_profile.update({'height':dst_height,'width':dst_width,'transform':dst_transform,'dtype':rasterio.float32,'nodata':np.nan})
-            altitude_data=np.empty((dst_height,dst_width),dtype=rasterio.float32)
-            reproject(source=rasterio.band(dem_src,1),destination=altitude_data,src_transform=src_transform,src_crs=src_crs,src_nodata=nodata_dem,dst_transform=dst_transform,dst_crs=src_crs,dst_nodata=np.nan,resampling=Resampling.average)
-            altitude_mask=np.isnan(altitude_data)
-        with rasterio.open(precip_raster_path) as precip_src:
-            precip_data_aligned=np.empty((dst_height,dst_width),dtype=rasterio.float32)
-            reproject(source=rasterio.band(precip_src,1),destination=precip_data_aligned,src_transform=precip_src.transform,src_crs=precip_src.crs,src_nodata=precip_src.nodata,dst_transform=dst_transform,dst_crs=src_crs,dst_nodata=np.nan,resampling=Resampling.bilinear)
-            precip_mask=np.isnan(precip_data_aligned)
+            src_width = dem_src.width
+            src_height = dem_src.height
+            src_transform = dem_src.transform
+            src_crs = dem_src.crs
+            nodata_dem = dem_src.nodata
 
-        # Ocultar st.write para reducir "ruido"
-        # st.write("Clasificando Zonas de Vida (Alt/PPT)...") 
-        classified_raster = np.full((dst_height, dst_width), 0, dtype=np.int16)
-        valid_pixels = ~altitude_mask & ~precip_mask & ~np.isnan(precip_data_aligned)
-        alt_values = altitude_data[valid_pixels]; ppt_values = precip_data_aligned[valid_pixels]
-        vectorized_classify = np.vectorize(classify_life_zone_alt_ppt); zone_ints = vectorized_classify(alt_values, ppt_values)
-        classified_raster[valid_pixels] = zone_ints.astype(np.int16)
-        # st.write("Clasificación completada.")
+            # Target (resampled) shape
+            dst_width = max(1, src_width // downscale_factor)
+            dst_height = max(1, src_height // downscale_factor)
 
-        # --- APLICAR MÁSCARA (Usando mask_geometry SIN guion bajo) ---
-        if mask_geometry is not None and not mask_geometry.empty: # <-- SIN GUION BAJO
-            # st.write("Aplicando máscara de geometría...")
+            # Nuevo transform escalado
+            scale_x = src_width / dst_width
+            scale_y = src_height / dst_height
+            dst_transform = src_transform * Affine.scale(scale_x, scale_y)
+
+            dem_resampled = _resample_raster_to_shape(dem_src, (dst_height, dst_width), dst_transform, resampling=Resampling.bilinear)
+
+        # Abrir precipitación y re-muestrear a la misma grilla/transform
+        with rasterio.open(precip_raster_path) as ppt_src:
+            ppt_resampled = _resample_raster_to_shape(ppt_src, (dst_height, dst_width), dst_transform, resampling=Resampling.average)
+
+        # Valid mask for pixels where both dem and ppt are finite
+        dem_mask = np.isnan(dem_resampled)
+        ppt_mask = np.isnan(ppt_resampled)
+        valid_mask = (~dem_mask) & (~ppt_mask) & np.isfinite(ppt_resampled)
+
+        classified_raster = np.zeros((dst_height, dst_width), dtype=np.int16)
+
+        if np.any(valid_mask):
+            alt_values = dem_resampled[valid_mask]
+            ppt_values = ppt_resampled[valid_mask]
+
+            # Vectorizar clasificación (más rápido)
+            vectorized_classify = np.vectorize(classify_life_zone_alt_ppt)
+            zone_ints = vectorized_classify(alt_values, ppt_values)
+            classified_raster[valid_mask] = zone_ints.astype(np.int16)
+
+        # Aplicar máscara de geometría (si se provee)
+        if mask_geometry is not None and not mask_geometry.empty:
+            # Asegurar que mask_geometry está en CRS del raster (tratar de reproyectar si tiene CRS)
             try:
-                mask_geometry_reproj = mask_geometry.to_crs(dst_profile['crs']) # <-- SIN GUION BAJO
-                temp_classified_path = "temp_classified_raster_mask.tif"
-                output_profile_mask = dst_profile.copy(); output_profile_mask.update({'dtype': rasterio.int16, 'nodata': 0, 'count': 1})
-                with rasterio.open(temp_classified_path, 'w', **output_profile_mask) as dst: dst.write(classified_raster, 1)
-                with rasterio.open(temp_classified_path) as src:
-                    masked_data, masked_transform = mask(src, mask_geometry_reproj, crop=False, nodata=0)
-                if os.path.exists(temp_classified_path): os.remove(temp_classified_path)
-                classified_raster = masked_data[0]
-                # st.write("Máscara aplicada.")
+                # Si mask_geometry tiene crs diferente, reprojectar
+                if hasattr(mask_geometry, "crs") and mask_geometry.crs and src_crs and mask_geometry.crs != src_crs:
+                    mask_reproj = mask_geometry.to_crs(src_crs)
+                else:
+                    mask_reproj = mask_geometry
+                # Rasterizar la geometría en la misma transform/shape
+                shapes = [(geom, 1) for geom in mask_reproj.geometry]
+                mask_raster = rasterize(
+                    shapes,
+                    out_shape=(dst_height, dst_width),
+                    transform=dst_transform,
+                    fill=0,
+                    dtype=np.uint8
+                )
+                # Mantener solo dentro de la máscara
+                classified_raster = np.where(mask_raster == 1, classified_raster, 0)
             except Exception as e_mask:
                 st.warning(f"No se pudo aplicar la máscara de geometría: {e_mask}")
-                if 'temp_classified_path' in locals() and os.path.exists(temp_classified_path): os.remove(temp_classified_path)
 
-        # --- Preparar salida ---
-        output_profile = dst_profile.copy()
-        output_profile.update({'dtype': rasterio.int16, 'nodata': 0, 'count': 1})
+        # Preparar perfil de salida (basado en DEM origen)
+        output_profile = {
+            'driver': 'GTiff',
+            'dtype': rasterio.int16,
+            'nodata': 0,
+            'width': dst_width,
+            'height': dst_height,
+            'count': 1,
+            'crs': src_crs,
+            'transform': dst_transform
+        }
+
         return classified_raster, output_profile, holdridge_int_to_name_simplified
 
     except Exception as e:
