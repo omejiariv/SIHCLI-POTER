@@ -98,11 +98,18 @@ class PDF(FPDF):
 
     def add_plotly_fig(self, fig, width=190):
         try:
-            # Asegurar que se importa io para la escritura de la imagen si no está en el scope global
-            import io 
-            img_bytes = fig.to_image(format="png", width=1000, height=500, scale=2)
-            self.image(io.BytesIO(img_bytes), w=width)
-            self.ln(5)
+            import io
+            # Intentar generar imagen con tamaño moderado
+            try:
+                img_bytes = fig.to_image(format="png", width=800, height=400, scale=1)
+                self.image(io.BytesIO(img_bytes), w=width)
+                self.ln(5)
+            except Exception:
+                # Fallback: generar HTML embebido (más ligero para Streamlit) y colocar mensaje
+                html = fig.to_html(include_plotlyjs='cdn')
+                # Guardar temporalmente la imagen HTML y mostrar una nota (no siempre útil en PDF, pero evita crash en Cloud)
+                self.add_body_text("Se incluye versión HTML del gráfico en vez de imagen en alta resolución.")
+                # No intentar insertar HTML binario en PDF si falla; deja la imagen fuera
         except Exception as e:
             self.add_body_text(f"Error al generar imagen del gráfico: {e}")
 
@@ -278,3 +285,4 @@ def generate_pdf_report(report_title, sections_to_include, summary_data, df_anom
         )
 
     return bytes(pdf.output(dest='S'))
+
