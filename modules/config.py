@@ -106,16 +106,12 @@ class Config:
             'run_balance': False,
             'gif_reload_key': 0,
             'dem_file': None,
+            'dem_file_path_validated': False,
+            'dem_file_path': None,
+            'dem_crs_is_geographic': True,
             'morph_results': None
         }
         
         for key, value in default_state.items():
             if key not in st.session_state:
                 st.session_state[key] = value
-
-
-
-
-
-
-
