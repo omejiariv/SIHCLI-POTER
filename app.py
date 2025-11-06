@@ -46,39 +46,6 @@ except NameError:
      # Fallback si __file__ no está definido (puede pasar en algunos entornos de ejecución)
      _DEM_PATH_APP = os.path.join('data', DEM_FILENAME) 
 
-# Comprueba si el archivo existe y lee el CRS UNA SOLA VEZ
-# Guarda los resultados en session_state si aún no existen
-if 'dem_file_path_validated' not in st.session_state: # Ejecutar solo la primera vez
-    st.session_state['dem_file_path_validated'] = False # Bandera para saber si ya lo validamos
-    st.session_state['dem_file_path'] = None
-    st.session_state['dem_crs_is_geographic'] = True # Asumir geográfico por defecto
-
-    if os.path.exists(_DEM_PATH_APP):
-        try:
-            import rasterio # Importar aquí o al principio del archivo
-            with rasterio.open(_DEM_PATH_APP) as src:
-                if src.crs:
-                    st.session_state['dem_crs_is_geographic'] = src.crs.is_geographic
-                    st.session_state['dem_file_path'] = _DEM_PATH_APP # Guarda la ruta VALIDADA
-                    st.session_state['dem_file_path_validated'] = True
-                    print(f"INFO: DEM encontrado en {_DEM_PATH_APP}, CRS es geográfico: {src.crs.is_geographic}") # Log
-                else:
-                    print(f"WARN: DEM encontrado en {_DEM_PATH_APP} pero no tiene CRS definido.")
-                    st.session_state['dem_file_path'] = _DEM_PATH_APP # Guarda ruta, asume geo
-                    st.session_state['dem_file_path_validated'] = True
-
-        except ImportError:
-             print("ERROR: Necesitas instalar 'rasterio' para leer el CRS del DEM.")
-             st.session_state['dem_file_path'] = None # No podemos validarlo
-        except Exception as e_dem_init:
-            print(f"ERROR: No se pudo abrir o leer el CRS del DEM en {_DEM_PATH_APP}: {e_dem_init}")
-            st.session_state['dem_file_path'] = None # Considerar que no se pudo cargar
-    else:
-         print(f"ERROR: DEM file not found at calculated path: {_DEM_PATH_APP}")
-         st.session_state['dem_file_path'] = None
-
-# --- FIN BLOQUE INICIALIZACIÓN DEM ---
-
 # --- Desactivar Advertencias ---
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -626,4 +593,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
