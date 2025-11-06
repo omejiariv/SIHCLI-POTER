@@ -103,6 +103,25 @@ def main():
     #--- Inicio de la Ejecución de la App ---
     Config.initialize_session_state()
     st.set_page_config(layout="wide", page_title=Config.APP_TITLE)
+    # Validación segura del DEM: ejecutarla dentro de main() cuando st.session_state ya existe
+    try:
+        if not st.session_state.get('dem_file_path_validated', False):
+            if os.path.exists(_DEM_PATH_APP):
+                try:
+                    import rasterio
+                    with rasterio.open(_DEM_PATH_APP) as src:
+                        if src.crs:
+                            st.session_state['dem_crs_is_geographic'] = bool(src.crs.is_geographic)
+                            st.session_state['dem_file_path'] = _DEM_PATH_APP
+                            st.session_state['dem_file_path_validated'] = True
+                            st.info(f"DEM encontrado: {_DEM_PATH_APP} (CRS geográfico: {st.session_state['dem_crs_is_geographic']})")
+                except Exception as e_dem:
+                    # No provocar error crítico en la inicialización; registrar y continuar
+                    st.warning(f"No se pudo validar DEM {_DEM_PATH_APP}: {e_dem}")
+                    st.session_state['dem_file_path_validated'] = False
+    except RuntimeError:
+        # En entornos raros, la sesión puede no estar disponible — evitar crash
+        pass
     st.markdown("""<style>div.block-container{padding-top:1rem;} [data-testid="stMetricValue"] {font-size: 1.8rem;} [data-testid="stMetricLabel"] {font-size: 1rem; padding-bottom:5px; }</style>""", unsafe_allow_html=True)
 
     #--- TÍTULO DE LA APP ---
@@ -593,5 +612,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
