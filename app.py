@@ -320,12 +320,21 @@ def main():
     
     # [CORRECCIÓN] Preparar argumentos para las pestañas, usando variables locales
     display_args = {
+        # --- Datos base cargados (locales) ---
+        "gdf_stations": gdf_stations,
+        "gdf_municipios": gdf_municipios,
+        "df_long": df_long,
+        "df_enso": df_enso,
+        "gdf_subcuencas": gdf_subcuencas,
+        
+        # --- Resultados de filtros (locales) ---
         "gdf_filtered": gdf_filtered,
         "stations_for_analysis": stations_for_analysis,
         "df_anual_melted": df_anual_melted,
         "df_monthly_filtered": df_monthly_filtered,
-        "df_long": df_long, # Pasa la variable local
         "analysis_mode": analysis_mode, 
+        
+        # --- Opciones de filtro (del sidebar) ---
         "selected_regions": sidebar_filters["selected_regions"],
         "selected_municipios": sidebar_filters["selected_municipios"],
         "selected_altitudes": sidebar_filters["selected_altitudes"]
@@ -358,7 +367,8 @@ def main():
         display_correlation_tab(**display_args)
     with tabs[12]:
         # [CORRECCIÓN] Pasa la variable local df_enso
-        display_enso_tab(df_enso=df_enso, **display_args)
+        # Ya no se necesita 'df_enso=' porque está dentro de display_args
+        display_enso_tab(**display_args)
     with tabs[13]:
         # [CORRECCIÓN] Pasa la variable local df_long
         display_trends_and_forecast_tab(df_full_monthly=df_long, **display_args)
