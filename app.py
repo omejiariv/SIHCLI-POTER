@@ -23,6 +23,8 @@ from modules.visualizer import (
     display_land_cover_analysis_tab,
     display_life_zones_tab
 )
+# [CORRECCIÓN PENDIENTE] Asegúrate de que 'modules/sidebar.py' contenga una función 'def create_sidebar(...):'
+# Si el error 'ImportError' persiste, es porque el archivo sidebar.py no tiene esa función.
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
 from modules.analysis import calculate_monthly_anomalies, calculate_basin_stats
@@ -81,29 +83,11 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
 
 
 def main():
-    #--- Definiciones de Funciones Internas ---
-    def process_and_store_data(file_mapa, file_precip, file_shape, file_parquet):
-        with st.spinner("Procesando archivos y cargando datos..."):
-            gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = \
-                load_and_process_all_data(file_mapa, file_precip, file_shape, file_parquet)
-
-            if gdf_stations is not None and df_long is not None and gdf_municipios is not None:
-                st.session_state.update({
-                    'gdf_stations': gdf_stations, 'gdf_municipios': gdf_municipios,
-                    'df_long': df_long, 'df_enso': df_enso,
-                    'gdf_subcuencas': gdf_subcuencas,
-                    'data_loaded': True
-                })
-                st.success("¡Datos cargados y listos!")
-                time.sleep(1) # Pequeña pausa para que el usuario vea el mensaje
-            else:
-                st.error("Hubo un error al procesar los archivos.")
-                st.session_state['data_loaded'] = False
-
     #--- Inicio de la Ejecución de la App ---
     Config.initialize_session_state()
     st.set_page_config(layout="wide", page_title=Config.APP_TITLE)
-    # Validación segura del DEM: ejecutarla dentro de main() cuando st.session_state ya existe
+    
+    # Validación segura del DEM
     try:
         if not st.session_state.get('dem_file_path_validated', False):
             if os.path.exists(_DEM_PATH_APP):
@@ -116,12 +100,11 @@ def main():
                             st.session_state['dem_file_path_validated'] = True
                             st.info(f"DEM encontrado: {_DEM_PATH_APP} (CRS geográfico: {st.session_state['dem_crs_is_geographic']})")
                 except Exception as e_dem:
-                    # No provocar error crítico en la inicialización; registrar y continuar
                     st.warning(f"No se pudo validar DEM {_DEM_PATH_APP}: {e_dem}")
                     st.session_state['dem_file_path_validated'] = False
     except RuntimeError:
-        # En entornos raros, la sesión puede no estar disponible — evitar crash
         pass
+        
     st.markdown("""<style>div.block-container{padding-top:1rem;} [data-testid="stMetricValue"] {font-size: 1.8rem;} [data-testid="stMetricLabel"] {font-size: 1rem; padding-bottom:5px; }</style>""", unsafe_allow_html=True)
 
     #--- TÍTULO DE LA APP ---
@@ -146,40 +129,36 @@ def main():
     ]
     tabs = st.tabs(tab_names)
 
-    #--- PANEL DE CARGA DE DATOS ---
+    #--- PANEL DE CARGA DE DATOS (LÓGICA CORREGIDA) ---
     with st.sidebar.expander("**Subir/Actualizar Archivos Base**", expanded=not st.session_state.get('data_loaded', False)):
-        load_mode = st.radio("Modo de Carga", ("GitHub", "Manual"), key="load_mode", horizontal=True)
-        if load_mode == "Manual":
-            uploaded_file_mapa = st.file_uploader("1. Archivo de estaciones (CSV)", type="csv")
-            uploaded_file_precip = st.file_uploader("2. Archivo de precipitación (CSV)", type="csv")
-            uploaded_zip_shapefile = st.file_uploader("3. Shapefile de municipios (.zip)", type="zip")
+        
+        # Guardar el modo de carga en la sesión
+        st.radio("Modo de Carga", ("GitHub", "Manual"), key="load_mode", horizontal=True)
+        
+        if st.session_state.load_mode == "Manual":
+            # Guardar los objetos FileUploader en la sesión (son ligeros)
+            st.file_uploader("1. Archivo de estaciones (CSV)", type="csv", key="file_mapa")
+            st.file_uploader("2. Archivo de precipitación (CSV)", type="csv", key="file_precip")
+            st.file_uploader("3. Shapefile de municipios (.zip)", type="zip", key="file_shape")
+            # [CORRECCIÓN] Añadido el uploader para el Parquet que faltaba en tu app.py
+            st.file_uploader("4. Datos largos (Parquet)", type="parquet", key="file_parquet")
+
             if st.button("Procesar Datos Manuales"):
-                if all([uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_parquet]):
-                    process_and_store_data(uploaded_file_mapa, uploaded_file_precip, uploaded_zip_shapefile, uploaded_file_parquet)
+                if all([st.session_state.file_mapa, st.session_state.file_precip, st.session_state.file_shape, st.session_state.file_parquet]):
+                    # Solo activamos el 'flag' de que los datos están listos.
+                    # La carga real se hará después del st.stop()
+                    st.session_state.data_loaded = True
+                    st.rerun() # Forzamos un rerun para salir del expander y cargar datos
                 else:
                     st.warning("Por favor, suba los 4 archivos requeridos (Estaciones, Precipitación, Municipios y Parquet).")
         else:
             st.info(f"Datos desde: **{Config.GITHUB_USER}/{Config.GITHUB_REPO}**")
             if st.button("Cargar Datos desde GitHub"):
-                with st.spinner("Descargando archivos..."):
-                    github_files = {
-                        'mapa': load_csv_from_url(Config.URL_ESTACIONES_CSV),
-                        'precip': load_csv_from_url(Config.URL_PRECIPITACION_CSV),
-                        'shape': load_zip_from_url(Config.URL_SHAPEFILE_ZIP),
-                        'parquet': load_parquet_from_url(Config.URL_PARQUET)
-                    }
-                    # Ahora, actualiza la condición y la llamada a la función
-                    if all(item is not None for item in github_files.values()):
-                        process_and_store_data(
-                            github_files['mapa'], 
-                            github_files['precip'], 
-                            github_files['shape'],
-                            github_files['parquet']
-                        )   
-                    else:
-                        st.error("No se pudieron descargar los archivos desde GitHub.")
+                # Solo activamos el 'flag'. La carga se hará después.
+                st.session_state.data_loaded = True
+                st.rerun() # Forzamos un rerun
 
-    #--- LÓGICA DE CONTROL DE FLUJO ---
+    #--- LÓGICA DE CONTROL DE FLUJO (CORREGIDA) ---
     if not st.session_state.get('data_loaded', False):
         with tabs[0]:
             display_welcome_tab()
@@ -187,9 +166,67 @@ def main():
             if i > 0:
                 with tab:
                     st.warning("Para comenzar, cargue los datos usando el panel de la izquierda.")
+        st.stop() # Detiene la ejecución si no hay datos cargados
+
+    #--- CARGA DE DATOS DESDE CACHÉ (ESTA ES LA CORRECCIÓN CLAVE) ---
+    # Si 'data_loaded' es True, esta sección se ejecuta EN CADA RERUN.
+    # Pero como 'load_and_process_all_data' está cacheada (@st.cache_data),
+    # solo se ejecutará la primera vez. Las siguientes veces será instantáneo.
+    
+    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = None, None, None, None, None
+    
+    try:
+        if st.session_state.load_mode == "Manual":
+            # Verifica que los archivos sigan en la sesión
+            if all([st.session_state.file_mapa, st.session_state.file_precip, st.session_state.file_shape, st.session_state.file_parquet]):
+                with st.spinner("Cargando datos locales (desde caché si es posible)..."):
+                    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = \
+                        load_and_process_all_data(
+                            st.session_state.file_mapa, 
+                            st.session_state.file_precip, 
+                            st.session_state.file_shape,
+                            st.session_state.file_parquet
+                        )
+            else:
+                st.error("Se perdieron las referencias a los archivos. Por favor, recárguelos.")
+                st.session_state.data_loaded = False
+                st.stop()
+        
+        else: # st.session_state.load_mode == "GitHub"
+            with st.spinner("Cargando datos de GitHub (desde caché si es posible)..."):
+                # Las funciones de carga de URL también están cacheadas
+                file_mapa_git = load_csv_from_url(Config.URL_ESTACIONES_CSV)
+                file_precip_git = load_csv_from_url(Config.URL_PRECIPITACION_CSV)
+                file_shape_git = load_zip_from_url(Config.URL_SHAPEFILE_ZIP)
+                file_parquet_git = load_parquet_from_url(Config.URL_PARQUET)
+                
+                if all([file_mapa_git, file_precip_git, file_shape_git, file_parquet_git]):
+                    # Llamamos a la función principal de procesamiento
+                    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = \
+                        load_and_process_all_data(
+                            file_mapa_git, 
+                            file_precip_git, 
+                            file_shape_git,
+                            file_parquet_git
+                        )
+                else:
+                    st.error("No se pudieron descargar los archivos de GitHub. Verifique la conexión o las URLs.")
+                    st.session_state.data_loaded = False
+                    st.stop()
+        
+        # Chequeo final de que los datos se cargaron en las variables locales
+        if df_long is None or gdf_stations is None:
+            st.error("La carga de datos falló. Verifique los archivos de origen.")
+            st.session_state.data_loaded = False
+            st.stop()
+
+    except Exception as e:
+        st.error(f"Error fatal durante la carga de datos: {e}")
+        st.exception(e) # Muestra el traceback completo para depuración
+        st.session_state.data_loaded = False
         st.stop()
 
-    #--- SECCIÓN DE CONTROL DEL SIDEBAR (UNA VEZ CARGADOS LOS DATOS) ---
+    #--- SECCIÓN DE CONTROL DEL SIDEBAR (DATOS YA CARGADOS) ---
     st.sidebar.success("Datos cargados.")
     if st.sidebar.button("Limpiar Caché y Reiniciar"):
         st.cache_data.clear()
@@ -199,21 +236,21 @@ def main():
             del st.session_state[key]
         st.rerun()
 
-    # Llamada a la función que crea los filtros
-    sidebar_filters = create_sidebar(st.session_state.gdf_stations, st.session_state.df_long)
+    # [CORRECCIÓN] Llamada a create_sidebar ahora usa las variables locales,
+    # NO las de st.session_state
+    sidebar_filters = create_sidebar(gdf_stations, df_long)
     
-# Extraemos los valores del diccionario retornado
+    # Extraemos los valores del diccionario retornado
     gdf_filtered = sidebar_filters["gdf_filtered"]
     stations_for_analysis = sidebar_filters["selected_stations"]
     year_range = sidebar_filters["year_range"]
     meses_numeros = sidebar_filters["meses_numeros"]
-    analysis_mode = sidebar_filters["analysis_mode"] # Capturar el modo aquí
+    analysis_mode = sidebar_filters["analysis_mode"] 
     exclude_na = sidebar_filters["exclude_na"]
     exclude_zeros = sidebar_filters["exclude_zeros"]
     
     # Detener si no hay estaciones seleccionadas después de filtrar
     if not stations_for_analysis:
-        # (Tu código para mostrar mensaje de bienvenida y st.stop() aquí - SIN CAMBIOS)
         with tabs[0]:
             display_welcome_tab()
         for i, tab in enumerate(tabs):
@@ -224,35 +261,32 @@ def main():
 
     #--- Procesamiento de Datos Post-Filtros (Lógica Optimizada) ---
 
-    # 1. Ejecutar complete_series SOLO UNA VEZ si es necesario y guardarlo en session_state
+    # 1. Ejecutar complete_series SOLO UNA VEZ si es necesario
     if analysis_mode == "Completar series (interpolación)":
         if 'df_completed' not in st.session_state:
             with st.spinner("Procesando y cacheando series completadas por primera vez..."):
-                # Llamar a complete_series con el DataFrame original completo
-                st.session_state.df_completed = complete_series(st.session_state.df_long)
+                # [CORRECCIÓN] Llama a complete_series con la variable local df_long
+                st.session_state.df_completed = complete_series(df_long)
                 if st.session_state.df_completed.empty:
                     st.warning("La completación de series no produjo resultados.")
-                    st.session_state.df_completed = st.session_state.df_long # Fallback
-        # Usar el DataFrame completado y cacheado
+                    st.session_state.df_completed = df_long # Fallback
         base_df_monthly = st.session_state.df_completed
     else:
-        # Usar el DataFrame original
-        base_df_monthly = st.session_state.df_long
-        # Asegurar que el modo original también tenga la columna 'origin'
+        # [CORRECCIÓN] Usa la variable local df_long
+        base_df_monthly = df_long
         if Config.ORIGIN_COL not in base_df_monthly.columns:
             base_df_monthly[Config.ORIGIN_COL] = 'Original'
 
-    # 2. Aplicar TODOS los filtros (Estación, Fecha, Mes) al DataFrame base seleccionado
-    #    Este filtrado ahora es rápido porque no re-ejecuta la interpolación
+    # 2. Aplicar TODOS los filtros (Estación, Fecha, Mes)
     if not base_df_monthly.empty:
         df_monthly_filtered = base_df_monthly[
             (base_df_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)) &
             (base_df_monthly[Config.DATE_COL].dt.year >= year_range[0]) &
             (base_df_monthly[Config.DATE_COL].dt.year <= year_range[1]) &
             (base_df_monthly[Config.DATE_COL].dt.month.isin(meses_numeros))
-        ].copy() # .copy() es importante para evitar warnings
+        ].copy()
     else:
-        df_monthly_filtered = pd.DataFrame() # DataFrame vacío si base_falla
+        df_monthly_filtered = pd.DataFrame() 
 
     # 3. Aplicar exclusión de NaN y Ceros
     if not df_monthly_filtered.empty:
@@ -263,7 +297,7 @@ def main():
             df_monthly_filtered = df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL]) 
             df_monthly_filtered = df_monthly_filtered[df_monthly_filtered[Config.PRECIPITATION_COL] > 0]
     
-    # 4. Calcular datos anuales (exactamente como lo tenías antes)
+    # 4. Calcular datos anuales
     df_anual_melted = pd.DataFrame() 
     if not df_monthly_filtered.empty and Config.PRECIPITATION_COL in df_monthly_filtered.columns and Config.MONTH_COL in df_monthly_filtered.columns:
         try:
@@ -282,14 +316,14 @@ def main():
 
     # --- FIN LÓGICA REVISADA ---
     
-    # Preparar argumentos para las pestañas (código original tuyo)
+    # [CORRECCIÓN] Preparar argumentos para las pestañas, usando variables locales
     display_args = {
         "gdf_filtered": gdf_filtered,
         "stations_for_analysis": stations_for_analysis,
         "df_anual_melted": df_anual_melted,
         "df_monthly_filtered": df_monthly_filtered,
-        "df_long": st.session_state.df_long, # Pasamos el original para funciones que lo necesiten
-        "analysis_mode": analysis_mode, # Usar la variable capturada al inicio
+        "df_long": df_long, # Pasa la variable local
+        "analysis_mode": analysis_mode, 
         "selected_regions": sidebar_filters["selected_regions"],
         "selected_municipios": sidebar_filters["selected_municipios"],
         "selected_altitudes": sidebar_filters["selected_altitudes"]
@@ -304,13 +338,13 @@ def main():
         display_graphs_tab(**display_args)
     with tabs[3]:
         display_advanced_maps_tab(**display_args)
-    with tabs[4]: # Variables Climáticas (nuevo índice 4)
+    with tabs[4]: 
         display_additional_climate_maps_tab(**display_args)
-    with tabs[5]: # Imágenes Satelitales (nuevo índice 5)
+    with tabs[5]: 
         display_satellite_imagery_tab(**display_args)
-    with tabs[6]: # Análisis Cobertura Suelo
+    with tabs[6]: 
         display_land_cover_analysis_tab(**display_args)
-    with tabs[7]: # Zonas de Vida
+    with tabs[7]: 
         display_life_zones_tab(**display_args)
     with tabs[8]:
         display_anomalies_tab(**display_args)
@@ -321,9 +355,11 @@ def main():
     with tabs[11]:
         display_correlation_tab(**display_args)
     with tabs[12]:
-        display_enso_tab(df_enso=st.session_state.df_enso, **display_args)
+        # [CORRECCIÓN] Pasa la variable local df_enso
+        display_enso_tab(df_enso=df_enso, **display_args)
     with tabs[13]:
-        display_trends_and_forecast_tab(df_full_monthly=st.session_state.df_long, **display_args)
+        # [CORRECCIÓN] Pasa la variable local df_long
+        display_trends_and_forecast_tab(df_full_monthly=df_long, **display_args)
         
     with tabs[14]:
         display_weekly_forecast_tab(
@@ -332,31 +368,28 @@ def main():
     )
     
     with tabs[15]:
+        # [CORRECCIÓN] Pasa la variable local analysis_mode
         display_downloads_tab(
             df_anual_melted=df_anual_melted,
             df_monthly_filtered=df_monthly_filtered,
             stations_for_analysis=stations_for_analysis,
-            analysis_mode=st.session_state.analysis_mode
+            analysis_mode=analysis_mode
         )
 
     with tabs[16]: 
         st.header("Análisis Agregado por Cuenca Hidrográfica")
-        # Verificar si gdf_subcuencas está cargado
-        if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
-            BASIN_NAME_COLUMN = 'SUBC_LBL' # Columna con nombres de cuenca
-            # Verificar si la columna de nombres existe
-            if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns:
+        # [CORRECCIÓN] Usa la variable local gdf_subcuencas
+        if gdf_subcuencas is not None and not gdf_subcuencas.empty:
+            BASIN_NAME_COLUMN = 'SUBC_LBL' 
+            if BASIN_NAME_COLUMN in gdf_subcuencas.columns:
 
-                # --- LÓGICA CORREGIDA PARA OBTENER NOMBRES DE CUENCAS ---
-                basin_names = [] # Inicializar lista
+                basin_names = [] 
                 
-                # 1. Filtrar cuencas por las regiones seleccionadas en el sidebar
-                #    'sidebar_filters' es el diccionario devuelto por create_sidebar
                 regions_from_sidebar = sidebar_filters.get("selected_regions", []) 
-                basins_in_selected_regions = st.session_state.gdf_subcuencas.copy() # Empezar con todas
+                # [CORRECCIÓN] Usa la variable local gdf_subcuencas
+                basins_in_selected_regions = gdf_subcuencas.copy() 
 
-                if regions_from_sidebar: # Si el usuario seleccionó alguna región
-                    # Asumiendo que gdf_subcuencas tiene una columna que coincide con Config.REGION_COL
+                if regions_from_sidebar: 
                     if Config.REGION_COL in basins_in_selected_regions.columns:
                          basins_in_selected_regions = basins_in_selected_regions[
                              basins_in_selected_regions[Config.REGION_COL].isin(regions_from_sidebar)
@@ -365,16 +398,11 @@ def main():
                               st.info("Ninguna subcuenca encontrada en las regiones seleccionadas.")
                     else:
                          st.warning(f"El archivo de subcuencas no tiene la columna '{Config.REGION_COL}'. No se puede filtrar por región.")
-                # Si no hay regiones seleccionadas, 'basins_in_selected_regions' sigue conteniendo todas las cuencas.
                 
-                # 2. Hacer Sjoin entre las cuencas (filtradas por región o todas) y las estaciones filtradas
-                #    'gdf_filtered' viene del sidebar y ya respeta TODOS los filtros (incluida región, municipio, etc.)
                 if not basins_in_selected_regions.empty and 'gdf_filtered' in sidebar_filters and not sidebar_filters['gdf_filtered'].empty:
-                     # Asegurarse que ambos GeoDataFrames tengan CRS antes del sjoin
-                     if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(st.session_state.gdf_stations.crs, allow_override=True) # Asumir mismo CRS que estaciones
-                     if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(st.session_state.gdf_stations.crs, allow_override=True)
+                     if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(gdf_stations.crs, allow_override=True)
+                     if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(gdf_stations.crs, allow_override=True)
 
-                     # Reproyectar a un CRS común si son diferentes (ej. WGS84)
                      target_crs_sjoin = "EPSG:4326"
                      try:
                           basins_for_sjoin = basins_in_selected_regions.to_crs(target_crs_sjoin)
@@ -384,35 +412,28 @@ def main():
                               basins_for_sjoin,
                               stations_for_sjoin,
                               how="inner", 
-                              predicate="intersects" # O 'contains'
+                              predicate="intersects" 
                           )
                           if not relevant_basins_gdf.empty:
-                              # Obtener nombres únicos de las cuencas resultantes del sjoin
                               basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique())
-                          # Si relevant_basins_gdf está vacío, basin_names permanece []
+                          
                      except Exception as e_sjoin:
                           st.error(f"Error durante la unión espacial (sjoin): {e_sjoin}")
-                          basin_names = [] # Resetear en caso de error
+                          basin_names = [] 
                           
-                # Si no hay estaciones filtradas o no hay cuencas en regiones, basin_names permanece []
-                # --- FIN LÓGICA CORREGIDA ---
-
-                # --- Mostrar resultados o mensajes ---
                 if not basin_names:
                     st.info("Ninguna cuenca (en las regiones/filtros seleccionados) contiene estaciones que coincidan con todos los filtros actuales.")
                 else:
                     selected_basin = st.selectbox(
                         "Seleccione una cuenca para analizar:",
                         options=basin_names,
-                        key="basin_selector" # Mantener la misma key
+                        key="basin_selector" 
                     )
                     if selected_basin:
-                        # Llamar a la función de análisis (asegúrate que esté importada)
-                        # from modules.analysis import calculate_basin_stats 
                         stats_df, stations_in_selected_basin, error_msg = calculate_basin_stats(
-                            sidebar_filters['gdf_filtered'], # Pasar las estaciones ya filtradas
-                            st.session_state.gdf_subcuencas, # Pasar el GDF original de subcuencas
-                            df_monthly_filtered, # Pasar los datos mensuales filtrados por sidebar
+                            sidebar_filters['gdf_filtered'], 
+                            gdf_subcuencas, # [CORRECCIÓN] Usa la variable local
+                            df_monthly_filtered, 
                             selected_basin,
                             BASIN_NAME_COLUMN
                         )
@@ -420,7 +441,7 @@ def main():
                         if error_msg: 
                             st.warning(error_msg)
                         
-                        if stations_in_selected_basin: # Verificar si se encontraron estaciones DENTRO de la cuenca seleccionada
+                        if stations_in_selected_basin: 
                             st.subheader(f"Resultados para la cuenca: {selected_basin}")
                             st.metric("Número de Estaciones Filtradas en la Cuenca", len(stations_in_selected_basin))
                             with st.expander("Ver estaciones incluidas"): 
@@ -431,10 +452,7 @@ def main():
                                 st.write("**Estadísticas de Precipitación Mensual (Agregada para estaciones filtradas en la cuenca)**")
                                 st.dataframe(stats_df, use_container_width=True)
                             else:
-                                # Este mensaje podría aparecer si las estaciones están en la cuenca pero no tienen datos en el periodo/meses seleccionados
                                 st.info("Aunque se encontraron estaciones filtradas en la cuenca, no hay datos de precipitación válidos para el período/meses seleccionados.")
-                        # else: # Este else ya no es necesario porque si no hay estaciones, basin_names estaría vacío
-                        #     st.warning("No se encontraron estaciones (que cumplan todos los filtros) dentro de la cuenca seleccionada.")
             else:
                 st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.")
         else:
@@ -451,10 +469,11 @@ def main():
 
         if analysis_level == "Por Cuenca Específica":
             st.markdown("---")
-            if st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
+            # [CORRECCIÓN] Usa la variable local gdf_subcuencas
+            if gdf_subcuencas is not None and not gdf_subcuencas.empty:
                 BASIN_NAME_COLUMN = 'SUBC_LBL'
-                if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns:
-                    relevant_basins_gdf = gpd.sjoin(st.session_state.gdf_subcuencas, gdf_filtered, how="inner", predicate="intersects")
+                if BASIN_NAME_COLUMN in gdf_subcuencas.columns:
+                    relevant_basins_gdf = gpd.sjoin(gdf_subcuencas, gdf_filtered, how="inner", predicate="intersects")
                     if not relevant_basins_gdf.empty:
                         basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique())
                     else:
@@ -467,7 +486,8 @@ def main():
                             options=basin_names,
                             key="compare_basin_selector"
                         )
-                        target_basin_geom = st.session_state.gdf_subcuencas[st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN] == selected_basin]
+                        # [CORRECCIÓN] Usa la variable local gdf_subcuencas
+                        target_basin_geom = gdf_subcuencas[gdf_subcuencas[BASIN_NAME_COLUMN] == selected_basin]
                         stations_in_basin = gpd.sjoin(gdf_filtered, target_basin_geom, how="inner", predicate="within")
                         station_names_in_basin = stations_in_basin[Config.STATION_NAME_COL].unique().tolist()
                         df_to_compare = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL].isin(station_names_in_basin)]
@@ -573,30 +593,21 @@ def main():
             else:
                 with st.spinner("Generando reporte PDF... Esto puede tardar unos minutos."):
                     try:
-                        # Prepara los datos necesarios para el reporte
-                        # (Asegúrate de que estas variables estén disponibles en el alcance global o pasadas a generate_pdf_report)
-                        # Por ejemplo, df_anomalies, df_drought_extremes, etc., deben ser calculados previamente
-                        # o pasados como argumentos. Para este ejemplo, solo paso los args mínimos.
-                        # DEBES ASEGURARTE DE QUE TODOS LOS DATOS NECESARIOS PARA CADA SECCIÓN ESTÉN DISPONIBLES.
-
+                        # [CORRECCIÓN] Pasa las variables locales df_long y df_enso
                         report_pdf_bytes = generate_pdf_report(
                             selected_report_sections=selected_report_sections,
                             report_title=report_title,
                             author_name=author_name,
                             gdf_filtered=gdf_filtered,
-                            df_long=st.session_state.df_long,
+                            df_long=df_long, # Variable local
                             df_anual_melted=df_anual_melted,
                             df_monthly_filtered=df_monthly_filtered,
                             stations_for_analysis=stations_for_analysis,
+                            df_enso=df_enso, # Variable local
                             # AÑADIR OTROS DATAFRAMES Y OBJETOS NECESARIOS AQUÍ
                             # Por ejemplo:
-                            # df_anomalies=df_anomalies, 
-                            # df_drought_extremes=df_drought_extremes,
-                            # df_thresholds=df_thresholds,
-                            # df_enso=st.session_state.df_enso,
-                            # sarima_forecast=st.session_state.sarima_forecast,
-                            # prophet_forecast=st.session_state.prophet_forecast
-                            # etc.
+                            # df_anomalies=df_anomalies_calculadas, 
+                            # ...etc.
                         )
                         st.success("Reporte PDF generado exitosamente!")
                         st.download_button(
@@ -612,6 +623,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
