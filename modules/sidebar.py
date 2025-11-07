@@ -6,37 +6,10 @@ import pandas as pd
 import os
 import rasterio # Importación necesaria
 
-# --- Ruta al DEM base ---
-# (Asegúrate que 'DemAntioquiaWgs84.tif' esté en 'modules/data/')
-_THIS_FILE_DIR_SB = os.path.dirname(__file__)
-BASE_DEM_FILENAME = "DemAntioquia_EPSG3116.tif"
-BASE_DEM_PATH = os.path.abspath(os.path.join(_THIS_FILE_DIR_SB, '..', 'data', BASE_DEM_FILENAME))
-
-# Guardar la ruta y estado del CRS del DEM base en la sesión
-# Esto se ejecuta una vez al inicio o cuando el script cambia
-dem_base_found = False
-dem_base_is_geographic = True # Asumir geográfico (peor caso)
-
-if os.path.exists(BASE_DEM_PATH):
-    try:
-        with rasterio.open(BASE_DEM_PATH) as src:
-            if src.crs:
-                # Corregido: Verificar si es geográfico
-                dem_base_is_geographic = src.crs.is_geographic 
-            else:
-                dem_base_is_geographic = True # Asumir geográfico si no hay CRS
-                print("Advertencia (sidebar): DEM base no tiene CRS definido.")
-        st.session_state['dem_file_path'] = BASE_DEM_PATH
-        st.session_state['dem_crs_is_geographic'] = dem_base_is_geographic
-        dem_base_found = True
-    except Exception as e_base_crs:
-        print(f"Advertencia (sidebar): No se pudo leer CRS del DEM base: {e_base_crs}")
-        st.session_state['dem_file_path'] = None
-        st.session_state['dem_crs_is_geographic'] = True
-else:
-    st.session_state['dem_file_path'] = None
-    st.session_state['dem_crs_is_geographic'] = True
-# --- FIN Ruta DEM base ---
+# --- LÓGICA CONFLICTIVA ELIMINADA ---
+# Se eliminó el bloque de código que intentaba cargar el DEM
+# y guardarlo en st.session_state al momento de importar.
+# app.py ahora maneja esta lógica de forma centralizada.
 
 
 def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celdas):
@@ -58,6 +31,7 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
             # rangos ajustados según tu código
             if r == '0-500': conditions.append((altitude_col_numeric >= 0) & (altitude_col_numeric <= 500))
             elif r == '500-1000': conditions.append((altitude_col_numeric > 500) & (altitude_col_numeric <= 1000))
+            # [CORRECCIÓN] Asumiendo que estos son los rangos correctos de tu archivo
             elif r == '1000-1500': conditions.append((altitude_col_numeric > 1000) & (altitude_col_numeric <= 1500)) 
             elif r == '1500-2000': conditions.append((altitude_col_numeric > 1500) & (altitude_col_numeric <= 2000))
             elif r == '2000-3000': conditions.append((altitude_col_numeric > 2000) & (altitude_col_numeric <= 3000))
@@ -76,20 +50,24 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
 def create_sidebar(gdf_stations, df_long):
     """
     Crea y muestra widgets del sidebar, retornando selecciones filtradas.
+    [CORRECCIÓN] Esta función ahora lee gdf_stations y df_long de sus argumentos,
+    NO de st.session_state.
     """
     st.sidebar.header("Panel de Control")
 
+    # [CORRECCIÓN] Usar el gdf_stations pasado como argumento
     if 'all_station_names' not in st.session_state:
         st.session_state['all_station_names'] = sorted(gdf_stations[Config.STATION_NAME_COL].unique())
 
     # --- Expander 1: Filtros Geográficos y de Datos ---
     with st.sidebar.expander("**1. Filtros Geográficos y de Datos**", expanded=True):
         min_data_perc = st.slider("Filtrar por % de datos mínimo:", 0, 100, st.session_state.get('min_data_perc_slider', 0), key="min_data_perc_slider")
+        
+        # [CORRECCIÓN] Asegurarse que los rangos coincidan con la función apply_filters
         altitude_ranges = ['0-500', '500-1000', '1000-1500', '1500-2000', '2000-3000', '>3000']
         selected_altitudes = st.multiselect('Filtrar por Altitud (m)', options=altitude_ranges, key='altitudes_multiselect')
 
-        # Dentro de create_sidebar -> expander 1
-
+        # [CORRECCIÓN] Usar el gdf_stations pasado como argumento
         gdf_base_for_options = gdf_stations.copy()
         
         # --- LÓGICA DE FILTROS EN CASCADA CORREGIDA ---
@@ -99,7 +77,6 @@ def create_sidebar(gdf_stations, df_long):
         selected_regions = st.multiselect('Filtrar por Depto/Región', options=regions_list, key='regions_multiselect')
 
         # 2. Crear lista de Municipios DINÁMICAMENTE
-        # Filtrar el DataFrame base ANTES de obtener las opciones de municipio
         municipios_df_options = gdf_base_for_options
         if selected_regions:
             municipios_df_options = municipios_df_options[
@@ -126,6 +103,7 @@ def create_sidebar(gdf_stations, df_long):
             
         # --- FIN DE LA LÓGICA CORREGIDA ---
 
+        # [CORRECCIÓN] Usar el gdf_stations pasado como argumento
         gdf_filtered_geo_data = apply_filters_to_stations(
             gdf_stations.copy(),
             min_data_perc, selected_altitudes,
@@ -161,22 +139,26 @@ def create_sidebar(gdf_stations, df_long):
         )
 
         # Rango de Años y Meses
+        # [CORRECCIÓN] Usar el df_long pasado como argumento
         years_with_data = sorted(df_long[Config.YEAR_COL].dropna().unique())
         min_year_data = int(min(years_with_data)) if years_with_data else 1970
         max_year_data = int(max(years_with_data)) if years_with_data else 2025
         slider_max_year = max(max_year_data, 2025)
-        year_range_default = (min_year_data, slider_max_year)
+        
+        # [CORRECCIÓN] Leer el default de st.session_state pero usar los límites de los datos
+        year_range_default = st.session_state.get('year_range', (min_year_data, slider_max_year))
         
         year_range = st.slider("Rango de Años", 
                                min_value=min_year_data, 
                                max_value=slider_max_year,
-                               value=st.session_state.get('year_range', year_range_default), 
+                               value=year_range_default, 
                                key='year_range')
         
         meses_dict = {m: i + 1 for i, m in enumerate(['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'])}
         default_meses = st.session_state.get('meses_nombres_multiselect', list(meses_dict.keys()))
         meses_nombres = st.multiselect("Meses", list(meses_dict.keys()), default=default_meses, key='meses_nombres_multiselect')
         meses_numeros = [meses_dict[m] for m in meses_nombres]
+        # [CORRECCIÓN] Guardar solo meses_numeros en la sesión (es ligero)
         st.session_state['meses_numeros'] = meses_numeros
 
     # --- Expander 3: Preprocesamiento y DEM (SIMPLIFICADO) ---
@@ -187,10 +169,10 @@ def create_sidebar(gdf_stations, df_long):
         st.markdown("---")
         st.markdown("##### Modelo de Elevación Digital (DEM)")
 
-        # --- INICIO DEL CÓDIGO MODIFICADO ---
-        # Simplemente lee la ruta y el flag del session_state (que se definirán en app.py)
+        # --- CÓDIGO SIMPLIFICADO ---
+        # Esta lógica ahora solo LEE de st.session_state, que es establecido por app.py
         dem_path_from_state = st.session_state.get('dem_file_path', None)
-        dem_is_geo_from_state = st.session_state.get('dem_crs_is_geographic', True) # Asume True si no está
+        dem_is_geo_from_state = st.session_state.get('dem_crs_is_geographic', True)
 
         if dem_path_from_state:
             dem_filename = os.path.basename(dem_path_from_state)
@@ -198,13 +180,14 @@ def create_sidebar(gdf_stations, df_long):
             if dem_is_geo_from_state:
                 st.warning("El DEM base está en grados geográficos. El cálculo de áreas será impreciso.")
         else:
-            # Muestra un error más genérico si la ruta no se encontró al inicio en app.py
             st.error("DEM base no encontrado al iniciar la app. Funciones DEM no calcularán áreas.")
-        # --- FIN DEL CÓDIGO MODIFICADO ---
-        # --- Fin Lógica DEM ---
+        # --- FIN CÓDIGO SIMPLIFICADO ---
 
     # Retornar los valores FINALES
     final_gdf_to_return = gdf_filtered_geo_data[gdf_filtered_geo_data[Config.STATION_NAME_COL].isin(selected_stations_final)]
+    
+    # Guardar los valores de rango de año en la sesión para que otras pestañas los lean
+    st.session_state['year_range'] = year_range 
     
     return {
         "gdf_filtered": final_gdf_to_return,
@@ -218,8 +201,3 @@ def create_sidebar(gdf_stations, df_long):
         "selected_municipios": selected_municipios,
         "selected_altitudes": selected_altitudes
     }
-
-
-
-
-
