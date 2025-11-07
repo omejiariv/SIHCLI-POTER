@@ -200,7 +200,9 @@ def main():
                 file_shape_git = load_zip_from_url(Config.URL_SHAPEFILE_ZIP)
                 file_parquet_git = load_parquet_from_url(Config.URL_PARQUET)
                 
-                if all([file_mapa_git, file_precip_git, file_shape_git, file_parquet_git]):
+                # [CORRECCIÓN] Se comprueba explícitamente que ningún item sea 'None'
+                # en lugar de evaluar el "valor de verdad" (que falla en DataFrames).
+                if all(item is not None for item in [file_mapa_git, file_precip_git, file_shape_git, file_parquet_git]):
                     # Llamamos a la función principal de procesamiento
                     gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = \
                         load_and_process_all_data(
