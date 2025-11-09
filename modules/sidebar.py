@@ -6,10 +6,41 @@ import pandas as pd
 import os
 import rasterio # Importación necesaria
 
-# --- LÓGICA CONFLICTIVA ELIMINADA ---
-# Se eliminó el bloque de código que intentaba cargar el DEM
-# y guardarlo en st.session_state al momento de importar.
-# app.py ahora maneja esta lógica de forma centralizada.
+# --- Ruta al DEM base ---
+# (Asegúrate que 'DemAntioquiaWgs84.tif' esté en 'modules/data/')
+_THIS_FILE_DIR_SB = os.path.dirname(__file__)
+BASE_DEM_FILENAME = "DemAntioquia_EPSG3116.tif"
+BASE_DEM_PATH = os.path.abspath(os.path.join(_THIS_FILE_DIR_SB, '..', 'data', BASE_DEM_FILENAME))
+
+# Guardar la ruta y estado del CRS del DEM base en la sesión
+# Esto se ejecuta una vez al inicio o cuando el script cambia
+dem_base_found = False
+dem_base_is_geographic = True # Asumir geográfico (peor caso)
+
+# [CORRECCIÓN] Usar st.session_state.get para evitar errores si no está inicializado
+if not st.session_state.get('dem_file_path_validated', False):
+    if os.path.exists(BASE_DEM_PATH):
+        try:
+            with rasterio.open(BASE_DEM_PATH) as src:
+                if src.crs:
+                    dem_base_is_geographic = src.crs.is_geographic 
+                else:
+                    dem_base_is_geographic = True
+                    print("Advertencia (sidebar): DEM base no tiene CRS definido.")
+            st.session_state['dem_file_path'] = BASE_DEM_PATH
+            st.session_state['dem_crs_is_geographic'] = dem_base_is_geographic
+            st.session_state['dem_file_path_validated'] = True # Marcar como validado
+            dem_base_found = True
+        except Exception as e_base_crs:
+            print(f"Advertencia (sidebar): No se pudo leer CRS del DEM base: {e_base_crs}")
+            st.session_state['dem_file_path'] = None
+            st.session_state['dem_crs_is_geographic'] = True
+            st.session_state['dem_file_path_validated'] = False # Marcar como no validado
+    else:
+        st.session_state['dem_file_path'] = None
+        st.session_state['dem_crs_is_geographic'] = True
+        st.session_state['dem_file_path_validated'] = False # Marcar como no validado
+# --- FIN Ruta DEM base ---
 
 
 def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celdas):
@@ -31,7 +62,6 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
             # rangos ajustados según tu código
             if r == '0-500': conditions.append((altitude_col_numeric >= 0) & (altitude_col_numeric <= 500))
             elif r == '500-1000': conditions.append((altitude_col_numeric > 500) & (altitude_col_numeric <= 1000))
-            # [CORRECCIÓN] Asumiendo que estos son los rangos correctos de tu archivo
             elif r == '1000-1500': conditions.append((altitude_col_numeric > 1000) & (altitude_col_numeric <= 1500)) 
             elif r == '1500-2000': conditions.append((altitude_col_numeric > 1500) & (altitude_col_numeric <= 2000))
             elif r == '2000-3000': conditions.append((altitude_col_numeric > 2000) & (altitude_col_numeric <= 3000))
@@ -50,24 +80,21 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
 def create_sidebar(gdf_stations, df_long):
     """
     Crea y muestra widgets del sidebar, retornando selecciones filtradas.
-    [CORRECCIÓN] Esta función ahora lee gdf_stations y df_long de sus argumentos,
-    NO de st.session_state.
     """
     st.sidebar.header("Panel de Control")
 
-    # [CORRECCIÓN] Usar el gdf_stations pasado como argumento
-    if 'all_station_names' not in st.session_state:
-        st.session_state['all_station_names'] = sorted(gdf_stations[Config.STATION_NAME_COL].unique())
+    # [CORRECCIÓN] Usar 'get' para seguridad en caso de que no esté inicializado
+    all_station_names = st.session_state.get('all_station_names', [])
+    if not all_station_names:
+        all_station_names = sorted(gdf_stations[Config.STATION_NAME_COL].unique())
+        st.session_state['all_station_names'] = all_station_names
 
     # --- Expander 1: Filtros Geográficos y de Datos ---
     with st.sidebar.expander("**1. Filtros Geográficos y de Datos**", expanded=True):
         min_data_perc = st.slider("Filtrar por % de datos mínimo:", 0, 100, st.session_state.get('min_data_perc_slider', 0), key="min_data_perc_slider")
-        
-        # [CORRECCIÓN] Asegurarse que los rangos coincidan con la función apply_filters
         altitude_ranges = ['0-500', '500-1000', '1000-1500', '1500-2000', '2000-3000', '>3000']
         selected_altitudes = st.multiselect('Filtrar por Altitud (m)', options=altitude_ranges, key='altitudes_multiselect')
 
-        # [CORRECCIÓN] Usar el gdf_stations pasado como argumento
         gdf_base_for_options = gdf_stations.copy()
         
         # --- LÓGICA DE FILTROS EN CASCADA CORREGIDA ---
@@ -103,7 +130,6 @@ def create_sidebar(gdf_stations, df_long):
             
         # --- FIN DE LA LÓGICA CORREGIDA ---
 
-        # [CORRECCIÓN] Usar el gdf_stations pasado como argumento
         gdf_filtered_geo_data = apply_filters_to_stations(
             gdf_stations.copy(),
             min_data_perc, selected_altitudes,
@@ -139,27 +165,29 @@ def create_sidebar(gdf_stations, df_long):
         )
 
         # Rango de Años y Meses
-        # [CORRECCIÓN] Usar el df_long pasado como argumento
         years_with_data = sorted(df_long[Config.YEAR_COL].dropna().unique())
         min_year_data = int(min(years_with_data)) if years_with_data else 1970
         max_year_data = int(max(years_with_data)) if years_with_data else 2025
         slider_max_year = max(max_year_data, 2025)
         
-        # [CORRECCIÓN] Leer el default de st.session_state pero usar los límites de los datos
-        year_range_default = st.session_state.get('year_range', (min_year_data, slider_max_year))
+        # [CORRECCIÓN] Leer el valor de la sesión PRIMERO
+        year_range_from_session = st.session_state.get('year_range', (min_year_data, slider_max_year))
         
         year_range = st.slider("Rango de Años", 
                                min_value=min_year_data, 
                                max_value=slider_max_year,
-                               value=year_range_default, 
-                               key='year_range')
+                               value=year_range_from_session, # Usar el valor leído
+                               key='year_range') # El widget actualiza 'st.session_state.year_range' automáticamente
         
         meses_dict = {m: i + 1 for i, m in enumerate(['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'])}
         default_meses = st.session_state.get('meses_nombres_multiselect', list(meses_dict.keys()))
         meses_nombres = st.multiselect("Meses", list(meses_dict.keys()), default=default_meses, key='meses_nombres_multiselect')
         meses_numeros = [meses_dict[m] for m in meses_nombres]
-        # [CORRECCIÓN] Guardar solo meses_numeros en la sesión (es ligero)
-        st.session_state['meses_numeros'] = meses_numeros
+        # [CORRECCIÓN] Esta línea causaba el StreamlitAPIException.
+        # st.session_state['meses_numeros'] = meses_numeros # ELIMINADA
+        # Es redundante; el widget 'meses_nombres_multiselect' ya guarda su estado.
+        # En su lugar, lo guardamos en la sesión *una vez* si no existe, o lo leemos.
+        st.session_state.meses_nombres_multiselect = meses_nombres # Esto es seguro
 
     # --- Expander 3: Preprocesamiento y DEM (SIMPLIFICADO) ---
     with st.sidebar.expander("3. Opciones de Preprocesamiento y DEM"):
@@ -169,8 +197,7 @@ def create_sidebar(gdf_stations, df_long):
         st.markdown("---")
         st.markdown("##### Modelo de Elevación Digital (DEM)")
 
-        # --- CÓDIGO SIMPLIFICADO ---
-        # Esta lógica ahora solo LEE de st.session_state, que es establecido por app.py
+        # --- INICIO DEL CÓDIGO MODIFICADO ---
         dem_path_from_state = st.session_state.get('dem_file_path', None)
         dem_is_geo_from_state = st.session_state.get('dem_crs_is_geographic', True)
 
@@ -181,19 +208,19 @@ def create_sidebar(gdf_stations, df_long):
                 st.warning("El DEM base está en grados geográficos. El cálculo de áreas será impreciso.")
         else:
             st.error("DEM base no encontrado al iniciar la app. Funciones DEM no calcularán áreas.")
-        # --- FIN CÓDIGO SIMPLIFICADO ---
+        # --- FIN DEL CÓDIGO MODIFICADO ---
 
     # Retornar los valores FINALES
     final_gdf_to_return = gdf_filtered_geo_data[gdf_filtered_geo_data[Config.STATION_NAME_COL].isin(selected_stations_final)]
     
-    # Guardar los valores de rango de año en la sesión para que otras pestañas los lean
-    st.session_state['year_range'] = year_range 
+    # [CORRECCIÓN] Esta línea causaba el StreamlitAPIException. ELIMINADA.
+    # st.session_state['year_range'] = year_range 
     
     return {
         "gdf_filtered": final_gdf_to_return,
         "selected_stations": selected_stations_final,
         "year_range": year_range,
-        "meses_numeros": meses_numeros,
+        "meses_numeros": meses_numeros, # Devolver la variable local
         "analysis_mode": analysis_mode,
         "exclude_na": exclude_na,
         "exclude_zeros": exclude_zeros,
