@@ -1,9 +1,11 @@
 # modules/visualizer.py
 
-# -- Añadir utilidades para limitar carga en mapas y gráficos (pegar en la parte superior del archivo visualizer.py) --
-
 import json
 import tempfile
+
+from modules.config import Config
+import pandas as pd # Asegurar que pandas esté importado
+import numpy as np # Asegurar que numpy esté importado
 
 def _limit_markers_gdf(gdf, max_markers=500):
     """
@@ -49,6 +51,7 @@ def _sample_for_plotly_xy(x, y, max_points=2000):
 
 
 # --- helper: añadir capa de Estaciones (FeatureGroup + MarkerCluster) ---
+import folium # [CORRECCIÓN] Asegurar que folium esté importado
 from folium.plugins import MarkerCluster
 
 def add_stations_layer(m, stations_gdf, popup_fields=None, max_markers=1000, cluster=True, show=True, icon_color="green"):
@@ -137,6 +140,10 @@ def add_stations_layer(m, stations_gdf, popup_fields=None, max_markers=1000, clu
 # m = add_stations_layer(m, gdf_display, popup_fields=[Config.STATION_NAME_COL, Config.ALTITUDE_COL], max_markers=500, cluster=True, show=True)
 # folium.LayerControl().add_to(m)   # asegúrate de añadir LayerControl después de agregar la capa de estaciones
 
+# [CORRECCIÓN] Importar calculate_hypsometric_curve
+from modules.analysis import calculate_hypsometric_curve 
+import plotly.graph_objects as go # Asegurar importación
+import os # Asegurar importación
 
 # -- Reemplazar/ajustar create_hypsometric_figure_and_data para limitar datos pesados --
 def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader, max_pixels=200000):
@@ -784,13 +791,23 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
 
     st.header("Distribución espacial de las Estaciones de Lluvia")
 
-    display_filter_summary(total_stations_count=len(st.session_state.gdf_stations),
-                           selected_stations_count=len(stations_for_analysis),
-                           year_range=st.session_state.year_range,
-                           selected_months_count=len(st.session_state.meses_numeros),
-                           analysis_mode=analysis_mode, selected_regions=selected_regions,
-                           selected_municipios=selected_municipios,
-                           selected_altitudes=selected_altitudes)
+    # [CORRECCIÓN] Obtener gdf_stations de kwargs (pasado por app.py)
+    # y los valores de los widgets desde st.session_state
+    gdf_stations = kwargs.get('gdf_stations', pd.DataFrame())
+    year_range_val = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros_val = st.session_state.get('meses_numeros', list(range(1,13)))
+
+    display_filter_summary(
+        total_stations_count=len(gdf_stations), # <--- CORREGIDO
+        selected_stations_count=len(stations_for_analysis),
+        year_range=year_range_val, # <--- CORREGIDO
+        selected_months_count=len(meses_numeros_val), # <--- CORREGIDO
+        analysis_mode=analysis_mode,
+        selected_regions=selected_regions,
+        selected_municipios=selected_municipios,
+        selected_altitudes=selected_altitudes
+    )
+
 
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
@@ -819,10 +836,11 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                     overlays_config=selected_overlays_config,
                     fit_bounds_data=gdf_display
                 )
-
-                if 'gdf_municipios' in st.session_state and st.session_state.gdf_municipios is not \
-                   None:
-                    folium.GeoJson(st.session_state.gdf_municipios.to_json(),
+                
+                # [CORRECCIÓN] Leer gdf_municipios desde kwargs
+                gdf_municipios = kwargs.get('gdf_municipios')
+                if gdf_municipios is not None:
+                    folium.GeoJson(gdf_municipios.to_json(),
                                    name='Municipios').add_to(m)
 
                 marker_cluster = MarkerCluster(name='Estaciones').add_to(m)
@@ -986,11 +1004,17 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
                        gdf_filtered, analysis_mode, selected_regions, selected_municipios,
                        selected_altitudes, **kwargs):
     st.header("Visualizaciones de Precipitación")
+    
+    # [CORRECCIÓN]
+    gdf_stations = kwargs.get('gdf_stations', pd.DataFrame())
+    year_range_val = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros_val = st.session_state.get('meses_numeros', list(range(1,13)))
+
     display_filter_summary(
-        total_stations_count=len(st.session_state.gdf_stations),
+        total_stations_count=len(gdf_stations), # <--- CORREGIDO
         selected_stations_count=len(stations_for_analysis),
-        year_range=st.session_state.year_range,
-        selected_months_count=len(st.session_state.meses_numeros),
+        year_range=year_range_val, # <--- CORREGIDO
+        selected_months_count=len(meses_numeros_val), # <--- CORREGIDO
         analysis_mode=analysis_mode,
         selected_regions=selected_regions,
         selected_municipios=selected_municipios,
@@ -1000,7 +1024,8 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
-
+    
+    # [CORRECCIÓN] Leer el valor del widget de 'year_range'
     year_range_val = st.session_state.get('year_range', (2000, 2020))
     year_min, year_max = year_range_val
 
@@ -1176,11 +1201,13 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
                 st.warning("No hay datos mensuales para mostrar el gráfico.")
 
         with mensual_enso_tab:
-            if 'df_enso' in st.session_state and st.session_state.df_enso is not None:
-                enso_filtered = st.session_state.df_enso[
-                    (st.session_state.df_enso[Config.DATE_COL].dt.year >= year_min) &
-                    (st.session_state.df_enso[Config.DATE_COL].dt.year <= year_max) &
-                    (st.session_state.df_enso[Config.DATE_COL].dt.month.isin(st.session_state.meses_numeros))
+            # [CORRECCIÓN] Leer df_enso desde kwargs
+            df_enso = kwargs.get('df_enso')
+            if df_enso is not None:
+                enso_filtered = df_enso[
+                    (df_enso[Config.DATE_COL].dt.year >= year_min) &
+                    (df_enso[Config.DATE_COL].dt.year <= year_max) &
+                    (df_enso[Config.DATE_COL].dt.month.isin(st.session_state.meses_numeros))
                 ]
                 fig_enso_mensual = create_enso_chart(enso_filtered)
                 st.plotly_chart(fig_enso_mensual, use_container_width=True, key="enso_chart_mensual")
@@ -1557,62 +1584,26 @@ def create_climate_risk_map(df_anual, _gdf_stations): # Añadido _ para caché
     fig.update_layout(title="Mapa de Tendencias de Precipitación (Pendiente de Sen)", xaxis_title="Longitud", yaxis_title="Latitud", height=600)
     return fig
 
-def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader):
-    """
-    Calcula los datos de la curva hipsométrica y genera la figura de Plotly.
-    También prepara los datos para la descarga en formato CSV.
-    """
-    if basin_gdf is None or dem_file_uploader is None:
-        return None, None
-
-    # Guardar temporalmente el DEM para poder leerlo
-    dem_path = os.path.join(os.getcwd(), dem_file_uploader.name)
-    with open(dem_path, "wb") as f:
-        f.write(dem_file_uploader.getbuffer())
-
-    hypsometric_data = calculate_hypsometric_curve(basin_gdf, dem_path)
-    os.remove(dem_path) # Limpiar el archivo temporal
-
-    if hypsometric_data.get("error"):
-        st.error(hypsometric_data["error"])
-        return None, None
-
-    # Crear la figura
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=hypsometric_data['cumulative_area_percent'],
-        y=hypsometric_data['elevations'],
-        mode='lines',
-        fill='tozeroy' # Rellena el área bajo la curva
-    ))
-    fig.update_layout(
-        title="Curva Hipsométrica de la Cuenca Agregada",
-        xaxis_title="Área Acumulada sobre la Elevación (%)",
-        yaxis_title="Elevación (m)",
-        xaxis=dict(range=[0, 100]), # Eje X de 0 a 100%
-        template="plotly_white"
-    )
-    
-    # Preparar los datos para el CSV
-    df_hypsometric = pd.DataFrame({
-        'Elevacion_m': hypsometric_data['elevations'],
-        'Porcentaje_Area_Acumulada': hypsometric_data['cumulative_area_percent']
-    })
-    csv_data = df_hypsometric.to_csv(index=False).encode('utf-8')
-    
-    return fig, csv_data
+# [CORRECCIÓN] Esta función estaba duplicada, se elimina la versión antigua
+# def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader):
+#     ... (Versión antigua eliminada) ...
     
 def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melted,
                               df_monthly_filtered, analysis_mode, selected_regions, selected_municipios,
                               selected_altitudes, **kwargs):
     st.header("Mapas Avanzados")
 
+    # [CORRECCIÓN]
+    gdf_stations = kwargs.get('gdf_stations', pd.DataFrame())
+    year_range_val = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros_val = st.session_state.get('meses_numeros', list(range(1,13)))
+
     try:
         display_filter_summary(
-            total_stations_count=len(st.session_state.get('gdf_stations', [])),
+            total_stations_count=len(gdf_stations), # <--- CORREGIDO
             selected_stations_count=len(stations_for_analysis),
-            year_range=st.session_state.get('year_range', (2000, 2020)),
-            selected_months_count=len(st.session_state.get('meses_numeros', [])),
+            year_range=year_range_val, # <--- CORREGIDO
+            selected_months_count=len(meses_numeros_val), # <--- CORREGIDO
             analysis_mode=analysis_mode,
             selected_regions=selected_regions,
             selected_municipios=selected_municipios,
@@ -1672,14 +1663,16 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
 
         # --- Modo Por Cuenca Específica ---
         if analysis_mode_interp == "Por Cuenca Específica":
-            if 'gdf_subcuencas' not in st.session_state or st.session_state.gdf_subcuencas is None or st.session_state.gdf_subcuencas.empty:
+            # [CORRECCIÓN] Leer gdf_subcuencas desde kwargs
+            gdf_subcuencas = kwargs.get('gdf_subcuencas')
+            if gdf_subcuencas is None or gdf_subcuencas.empty:
                 st.warning("Los datos de cuencas no están disponibles o están vacíos.")
-                st.stop()
+                st.stop() # [CORRECCIÓN] Usar st.stop() en lugar de st.session_state
 
             BASIN_NAME_COLUMN = 'SUBC_LBL'
-            if BASIN_NAME_COLUMN not in st.session_state.gdf_subcuencas.columns:
+            if BASIN_NAME_COLUMN not in gdf_subcuencas.columns:
                 st.error(f"La columna '{BASIN_NAME_COLUMN}' no se encontró en los datos de cuencas.")
-                st.stop()
+                st.stop() # [CORRECCIÓN] Usar st.stop()
 
             col_control, col_display = st.columns([1, 2])
 
@@ -1687,8 +1680,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 st.markdown("#### Controles de Cuenca")
                 basin_names = []
                 regions_from_sidebar = selected_regions
-                if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None:
-                    gdf_subcuencas_local = st.session_state.gdf_subcuencas
+                # [CORRECCIÓN] Usar la variable local gdf_subcuencas
+                if gdf_subcuencas is not None:
+                    gdf_subcuencas_local = gdf_subcuencas
                     if regions_from_sidebar:
                         if Config.REGION_COL in gdf_subcuencas_local.columns:
                             relevant_basins_by_region = gdf_subcuencas_local[gdf_subcuencas_local[Config.REGION_COL].isin(regions_from_sidebar)]
@@ -1724,14 +1718,16 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         
                         try:
                             with st.spinner("Preparando datos y realizando interpolación..."):
-                                target_basins_gdf = st.session_state.gdf_subcuencas[st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN].isin(selected_basins)]
+                                # [CORRECCIÓN] Usar la variable local gdf_subcuencas
+                                target_basins_gdf = gdf_subcuencas[gdf_subcuencas[BASIN_NAME_COLUMN].isin(selected_basins)]
                                 unified_basin_gdf = gpd.GeoDataFrame(geometry=[target_basins_gdf.unary_union], crs=target_basins_gdf.crs)
                                 target_basin_metric = unified_basin_gdf.to_crs("EPSG:3116"); basin_buffer_metric = target_basin_metric.buffer(buffer_km * 1000)
 
-                                if 'gdf_stations' not in st.session_state or st.session_state.gdf_stations is None: raise ValueError("Datos de estaciones no cargados.")
-                                if st.session_state.gdf_stations.crs is None: st.session_state.gdf_stations.set_crs("EPSG:4326", inplace=True)
+                                # [CORRECCIÓN] Usar la variable local gdf_stations
+                                if gdf_stations is None: raise ValueError("Datos de estaciones no cargados.")
+                                if gdf_stations.crs is None: gdf_stations.set_crs("EPSG:4326", inplace=True)
 
-                                stations_metric = st.session_state.gdf_stations.to_crs("EPSG:3116")
+                                stations_metric = gdf_stations.to_crs("EPSG:3116")
                                 stations_in_buffer = stations_metric[stations_metric.intersects(basin_buffer_metric.unary_union)]
                                 station_names = stations_in_buffer[Config.STATION_NAME_COL].unique()
                                 if len(station_names) == 0: raise ValueError(f"No se encontraron estaciones dentro del buffer de {buffer_km} km.")
@@ -4778,6 +4774,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
