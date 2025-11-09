@@ -913,6 +913,11 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                     else: data_composition = data_composition.sort_index(ascending=True)
 
                     # Melt para preparar datos para el gráfico
+                    LIMIT_BARS = 100 # Límite de 100 estaciones
+                    if len(data_composition) > LIMIT_BARS:
+                        st.warning(f"Mostrando {LIMIT_BARS} estaciones (de {len(data_composition)}) para evitar sobrecarga del gráfico.")
+                        data_composition = data_composition.head(LIMIT_BARS)
+                    
                     df_plot = data_composition.reset_index().melt(
                         id_vars=Config.STATION_NAME_COL,
                         value_vars=['% Original', '% Completado'],
@@ -962,7 +967,7 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                     else:
                         df_chart = df_chart.sort_values(Config.STATION_NAME_COL, ascending=True)
 
-                    LIMIT_BARS = 200
+                    LIMIT_BARS = 150
                     if len(df_chart) > LIMIT_BARS:
                         st.info(f"Mostrando las primeras {LIMIT_BARS} estaciones ordenadas. Hay {len(df_chart)} en total.")
                         df_chart = df_chart.head(LIMIT_BARS)
@@ -4929,6 +4934,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
