@@ -217,7 +217,7 @@ def main():
                     st.stop()
         
         # Chequeo final de que los datos se cargaron en las variables locales
-        if df_long is None or gdf_stations is None:
+        if df_long is None or gdf_stations is None or gdf_municipios is None or gdf_subcuencas is None:
             st.error("La carga de datos falló. Verifique los archivos de origen.")
             st.session_state.data_loaded = False
             st.stop()
@@ -626,4 +626,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
