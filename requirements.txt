@@ -30,7 +30,4 @@ requests-cache
 retry-requests
 rich==13.7.1
 rasterstats
-PyKrige
 cmdstanpy
-
-
