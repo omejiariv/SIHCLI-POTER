@@ -1514,13 +1514,10 @@ def create_climate_risk_map(df_anual, _gdf_stations): # Añadido _ para caché
     fig.update_layout(title="Mapa de Tendencias de Precipitación (Pendiente de Sen)", xaxis_title="Longitud", yaxis_title="Latitud", height=600)
     return fig
 
-# [CORRECCIÓN] Esta función estaba duplicada, se elimina la versión antigua
-# def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader):
-#     ... (Versión antigua eliminada) ...
     
 def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melted,
                               df_monthly_filtered, analysis_mode, selected_regions, selected_municipios,
-                              selected_altitudes, **kwargs):
+                              selected_altitudes, gdf_subcuencas=None, **kwargs):
     st.header("Mapas Avanzados")
 
     # [CORRECCIÓN]
@@ -1914,6 +1911,43 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
         basin_title_morph = st.session_state.get('selected_basins_title', 'Cuenca no seleccionada')
         dem_fixed_path_morph = st.session_state.get('dem_file_path') # Usar ruta base validada
 
+        # --- INICIO BLOQUE AÑADIDO (ESTADÍSTICAS DE CUENCA) ---
+        st.markdown("---")
+        st.subheader(f"Estadísticas de Precipitación en: {basin_title_morph}")
+        
+        if unified_basin_gdf_morph is not None and not unified_basin_gdf_morph.empty:
+            BASIN_NAME_COLUMN = 'SUBC_LBL' # Asumiendo de app.py
+        
+            # gdf_filtered y df_monthly_filtered ya están disponibles como argumentos de la función
+        
+            # Comprobar que gdf_subcuencas se haya pasado
+            if gdf_subcuencas is None or gdf_subcuencas.empty:
+                st.error("Datos de subcuencas no encontrados. No se pueden calcular estadísticas.")
+            else:
+                stats_df, stations_in_selected_basin, error_msg = calculate_basin_stats(
+                    gdf_filtered, # _gdf_stations
+                    gdf_subcuencas, # _gdf_basins (ahora pasado como arg)
+                    df_monthly_filtered, # _df_monthly
+                    basin_title_morph, # basin_name (el título de la cuenca ya seleccionada)
+                    BASIN_NAME_COLUMN
+                )
+        
+                if error_msg: 
+                    st.warning(error_msg)
+        
+                if stations_in_selected_basin:
+                    st.metric("Estaciones (filtradas) en la Cuenca", len(stations_in_selected_basin))
+                    with st.expander("Ver estaciones incluidas"): 
+                        st.write(", ".join(stations_in_selected_basin))
+        
+                    if stats_df is not None and not stats_df.empty:
+                        st.markdown("**Resumen de Precipitación Mensual (para estaciones en cuenca)**")
+                        st.dataframe(stats_df, use_container_width=True)
+                    else:
+                        st.info("No hay datos de precipitación válidos para el período/meses seleccionados en esta cuenca.")
+                else:
+                    st.info("No se encontraron estaciones (que cumplan los filtros) dentro de la cuenca seleccionada.")
+        
         # Proceder solo si hay una cuenca seleccionada
         if unified_basin_gdf_morph is not None and not unified_basin_gdf_morph.empty:
             st.markdown(f"**Cuenca(s):** {basin_title_morph}")
@@ -4920,6 +4954,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
