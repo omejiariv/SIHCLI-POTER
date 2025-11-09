@@ -6,39 +6,6 @@ import pandas as pd
 import os
 import rasterio # Importación necesaria
 
-# --- Ruta al DEM base ---
-# (Asegúrate que 'DemAntioquiaWgs84.tif' esté en 'modules/data/')
-_THIS_FILE_DIR_SB = os.path.dirname(__file__)
-BASE_DEM_FILENAME = "DemAntioquia_EPSG_3116.tif"
-BASE_DEM_PATH = os.path.abspath(os.path.join(_THIS_FILE_DIR_SB, '..', 'data', BASE_DEM_FILENAME))
-
-# Guardar la ruta y estado del CRS del DEM base en la sesión
-# Esto se ejecuta una vez al inicio o cuando el script cambia
-dem_base_found = False
-dem_base_is_geographic = True # Asumir geográfico (peor caso)
-
-if os.path.exists(BASE_DEM_PATH):
-    try:
-        with rasterio.open(BASE_DEM_PATH) as src:
-            if src.crs:
-                # Corregido: Verificar si es geográfico
-                dem_base_is_geographic = src.crs.is_geographic 
-            else:
-                dem_base_is_geographic = True # Asumir geográfico si no hay CRS
-                print("Advertencia (sidebar): DEM base no tiene CRS definido.")
-        st.session_state['dem_file_path'] = BASE_DEM_PATH
-        st.session_state['dem_crs_is_geographic'] = dem_base_is_geographic
-        dem_base_found = True
-    except Exception as e_base_crs:
-        print(f"Advertencia (sidebar): No se pudo leer CRS del DEM base: {e_base_crs}")
-        st.session_state['dem_file_path'] = None
-        st.session_state['dem_crs_is_geographic'] = True
-else:
-    st.session_state['dem_file_path'] = None
-    st.session_state['dem_crs_is_geographic'] = True
-# --- FIN Ruta DEM base ---
-
-
 def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celdas):
     """
     Aplica una serie de filtros al DataFrame de estaciones.
@@ -226,3 +193,4 @@ def create_sidebar(gdf_stations, df_long):
         "selected_municipios": selected_municipios,
         "selected_altitudes": selected_altitudes
     }
+
