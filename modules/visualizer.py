@@ -3835,6 +3835,13 @@ def display_downloads_tab(df_anual_melted, df_monthly_filtered, stations_for_ana
 def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered,
                               stations_for_analysis, **kwargs):
     st.header("Información Detallada de las Estaciones")
+    # --- INICIO BLOQUE AÑADIDO ---
+    # @st.cache_data # No cachear esta función local
+    def convert_df_to_csv(df):
+        """Función auxiliar local para convertir DFs a CSV."""
+        return df.to_csv(index=False, sep=';').encode('utf-8')
+    # --- FIN BLOQUE AÑADIDO ---
+                                  
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
@@ -3960,6 +3967,44 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
             except Exception as e:
                 st.error(f"Ocurrió un error al calcular las estadísticas: {e}")
 
+    # --- INICIO BLOQUE AÑADIDO (LÓGICA DE DESCARGAS) ---
+    st.markdown("---")
+    st.subheader("Opciones de Descarga")
+    st.markdown("Aquí puedes descargar los datos actualmente visualizados, según los filtros aplicados.")
+
+    if not stations_for_analysis:
+        st.warning("Seleccione al menos una estación para activar las descargas.")
+        return # Ya estabas regresando al inicio de la función, pero por si acaso.
+
+    st.markdown("#### Datos de Precipitación Anual (Filtrados)")
+    if not df_anual_melted.empty:
+        csv_anual = convert_df_to_csv(df_anual_melted)
+        st.download_button(label="  Descargar CSV Anual", data=csv_anual,
+                           file_name='precipitacion_anual_filtrada.csv', mime='text/csv', 
+                           key='download-anual-tablestats') # Key actualizada para evitar conflictos
+    else:
+        st.info("No hay datos anuales para descargar con los filtros actuales.")
+    
+    st.markdown("---")
+    
+    # Usar la variable 'analysis_mode' que ya es un argumento de esta función
+    if analysis_mode == "Completar series (interpolación)":
+        st.markdown("#### Datos de Series Mensuales Completas (Interpoladas)")
+        st.info("Los datos a continuación han sido completados (interpolados) para rellenar los vacíos.")
+        csv_completed = convert_df_to_csv(df_monthly_filtered)
+        st.download_button(label="  Descargar CSV de Series Completas",
+                           data=csv_completed, file_name='precipitacion_mensual_completa.csv', mime='text/csv',
+                           key='download-completed-tablestats') # Key actualizada
+    else:
+        st.markdown("#### Datos de Precipitación Mensual (Originales Filtrados)")
+        if not df_monthly_filtered.empty:
+            csv_mensual = convert_df_to_csv(df_monthly_filtered)
+            st.download_button(label="  Descargar CSV Mensual", data=csv_mensual,
+                               file_name='precipitacion_mensual_filtrada.csv', mime='text/csv', 
+                               key='download-mensual-tablestats') # Key actualizada
+        else:
+            st.info("No hay datos mensuales para descargar con los filtros actuales.")
+    # --- FIN BLOQUE AÑADIDO ---
 
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     st.header("Pronóstico del Tiempo a 7 Días (Open-Meteo)")
@@ -4875,6 +4920,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
