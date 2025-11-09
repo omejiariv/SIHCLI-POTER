@@ -1808,7 +1808,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                 else: 
                                     st.session_state['morph_results'] = None
 
-                            # --- CÁLCULO DE BALANCE (Movido fuera del spinner) ---
+# --- CÁLCULO DE BALANCE (Movido fuera del spinner) ---
                             run_balance_state = st.session_state.get('run_balance', False)
                             if run_balance_state:
                                 mean_p = st.session_state.get('mean_precip'); morph_r = st.session_state.get('morph_results'); basin_g = st.session_state.get('unified_basin_gdf')
@@ -1866,6 +1866,14 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
 
         # --- Modo Regional ---
         else:
+            # --- [INICIO] CORRECCIÓN ---
+            # Carga gdf_stations desde kwargs al inicio de esta sección 'else'
+            gdf_stations = kwargs.get('gdf_stations')
+            if gdf_stations is None:
+                st.error("Error: Faltan datos de gdf_stations en el modo regional.")
+                return
+            # --- [FIN] CORRECCIÓN ---
+
             df_anual_non_na = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
             if not stations_for_analysis or df_anual_non_na.empty:
                 st.warning("No hay suficientes datos anuales para interpolación regional.")
@@ -2358,12 +2366,33 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
 def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_analysis,
                                  df_anual_melted, gdf_filtered, analysis_mode, selected_regions,
                                  selected_municipios, selected_altitudes, **kwargs):
+    
+    # --- [INICIO] CORRECCIÓN ---
+    # Carga gdf_stations desde kwargs al inicio de la función
+    gdf_stations = kwargs.get('gdf_stations')
+    # Carga df_long (el original, completo) desde kwargs
+    df_long_original = kwargs.get('df_long') 
+
+    # Comprobaciones de robustez
+    if gdf_stations is None:
+        st.error("Error: Faltan datos de gdf_stations en display_drought_analysis_tab.")
+        return
+    if df_long_original is None:
+        st.error("Error: Faltan datos de df_long en display_drought_analysis_tab.")
+        return
+    # Las variables del sidebar 'year_range' y 'meses_numeros' SÍ están en session_state
+    year_range = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros = st.session_state.get('meses_numeros', list(range(1, 13)))
+    # --- [FIN] CORRECCIÓN ---
+
     st.header("Análisis de Extremos Hidrológicos")
     display_filter_summary(
-        total_stations_count=len(st.session_state.gdf_stations),
+        # --- [INICIO] CORRECCIÓN ---
+        total_stations_count=len(gdf_stations), # Usa la variable local
         selected_stations_count=len(stations_for_analysis),
-        year_range=st.session_state.year_range,
-        selected_months_count=len(st.session_state.meses_numeros),
+        year_range=year_range, # Usa la variable local
+        selected_months_count=len(meses_numeros), # Usa la variable local
+        # --- [FIN] CORRECCIÓN ---
         analysis_mode=analysis_mode,
         selected_regions=selected_regions,
         selected_municipios=selected_municipios,
@@ -2384,12 +2413,16 @@ def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_anal
     p_upper = col2.slider("Percentil Superior (Húmedo):", 60, 99, 90, key="p_upper_perc")
     df_extremes, df_thresholds = pd.DataFrame(), pd.DataFrame()
     if station_to_analyze_perc:
-        df_long_state = st.session_state.get('df_long')
-        if df_long_state is not None and not df_long_state.empty:
+        # --- [INICIO] CORRECCIÓN ---
+        # Usa la variable local df_long_original en lugar de leer de session_state
+        if df_long_original is not None and not df_long_original.empty:
+        # --- [FIN] CORRECCIÓN ---
             try:
                 with st.spinner(f"Calculando percentiles P{p_lower} y P{p_upper}..."):
                     df_extremes, df_thresholds = calculate_percentiles_and_extremes(
-                        df_long_state, station_to_analyze_perc, p_lower, p_upper
+                        # --- [INICIO] CORRECCIÓN ---
+                        df_long_original, station_to_analyze_perc, p_lower, p_upper
+                        # --- [FIN] CORRECCIÓN ---
                     )
             except Exception as e:
                 st.error(f"Error al calcular el análisis de percentiles: {e}")
@@ -2403,13 +2436,16 @@ def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_anal
     
     with percentile_series_tab:
         if not df_extremes.empty:
-            year_range_val = st.session_state.get('year_range', (2000, 2020))
-            year_min, year_max = year_range_val if isinstance(year_range_val, tuple) and len(year_range_val) == 2 else st.session_state.get('year_range_single', (2000, 2020))
+            # --- [INICIO] CORRECCIÓN ---
+            # Usa la variable local year_range
+            year_min, year_max = year_range
+            # Usa la variable local meses_numeros
+            # --- [FIN] CORRECCIÓN ---
             
             df_plot = df_extremes[
                 (df_extremes[Config.DATE_COL].dt.year >= year_min) &
                 (df_extremes[Config.DATE_COL].dt.year <= year_max) &
-                (df_extremes[Config.DATE_COL].dt.month.isin(st.session_state.meses_numeros))
+                (df_extremes[Config.DATE_COL].dt.month.isin(meses_numeros))
             ].copy()
 
             if not df_plot.empty:
@@ -2422,7 +2458,10 @@ def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_anal
                     labels={Config.PRECIPITATION_COL: "Precipitación (mm)", Config.DATE_COL: "Fecha"},
                     hover_data={'event_type': True, 'p_lower': ':.0f', 'p_upper': ':.0f'}
                 )
-                mean_precip_station = st.session_state.df_long[st.session_state.df_long[Config.STATION_NAME_COL] == station_to_analyze_perc][Config.PRECIPITATION_COL].mean()
+                # --- [INICIO] CORRECCIÓN ---
+                # Usa la variable local df_long_original
+                mean_precip_station = df_long_original[df_long_original[Config.STATION_NAME_COL] == station_to_analyze_perc][Config.PRECIPITATION_COL].mean()
+                # --- [FIN] CORRECCIÓN ---
                 fig_series.add_hline(y=mean_precip_station, line_dash="dash", line_color="green", annotation_text="Media Histórica")
                 fig_series.update_layout(height=500)
                 st.plotly_chart(fig_series, use_container_width=True)
@@ -2557,13 +2596,33 @@ def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_anal
 def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis,
                              analysis_mode, selected_regions, selected_municipios, selected_altitudes, **kwargs):
 
+    # --- [INICIO] CORRECCIÓN ---
+    # Carga gdf_stations desde kwargs al inicio de la función
+    gdf_stations = kwargs.get('gdf_stations')
+    # Carga df_long (el original, completo) desde kwargs
+    df_long_original = kwargs.get('df_long') 
+
+    # Comprobaciones de robustez
+    if gdf_stations is None:
+        st.error("Error: Faltan datos de gdf_stations en display_anomalies_tab.")
+        return
+    if df_long_original is None:
+        st.error("Error: Faltan datos de df_long en display_anomalies_tab.")
+        return
+    # Las variables del sidebar 'year_range' y 'meses_numeros' SÍ están en session_state
+    year_range = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros = st.session_state.get('meses_numeros', list(range(1, 13)))
+    # --- [FIN] CORRECCIÓN ---
+
     st.header("Análisis de Anomalías de Precipitación")
 
     display_filter_summary(
-        total_stations_count=len(st.session_state.gdf_stations),
+        # --- [INICIO] CORRECCIÓN ---
+        total_stations_count=len(gdf_stations), # Usa la variable local
         selected_stations_count=len(stations_for_analysis),
-        year_range=st.session_state.year_range,
-        selected_months_count=len(st.session_state.meses_numeros),
+        year_range=year_range, # Usa la variable local
+        selected_months_count=len(meses_numeros), # Usa la variable local
+        # --- [FIN] CORRECCIÓN ---
         analysis_mode=analysis_mode,
         selected_regions=selected_regions,
         selected_municipios=selected_municipios,
@@ -2586,7 +2645,10 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis,
     avg_col_name = ""
 
     if analysis_type == "Una Normal Climatológica (período base fijo)":
-        years_in_long = sorted(df_long[Config.YEAR_COL].unique())
+        # --- [INICIO] CORRECCIÓN ---
+        # Usa la variable local df_long_original
+        years_in_long = sorted(df_long_original[Config.YEAR_COL].unique())
+        # --- [FIN] CORRECCIÓN ---
         default_start = 1991 if 1991 in years_in_long else years_in_long[0]
         default_end = 2020 if 2020 in years_in_long else years_in_long[-1]
 
@@ -2604,14 +2666,20 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis,
 
         with st.spinner(f"Calculando anomalías vs. normal climatológica ({baseline_start}-{baseline_end})..."):
             from modules.analysis import calculate_climatological_anomalies # Asume importación
-            df_anomalias = calculate_climatological_anomalies(df_monthly_filtered, df_long,
+            # --- [INICIO] CORRECCIÓN ---
+            # Usa la variable local df_long_original
+            df_anomalias = calculate_climatological_anomalies(df_monthly_filtered, df_long_original,
                                                              baseline_start, baseline_end)
+            # --- [FIN] CORRECCIÓN ---
         avg_col_name = 'precip_promedio_climatologico'
 
     else:
         with st.spinner("Calculando anomalías vs. promedio de todo el período..."):
             from modules.analysis import calculate_monthly_anomalies # Asume importación
-            df_anomalias = calculate_monthly_anomalies(df_monthly_filtered, df_long)
+            # --- [INICIO] CORRECCIÓN ---
+            # Usa la variable local df_long_original
+            df_anomalias = calculate_monthly_anomalies(df_monthly_filtered, df_long_original)
+            # --- [FIN] CORRECCIÓN ---
         avg_col_name = 'precip_promedio_mes'
 
     if df_anomalias.empty or df_anomalias['anomalia'].isnull().all():
@@ -2624,8 +2692,11 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis,
     with anom_graf_tab:
         df_plot = df_anomalias.groupby(Config.DATE_COL).agg(anomalia=('anomalia',
                                                                         'mean')).reset_index()
-        from .visualizer import create_anomaly_chart # Asume importación local de la función
+        
+        # --- [INICIO] CORRECCIÓN ---
+        # Llama a la función usando 'from .' si está en el mismo módulo
         fig = create_anomaly_chart(df_plot)
+        # --- [FIN] CORRECCIÓN ---
         st.plotly_chart(fig, use_container_width=True)
 
     with anom_fase_tab:
@@ -2684,12 +2755,33 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis,
 def display_stats_tab(df_long, df_anual_melted, df_monthly_filtered, 
                       stations_for_analysis, gdf_filtered, analysis_mode, selected_regions, 
                       selected_municipios, selected_altitudes, **kwargs):
+    
+    # --- [INICIO] CORRECCIÓN ---
+    # Carga gdf_stations desde kwargs al inicio de la función
+    gdf_stations = kwargs.get('gdf_stations')
+    # Carga df_long (el original, completo) desde kwargs
+    df_long_original = kwargs.get('df_long') 
+
+    # Comprobaciones de robustez
+    if gdf_stations is None:
+        st.error("Error: Faltan datos de gdf_stations en display_stats_tab.")
+        return
+    if df_long_original is None:
+        st.error("Error: Faltan datos de df_long en display_stats_tab.")
+        return
+    # Las variables del sidebar 'year_range' y 'meses_numeros' SÍ están en session_state
+    year_range = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros = st.session_state.get('meses_numeros', list(range(1, 13)))
+    # --- [FIN] CORRECCIÓN ---
+
     st.header("Estadísticas de Precipitación")
     display_filter_summary(
-        total_stations_count=len(st.session_state.gdf_stations),
+        # --- [INICIO] CORRECCIÓN ---
+        total_stations_count=len(gdf_stations), # Usa la variable local
         selected_stations_count=len(stations_for_analysis),
-        year_range=st.session_state.year_range,
-        selected_months_count=len(st.session_state.meses_numeros),
+        year_range=year_range, # Usa la variable local
+        selected_months_count=len(meses_numeros), # Usa la variable local
+        # --- [FIN] CORRECCIÓN ---
         analysis_mode=analysis_mode,
         selected_regions=selected_regions,
         selected_municipios=selected_municipios,
@@ -2736,10 +2828,13 @@ def display_stats_tab(df_long, df_anual_melted, df_monthly_filtered,
                 title_text = "Disponibilidad de Datos Totales (Original + Completado)"
 
             else:  # Porcentaje de Datos Originales
+                # --- [INICIO] CORRECCIÓN ---
+                # Usa la variable local df_long_original y year_range
                 df_original_filtered = \
-                    df_long[(df_long[Config.STATION_NAME_COL].isin(stations_for_analysis)) &
-                            (df_long[Config.DATE_COL].dt.year >= st.session_state.year_range[0]) &
-                            (df_long[Config.DATE_COL].dt.year <= st.session_state.year_range[1])]
+                    df_long_original[(df_long_original[Config.STATION_NAME_COL].isin(stations_for_analysis)) &
+                            (df_long_original[Config.DATE_COL].dt.year >= year_range[0]) &
+                            (df_long_original[Config.DATE_COL].dt.year <= year_range[1])]
+                # --- [FIN] CORRECCIÓN ---
                 df_counts = df_original_filtered.groupby([Config.STATION_NAME_COL,
                                                          Config.YEAR_COL]).size().reset_index(name='count')
                 df_counts['porc_value'] = (df_counts['count'] / 12) * 100
@@ -4774,6 +4869,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
