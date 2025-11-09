@@ -3961,14 +3961,18 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
                 detailed_stats_df = calculate_comprehensive_stats(df_anual_melted,
                                                                   df_monthly_filtered, stations_for_analysis)
                 
-                base_info_df = gdf_filtered[[Config.STATION_NAME_COL, Config.ALTITUDE_COL,
-                                             Config.MUNICIPALITY_COL, Config.REGION_COL]].copy()
-                base_info_df.rename(columns={Config.STATION_NAME_COL: 'Estación'},
-                                    inplace=True)
-
-                # Corregir el merge: Usar 'Estación' como columna de unión
-                final_df = pd.merge(base_info_df.drop_duplicates(subset=['Estación']),
-                                    detailed_stats_df, on="Estación", how="right")
+                # [CORRECCIÓN] Manejar si gdf_filtered es None o vacío
+                base_info_df = pd.DataFrame()
+                if gdf_filtered is not None and not gdf_filtered.empty:
+                    base_info_df = gdf_filtered[[Config.STATION_NAME_COL, Config.ALTITUDE_COL,
+                                                Config.MUNICIPALITY_COL, Config.REGION_COL]].copy()
+                    base_info_df.rename(columns={Config.STATION_NAME_COL: 'Estación'},
+                                        inplace=True)
+                    # Corregir el merge: Usar 'Estación' como columna de unión
+                    final_df = pd.merge(base_info_df.drop_duplicates(subset=['Estación']),
+                                        detailed_stats_df, on="Estación", how="right")
+                else:
+                    final_df = detailed_stats_df # Fallback si gdf_filtered falla
 
                 # Asegurar que las columnas de Config coincidan con los nombres reales antes de ordenar
                 column_order = [
@@ -4032,7 +4036,18 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     # Botón para obtener/actualizar pronóstico
     if st.button("Obtener/Actualizar Pronóstico", key="get_forecast_button"):
         if selected_station:
-            station_info = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == selected_station].iloc[0]
+            # [CORRECCIÓN] Manejar si gdf_filtered es None
+            if gdf_filtered is None or gdf_filtered.empty:
+                st.error("No hay datos de estaciones filtradas disponibles.")
+                return
+
+            station_info_series = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == selected_station]
+            
+            if station_info_series.empty:
+                st.error(f"No se pudo encontrar la información de la estación: {selected_station}")
+                return
+                
+            station_info = station_info_series.iloc[0]
             lat = station_info.geometry.y
             lon = station_info.geometry.x
 
@@ -4201,7 +4216,7 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
     st.header("Mapas de Variables Climáticas Adicionales (Open-Meteo)")
     st.info("Estos mapas usan datos históricos promediados de Open-Meteo para las ubicaciones de las estaciones seleccionadas y los interpolan.")
 
-    if gdf_filtered.empty:
+    if gdf_filtered is None or gdf_filtered.empty:
         st.warning("Seleccione al menos una estación en el panel de control para ver estos mapas.")
         return
 
@@ -4442,7 +4457,7 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
             zoom=5,
             base_map_config=selected_base_map_config, # Usa la selección directa
             overlays_config=[], # Los WMS se añaden manualmente
-            fit_bounds_data=gdf_filtered if not gdf_filtered.empty else None
+            fit_bounds_data=gdf_filtered if (gdf_filtered is not None and not gdf_filtered.empty) else None # [CORRECCIÓN]
         )
 
         # Añade las capas WMS seleccionadas
