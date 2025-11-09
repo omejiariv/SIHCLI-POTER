@@ -83,28 +83,27 @@ def load_shapefile(file_uploader_object):
 def complete_series(_df):
     """
     Completa series mensuales (SOLO precipitación y origen),
-    preservando TODAS las demás columnas (metadatos, ENSO, et_mmy, etc.).
+    preservando TODAS las demás columnas (metadatos, ENSO, et_mmy, etc.)
+    y rellenando los metadatos para las nuevas filas creadas.
     """
     
     # --- 1. Separar el DataFrame ---
-    
-    # Columnas clave para el merge
     merge_keys = [Config.STATION_NAME_COL, Config.DATE_COL]
-    
-    # Columna a procesar
     value_col = Config.PRECIPITATION_COL
     
-    # Columnas de metadatos (TODAS las demás)
-    # Excluir 'origin' si existe, ya que la vamos a recalcular
-    metadata_cols = [col for col in _df.columns if col not in [value_col, Config.ORIGIN_COL]]
-    # Asegurarse que las claves de merge estén
-    for key in merge_keys:
-        if key not in metadata_cols:
-            st.error(f"Error Crítico en complete_series: Falta la columna clave {key}.")
-            return _df # Devolver original si faltan claves
-
-    df_metadata = _df[metadata_cols].copy()
+    # Columnas de metadatos (TODAS las demás, que querremos rellenar)
+    metadata_cols = [
+        col for col in _df.columns 
+        if col not in [value_col, Config.ORIGIN_COL] and col not in merge_keys
+    ]
     
+    # DataFrame con metadatos originales (para el merge)
+    # Importante: incluir las claves del merge y eliminar duplicados de fecha
+    df_metadata = _df[merge_keys + metadata_cols].copy()
+    df_metadata[Config.DATE_COL] = pd.to_datetime(df_metadata[Config.DATE_COL], errors='coerce')
+    df_metadata = df_metadata.dropna(subset=[Config.DATE_COL, Config.STATION_NAME_COL])
+    df_metadata = df_metadata.drop_duplicates(subset=merge_keys, keep='first')
+
     # DataFrame de procesamiento (solo precip + claves)
     df_proc = _df[merge_keys + [value_col]].copy()
     df_proc[Config.DATE_COL] = pd.to_datetime(df_proc[Config.DATE_COL], errors='coerce')
@@ -144,39 +143,57 @@ def complete_series(_df):
     # --- Fin de la función interna ---
 
     # --- 3. Aplicar y Concatenar (Lógica de Bucle Corregida) ---
-    completed_dfs_list = [] # Crear una lista vacía
+    completed_dfs_list = [] 
     
-    # Iterar manualmente sobre cada grupo de estación
     for station_name, station_group_df in df_proc.groupby(Config.STATION_NAME_COL):
         filled_df = fill_station_gaps(station_group_df)
         
         if filled_df is not None and not filled_df.empty:
             filled_df[Config.STATION_NAME_COL] = station_name 
             completed_dfs_list.append(filled_df)
-    # --- FIN LÓGICA CORREGIDA ---
 
     if not completed_dfs_list:
         st.warning("No se pudieron completar series para las estaciones seleccionadas.")
-        return _df # Devolver original si la completación falló
+        return _df 
 
     df_completed_core = pd.concat(completed_dfs_list, ignore_index=True)
 
-    # --- 4. Unir (Merge) metadatos de vuelta ---
+    # --- 4. Unir (Merge) metadatos de vuelta (LÓGICA CORREGIDA) ---
+    
+    # CAMBIO 1: El merge debe ser 'how='right'' (o 'left' sobre df_completed_core)
+    #          para conservar todas las filas interpoladas.
     df_final_completed = pd.merge(
         df_metadata, 
         df_completed_core, 
         on=merge_keys, 
-        how='left' 
+        how='right' # <-- ¡ESTE ES EL CAMBIO CRÍTICO!
     )
     
-    # Rellenar 'origin' con 'Original' para las filas que no fueron interpoladas
-    df_final_completed[Config.ORIGIN_COL] = df_final_completed[Config.ORIGIN_COL].fillna('Original')
+    # CAMBIO 2: Rellenar los 'NaN' en los metadatos de las filas nuevas
+    #          Agrupamos por estación y rellenamos hacia adelante (ffill)
+    #          y luego hacia atrás (bfill) para cubrir huecos al inicio.
+    if not df_final_completed.empty:
+        group_cols = [Config.STATION_NAME_COL]
+        all_cols = group_cols + metadata_cols
+        
+        # Asegurarnos de que las columnas de metadatos existan antes de rellenar
+        cols_to_fill = [col for col in metadata_cols if col in df_final_completed.columns]
+        
+        if cols_to_fill:
+             # Ordenar por estación y fecha es VITAL antes de ffill
+            df_final_completed = df_final_completed.sort_values(by=merge_keys)
+            # Rellenar dentro de cada grupo de estación
+            df_final_completed[cols_to_fill] = df_final_completed.groupby(Config.STATION_NAME_COL)[cols_to_fill].ffill().bfill()
+
+    # CAMBIO 3: La línea 'fillna('Original')' se elimina.
+    #          Ya no es necesaria, pues 'df_completed_core' ya tiene la columna 'origin'
+    #          correctamente etiquetada.
     
-    # Asegurarse que las columnas de precipitación y origen existan
+    # Asegurarse de que las columnas clave existan por si algo falló
     if Config.PRECIPITATION_COL not in df_final_completed.columns:
          df_final_completed[Config.PRECIPITATION_COL] = np.nan
     if Config.ORIGIN_COL not in df_final_completed.columns:
-         df_final_completed[Config.ORIGIN_COL] = 'Original'
+         df_final_completed[Config.ORIGIN_COL] = 'Original' # Fallback
 
     return df_final_completed
     
@@ -376,6 +393,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
