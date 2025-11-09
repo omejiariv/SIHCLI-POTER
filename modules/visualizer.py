@@ -2797,58 +2797,70 @@ def display_stats_tab(df_long, df_anual_melted, df_monthly_filtered,
 
     with matriz_tab:
         st.subheader("Matriz de Disponibilidad de Datos Anual")
+        
+        # --- INICIO DE LA LÓGICA CORREGIDA ---
+        
+        # 1. Obtener el DataFrame base correcto (según el modo de análisis)
+        if analysis_mode == "Completar series (interpolación)":
+            base_df_for_matrix = st.session_state.get('df_completed')
+            if base_df_for_matrix is None or base_df_for_matrix.empty:
+                st.warning("Datos completados no están disponibles. El modo 'Completar series' debe estar activo.")
+                st.stop()
+        else:
+            base_df_for_matrix = df_long # df_long es df_long_original
+            # Asegurar que tenga la columna 'origin' para consistencia
+            if Config.ORIGIN_COL not in base_df_for_matrix.columns:
+                base_df_for_matrix = base_df_for_matrix.copy() # Evitar warning
+                base_df_for_matrix[Config.ORIGIN_COL] = 'Original'
+
+        # 2. Aplicar filtros de Estación y Año (PERO NO DE MES)
+        year_range_val = st.session_state.get('year_range', (1970, 2025))
+        
+        df_matrix_data = base_df_for_matrix[
+            (base_df_for_matrix[Config.STATION_NAME_COL].isin(stations_for_analysis)) &
+            (base_df_for_matrix[Config.DATE_COL].dt.year >= year_range_val[0]) &
+            (base_df_for_matrix[Config.DATE_COL].dt.year <= year_range_val[1])
+        ]
+        
+        if df_matrix_data.empty:
+            st.info("No hay datos para mostrar en la matriz con la selección actual.")
+            st.stop()
+        # --- FIN DE LA LÓGICA CORREGIDA ---
+
         heatmap_df = pd.DataFrame()
         title_text = ""
         color_scale = "Greens"
 
-        if analysis_mode == "Completar series (interpolación)":
-            view_mode = st.radio(
-                "Seleccione la vista de la matriz:",
-                ("Porcentaje de Datos Originales", "Porcentaje de Datos Completados",
-                 "Porcentaje de Datos Totales"),
-                horizontal=True, key="matriz_view_mode"
-            )
+        view_mode = st.radio(
+            "Seleccione la vista de la matriz:",
+            ("Porcentaje de Datos Originales", "Porcentaje de Datos Completados",
+             "Porcentaje de Datos Totales"),
+            horizontal=True, key="matriz_view_mode"
+        )
 
-            if view_mode == "Porcentaje de Datos Completados":
-                df_counts = df_monthly_filtered[df_monthly_filtered[Config.ORIGIN_COL] ==
-                                                'Completado'].groupby([Config.STATION_NAME_COL,
-                                                                      Config.YEAR_COL]).size().reset_index(name='count')
-                df_counts['porc_value'] = (df_counts['count'] / 12) * 100
-                heatmap_df = df_counts.pivot(index=Config.STATION_NAME_COL,
-                                             columns=Config.YEAR_COL, values='porc_value').fillna(0)
-                color_scale = "Reds"
-                title_text = "Porcentaje de Datos Completados (Interpolados)"
-
-            elif view_mode == "Porcentaje de Datos Totales":
-                df_counts = df_monthly_filtered.groupby([Config.STATION_NAME_COL,
-                                                        Config.YEAR_COL]).size().reset_index(name='count')
-                df_counts['porc_value'] = (df_counts['count'] / 12) * 100
-                heatmap_df = df_counts.pivot(index=Config.STATION_NAME_COL,
-                                             columns=Config.YEAR_COL, values='porc_value').fillna(0)
-                color_scale = "Blues"
-                title_text = "Disponibilidad de Datos Totales (Original + Completado)"
-
-            else:  # Porcentaje de Datos Originales
-                # --- [INICIO] CORRECCIÓN ---
-                # Usa la variable local df_long_original y year_range
-                df_original_filtered = \
-                    df_long_original[(df_long_original[Config.STATION_NAME_COL].isin(stations_for_analysis)) &
-                            (df_long_original[Config.DATE_COL].dt.year >= year_range[0]) &
-                            (df_long_original[Config.DATE_COL].dt.year <= year_range[1])]
-                # --- [FIN] CORRECCIÓN ---
-                df_counts = df_original_filtered.groupby([Config.STATION_NAME_COL,
-                                                         Config.YEAR_COL]).size().reset_index(name='count')
-                df_counts['porc_value'] = (df_counts['count'] / 12) * 100
-                heatmap_df = df_counts.pivot(index=Config.STATION_NAME_COL,
-                                             columns=Config.YEAR_COL, values='porc_value').fillna(0)
-                title_text = "Disponibilidad de Datos Originales"
-
-        else:  # Modo de datos originales
-            df_counts = df_monthly_filtered.groupby([Config.STATION_NAME_COL,
-                                                    Config.YEAR_COL]).size().reset_index(name='count')
+        if view_mode == "Porcentaje de Datos Completados":
+            # Usar el nuevo df_matrix_data
+            df_counts = df_matrix_data[df_matrix_data[Config.ORIGIN_COL] == 'Completado'] \
+                        .groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).size().reset_index(name='count')
             df_counts['porc_value'] = (df_counts['count'] / 12) * 100
-            heatmap_df = df_counts.pivot(index=Config.STATION_NAME_COL,
-                                         columns=Config.YEAR_COL, values='porc_value').fillna(0)
+            heatmap_df = df_counts.pivot(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values='porc_value').fillna(0)
+            color_scale = "Reds"
+            title_text = "Porcentaje de Datos Completados (Interpolados)"
+
+        elif view_mode == "Porcentaje de Datos Totales":
+            # Usar el nuevo df_matrix_data
+            df_counts = df_matrix_data.groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).size().reset_index(name='count')
+            df_counts['porc_value'] = (df_counts['count'] / 12) * 100
+            heatmap_df = df_counts.pivot(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values='porc_value').fillna(0)
+            color_scale = "Blues"
+            title_text = "Disponibilidad de Datos Totales (Original + Completado)"
+
+        else:  # Porcentaje de Datos Originales
+            # Usar el nuevo df_matrix_data Y FILTRAR POR ORIGEN
+            df_counts = df_matrix_data[df_matrix_data[Config.ORIGIN_COL] == 'Original'] \
+                        .groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).size().reset_index(name='count')
+            df_counts['porc_value'] = (df_counts['count'] / 12) * 100
+            heatmap_df = df_counts.pivot(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values='porc_value').fillna(0)
             title_text = "Disponibilidad de Datos Originales"
 
         if not heatmap_df.empty:
@@ -4934,6 +4946,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
