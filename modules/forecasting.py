@@ -154,6 +154,7 @@ def evaluate_forecast(y_true, y_pred):
     return {'RMSE': rmse, 'MAE': mae}
 
 # --- INICIO DE LA CORRECCIÓN ---
+@st.cache_data
 def generate_sarima_forecast(ts_data_raw, order, seasonal_order, horizon, test_size=12, regressors=None):
     """Entrena, evalúa y genera un pronóstico con SARIMAX, incluyendo regresores opcionales."""
     ts_data = ts_data_raw[[Config.DATE_COL, Config.PRECIPITATION_COL]].copy()
@@ -196,6 +197,7 @@ def generate_sarima_forecast(ts_data_raw, order, seasonal_order, horizon, test_s
     return ts, forecast_mean, forecast_ci, metrics, sarima_df_export
 # --- FIN DE LA CORRECCIÓN ---
 
+@st.cache_data
 def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=None):
     """Entrena, evalúa y genera un pronóstico con Prophet, incluyendo regresores opcionales."""
     ts_data = ts_data_raw.rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
@@ -267,4 +269,5 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
