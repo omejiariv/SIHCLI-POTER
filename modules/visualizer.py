@@ -596,7 +596,7 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
             layer_type = layer_config.get("type", "tile")
             url = layer_config.get("url")
             layer_name = layer_config.get("attr", layer_config.get("name", "Overlay"))
-            fg = folium.FeatureGroup(name=layer_name, show=False)
+            fg = folium.FeatureGroup(name=layer_name, show=True)
             try:
                 if layer_type == "wms":
                     if "layers" not in layer_config:
@@ -657,12 +657,6 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
                 folium.Marker(location=location, popup=f"No se pudo añadir la capa '{layer_name}': {e_layer}").add_to(fg)
                 fg.add_to(m)
                 continue
-
-    # Agregar LayerControl al final para asegurar que los grupos registrados aparezcan
-    try:
-        folium.LayerControl().add_to(m)
-    except Exception:
-        pass
 
     # Ajuste de bounds (usar bounding box si muchas geometrías)
     try:
@@ -4935,6 +4929,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
