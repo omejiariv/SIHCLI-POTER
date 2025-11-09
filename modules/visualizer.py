@@ -1157,6 +1157,15 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
                 
                 with chart_col:
                     if chart_type != "Gráfico de Cajas (Distribución Mensual)":
+                        # --- AÑADIR ESTA LÓGICA DE LÍMITE ---
+                        LIMIT = 50000 # Límite de 50,000 puntos para el gráfico
+                        if len(df_monthly_rich) > LIMIT:
+                            st.warning(f"Mostrando una muestra de {LIMIT} puntos (de {len(df_monthly_rich)}) para evitar sobrecarga.")
+                            df_plot_data = df_monthly_rich.sample(LIMIT, random_state=1)
+                        else:
+                            df_plot_data = df_monthly_rich
+                        # --- FIN DE LÓGICA DE LÍMITE ---
+                        
                         fig_mensual = px.scatter(
                             df_monthly_rich,
                             x=Config.DATE_COL,
@@ -4933,4 +4942,5 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
