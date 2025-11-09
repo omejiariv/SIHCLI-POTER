@@ -4001,10 +4001,10 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
             except Exception as e:
                 st.error(f"Ocurrió un error al calcular las estadísticas: {e}")
 
-    # --- INICIO BLOQUE AÑADIDO (LÓGICA DE DESCARGAS) ---
+    # --- (LÓGICA DE DESCARGAS) ---
     st.markdown("---")
+    analysis_mode = kwargs.get('analysis_mode', 'Usar datos originales') 
     st.subheader("Opciones de Descarga")
-    st.markdown("Aquí puedes descargar los datos actualmente visualizados, según los filtros aplicados.")
 
     if not stations_for_analysis:
         st.warning("Seleccione al menos una estación para activar las descargas.")
@@ -4954,6 +4954,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
