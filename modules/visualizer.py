@@ -2157,9 +2157,9 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         try: 
                             import traceback; import_tb = True
                             results_df = perform_loocv_for_all_methods(
-                                year=selected_year_val,
-                                gdf_metadata=gdf_filtered[cols_present_val].drop_duplicates(subset=[Config.STATION_NAME_COL]),
-                                df_anual_non_na=df_anual_non_na_val
+                                _year=selected_year_val,
+                                _gdf_metadata=gdf_filtered[cols_present_val].drop_duplicates(subset=[Config.STATION_NAME_COL]),
+                                _df_anual_non_na=df_anual_non_na_val
                             )
                         except ImportError: error_val = "Función 'perform_loocv_for_all_methods' no encontrada."
                         except Exception as e_val: error_val = f"Error validación: {e_val}\n{traceback.format_exc() if import_tb else ''}"
@@ -4929,6 +4929,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
