@@ -124,7 +124,7 @@ def main():
         "Análisis de Anomalías", "Análisis de Extremos", "Estadísticas",
         "Correlación", "Análisis ENSO", "Tendencias y Pronósticos",
         "Pronóstico Semanal",
-        "Descargas", "Análisis por Cuenca", "Comparación de Periodos",
+        "Análisis por Cuenca", "Comparación de Periodos",
         "Tabla de Estaciones", "Generar Reporte"
     ]
     tabs = st.tabs(tab_names)
@@ -379,16 +379,7 @@ def main():
         gdf_filtered=gdf_filtered
     )
     
-    with tabs[15]:
-        # [CORRECCIÓN] Pasa la variable local analysis_mode
-        display_downloads_tab(
-            df_anual_melted=df_anual_melted,
-            df_monthly_filtered=df_monthly_filtered,
-            stations_for_analysis=stations_for_analysis,
-            analysis_mode=analysis_mode
-        )
-
-    with tabs[16]: 
+    with tabs[15]: 
         st.header("Análisis Agregado por Cuenca Hidrográfica")
         # [CORRECCIÓN] Usa la variable local gdf_subcuencas
         if gdf_subcuencas is not None and not gdf_subcuencas.empty:
@@ -470,7 +461,7 @@ def main():
         else:
             st.warning("Los datos de las subcuencas no están cargados o el archivo está vacío.")
             
-    with tabs[17]:
+    with tabs[16]:
         st.header("Comparación de Periodos de Tiempo")
         analysis_level = st.radio(
             "Seleccione el nivel de análisis para la comparación:",
@@ -558,10 +549,10 @@ def main():
                     st.write(f"**Periodo 2 ({periodo2[0]}-{periodo2[1]})**")
                     st.dataframe(df_periodo2[Config.PRECIPITATION_COL].describe().round(2))
     
-    with tabs[18]:
+    with tabs[17]:
         display_station_table_tab(**display_args)
     
-    with tabs[19]:
+    with tabs[18]:
         st.header("Generación de Reporte PDF")
        
         # Opciones para el reporte
@@ -635,3 +626,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
