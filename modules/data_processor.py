@@ -225,7 +225,6 @@ def load_and_process_all_data(uploaded_file_mapa, uploaded_file_precip, uploaded
         gdf_stations[Config.ALTITUDE_COL] = standardize_numeric_column(gdf_stations[Config.ALTITUDE_COL])
 
     # --- INICIO DEL REEMPLAZO ---
-    st.info("Cargando datos de precipitación desde Parquet (¡rápido!)...")
 
     if uploaded_file_parquet is None:
         st.error("Por favor, carga el archivo 'datos_precipitacion_largos.parquet' para continuar.")
@@ -377,6 +376,7 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
 
 
 
