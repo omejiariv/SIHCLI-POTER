@@ -1591,7 +1591,6 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
         # --- Modo Por Cuenca Específica ---
         if analysis_mode_interp == "Por Cuenca Específica":
             # [CORRECCIÓN] Leer gdf_subcuencas desde kwargs
-            gdf_subcuencas = kwargs.get('gdf_subcuencas')
             if gdf_subcuencas is None or gdf_subcuencas.empty:
                 st.warning("Los datos de cuencas no están disponibles o están vacíos.")
                 st.stop() # [CORRECCIÓN] Usar st.stop() en lugar de st.session_state
@@ -4954,6 +4953,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
