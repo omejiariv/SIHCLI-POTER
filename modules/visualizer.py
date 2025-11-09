@@ -980,6 +980,11 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                     else:
                         df_chart = df_chart.sort_values(Config.STATION_NAME_COL, ascending=True)
 
+                    LIMIT_BARS = 200
+                    if len(df_chart) > LIMIT_BARS:
+                        st.info(f"Mostrando las primeras {LIMIT_BARS} estaciones ordenadas. Hay {len(df_chart)} en total.")
+                        df_chart = df_chart.head(LIMIT_BARS)
+                    
                     fig_disp = px.bar(
                         df_chart,
                         x=Config.STATION_NAME_COL,
@@ -4942,5 +4947,6 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
