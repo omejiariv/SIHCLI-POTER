@@ -52,48 +52,6 @@ def interpolate_idw(lons, lats, vals, grid_lon, grid_lat, method='cubic'):
     return grid_z
 
 # -----------------------------------------------------------------------------
-# NUEVA FUNCIÓN INTERNA PARA REUTILIZAR LA LÓGICA DE VALIDACIÓN CRUZADA
-# -----------------------------------------------------------------------------
-@st.cache_data
-def perform_loocv_for_all_methods(year, gdf_metadata, df_anual_non_na):
-    """
-    Ejecuta LOOCV para todos los métodos de interpolación para un año dado.
-    Parámetros:
-      - year: int o str del año a evaluar.
-      - gdf_metadata: GeoDataFrame con metadatos de estaciones (long, lat, opcional elev).
-      - df_anual_non_na: DataFrame anual con valores no nulos de precipitación.
-    Retorna:
-      - DataFrame con columnas: Método, Año, RMSE, MAE
-    """
-    # Lista de métodos disponibles (mantener consistencia con perform_loocv_for_year)
-    methods = ["Kriging Ordinario", "IDW", "Spline (Thin Plate)"]
-    try:
-        # Insertar KED si hay columna de elevación en el metadata
-        if Config.ELEVATION_COL in gdf_metadata.columns:
-            methods.insert(1, "Kriging con Deriva Externa (KED)")
-    except Exception:
-        # Si gdf_metadata es None o no tiene columnas, seguimos con la lista base
-        pass
-
-    results = []
-    for method in methods:
-        try:
-            metrics = perform_loocv_for_year(year, method, gdf_metadata, df_anual_non_na)
-            # metrics puede ser dict o None
-            if metrics and (metrics.get('RMSE') is not None or metrics.get('MAE') is not None):
-                results.append({
-                    "Método": method,
-                    "Año": year,
-                    "RMSE": metrics.get('RMSE'),
-                    "MAE": metrics.get('MAE')
-                })
-        except Exception:
-            # Si falla un método, continuar con los demás
-            continue
-
-    return pd.DataFrame(results)
-
-# -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN PÚBLICA PARA LA PESTAÑA DE VALIDACIÓN
 # -----------------------------------------------------------------------------
 @st.cache_data
@@ -390,6 +348,7 @@ def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
         variance = np.zeros_like(grid_z)
 
     return grid_z, variance
+
 
 
 
