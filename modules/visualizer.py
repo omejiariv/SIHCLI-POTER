@@ -2371,7 +2371,7 @@ def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_anal
     # Carga gdf_stations desde kwargs al inicio de la función
     gdf_stations = kwargs.get('gdf_stations')
     # Carga df_long (el original, completo) desde kwargs
-    df_long_original = kwargs.get('df_long') 
+    df_long_original = df_long 
 
     # Comprobaciones de robustez
     if gdf_stations is None:
@@ -2600,7 +2600,7 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis,
     # Carga gdf_stations desde kwargs al inicio de la función
     gdf_stations = kwargs.get('gdf_stations')
     # Carga df_long (el original, completo) desde kwargs
-    df_long_original = kwargs.get('df_long') 
+    df_long_original = df_long 
 
     # Comprobaciones de robustez
     if gdf_stations is None:
@@ -2760,7 +2760,7 @@ def display_stats_tab(df_long, df_anual_melted, df_monthly_filtered,
     # Carga gdf_stations desde kwargs al inicio de la función
     gdf_stations = kwargs.get('gdf_stations')
     # Carga df_long (el original, completo) desde kwargs
-    df_long_original = kwargs.get('df_long') 
+    df_long_original = df_long 
 
     # Comprobaciones de robustez
     if gdf_stations is None:
@@ -4933,3 +4933,4 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
