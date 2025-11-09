@@ -3029,11 +3029,19 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
 
     st.header("Análisis de Correlación")
 
+    # [INICIO CORRECCIÓN] Obtener datos pesados de kwargs y ligeros de session_state
+    gdf_stations = kwargs.get('gdf_stations')
+    year_range_val = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros_val = st.session_state.get('meses_numeros', list(range(1,13)))
+    # [FIN CORRECCIÓN]
+
     display_filter_summary(
-        total_stations_count=len(st.session_state.gdf_stations),
+        # [INICIO CORRECCIÓN] Usar variables locales en lugar de st.session_state
+        total_stations_count=len(gdf_stations) if gdf_stations is not None else 0,
         selected_stations_count=len(stations_for_analysis),
-        year_range=st.session_state.year_range,
-        selected_months_count=len(st.session_state.meses_numeros),
+        year_range=year_range_val,
+        selected_months_count=len(meses_numeros_val),
+        # [FIN CORRECCIÓN]
         analysis_mode=analysis_mode,
         selected_regions=selected_regions,
         selected_municipios=selected_municipios,
@@ -3056,7 +3064,8 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
         if Config.ENSO_ONI_COL not in df_monthly_filtered.columns or \
            df_monthly_filtered[Config.ENSO_ONI_COL].isnull().all():
             st.warning(f"No se puede realizar el análisis de correlación con ENSO. La columna '{Config.ENSO_ONI_COL}' no fue encontrada o no tiene datos en el período seleccionado.")
-            return
+            # [CORRECCIÓN] Cambiado 'return' por 'st.stop()' para detener solo esta pestaña
+            st.stop() 
 
         st.subheader("Configuración del Análisis de Correlación con ENSO")
 
@@ -3071,7 +3080,7 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
 
         if df_corr_analysis.empty:
             st.warning("No hay datos coincidentes entre la precipitación y el ENSO para la selección actual.")
-            return
+            st.stop() # [CORRECCIÓN] Cambiado 'return' por 'st.stop()'
 
         analysis_level = st.radio("Nivel de Análisis de Correlación con ENSO", ["Promedio de la selección", "Por Estación Individual"], horizontal=True, key="enso_corr_level")
 
@@ -3087,7 +3096,7 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                                                 station_to_corr].copy()
                 title_text = f"Correlación para la estación: {station_to_corr}"
             else:
-                return  # Si no se selecciona estación
+                st.stop()  # Si no se selecciona estación [CORRECCIÓN]
 
         else:
             df_plot_corr = df_corr_analysis.groupby(Config.DATE_COL).agg(
@@ -3108,27 +3117,31 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                 oni_column_to_use = 'anomalia_oni'
                 lag_text = ""
 
-            corr, p_value = stats.pearsonr(df_plot_corr[oni_column_to_use],
-                                           df_plot_corr['precipitation'])
+            # [CORRECCIÓN] Añadir chequeo de datos > 2 después del shift
+            if len(df_plot_corr) > 2:
+                corr, p_value = stats.pearsonr(df_plot_corr[oni_column_to_use],
+                                            df_plot_corr['precipitation'])
 
-            st.subheader(title_text + lag_text)
+                st.subheader(title_text + lag_text)
 
-            col1, col2 = st.columns(2)
-            col1.metric("Coeficiente de Correlación (r)", f"{corr:.3f}")
-            col2.metric("Significancia (valor p)", f"{p_value:.4f}")
+                col1, col2 = st.columns(2)
+                col1.metric("Coeficiente de Correlación (r)", f"{corr:.3f}")
+                col2.metric("Significancia (valor p)", f"{p_value:.4f}")
 
-            if p_value < 0.05:
-                st.success("La correlación es estadísticamente significativa.")
+                if p_value < 0.05:
+                    st.success("La correlación es estadísticamente significativa.")
+                else:
+                    st.warning("La correlación no es estadísticamente significativa.")
+
+                fig_corr = px.scatter(
+                    df_plot_corr, x=oni_column_to_use, y='precipitation', trendline='ols',
+                    title=f"Dispersión: Precipitación vs. Anomalía ONI{lag_text}",
+                    labels={oni_column_to_use: f'Anomalía ONI (°C) [desfase {lag_months}m]',
+                            'precipitation': 'Precipitación Mensual (mm)'}
+                )
+                st.plotly_chart(fig_corr, use_container_width=True)
             else:
-                st.warning("La correlación no es estadísticamente significativa.")
-
-            fig_corr = px.scatter(
-                df_plot_corr, x=oni_column_to_use, y='precipitation', trendline='ols',
-                title=f"Dispersión: Precipitación vs. Anomalía ONI{lag_text}",
-                labels={oni_column_to_use: f'Anomalía ONI (°C) [desfase {lag_months}m]',
-                        'precipitation': 'Precipitación Mensual (mm)'}
-            )
-            st.plotly_chart(fig_corr, use_container_width=True)
+                st.warning("No hay suficientes datos superpuestos después de aplicar el desfase temporal.")
 
         else:
             st.warning("No hay suficientes datos superpuestos para calcular la correlación.")
@@ -3151,6 +3164,8 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                 text_auto=True,
                 aspect="auto",
                 color_continuous_scale='RdBu_r',
+                zmin=-1, # [CORRECCIÓN] Fijar rango de color
+                zmax=1,  # [CORRECCIÓN] Fijar rango de color
                 title="Mapa de Calor de Correlaciones de Precipitación Mensual"
             )
             fig_matrix.update_layout(height=max(400, len(stations_for_analysis) * 25))
@@ -3192,9 +3207,13 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                     else:
                         st.warning(f"La correlación no es estadísticamente significativa (p={p_value:.4f}).")
 
-                    slope, intercept, _, _, _ = stats.linregress(df_merged[station1_name],
-                                                                 df_merged[station2_name])
-                    st.info(f"Ecuación de regresión: y = {slope:.2f}x + {intercept:.2f}")
+                    # [CORRECCIÓN] Usar stats.linregress para obtener la línea de tendencia
+                    try:
+                        slope, intercept, r_val, p_val_reg, std_err = stats.linregress(df_merged[station1_name], df_merged[station2_name])
+                        st.info(f"Ecuación de regresión: y = {slope:.2f}x + {intercept:.2f} (R² = {r_val**2:.3f})")
+                    except Exception:
+                         st.info("No se pudo calcular la regresión lineal.")
+
 
                     fig_scatter = px.scatter(
                         df_merged, x=station1_name, y=station2_name, trendline='ols',
@@ -3238,7 +3257,8 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                                                      index_col_name], inplace=True)
                 else:
                     st.error(f"La columna para el índice '{selected_index}' no se encontró en los datos de la estación.")
-                    return
+                    st.stop() # [CORRECCIÓN]
+                    
 
                 if not df_merged_indices.empty and len(df_merged_indices) > 2:
                     corr, p_value = stats.pearsonr(df_merged_indices[index_col_name],
@@ -3265,16 +3285,26 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
 def display_enso_tab(df_enso, df_monthly_filtered, gdf_filtered, stations_for_analysis,
                         analysis_mode, selected_regions, selected_municipios, selected_altitudes, **kwargs):
     st.header("Análisis de Precipitación y el Fenómeno ENSO")
+    
+    # [INICIO CORRECCIÓN] Obtener datos pesados de kwargs y ligeros de session_state
+    gdf_stations = kwargs.get('gdf_stations')
+    year_range_val = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros_val = st.session_state.get('meses_numeros', list(range(1,13)))
+    # [FIN CORRECCIÓN]
+
     display_filter_summary(
-        total_stations_count=len(st.session_state.gdf_stations),
+        # [INICIO CORRECCIÓN] Usar variables locales en lugar de st.session_state
+        total_stations_count=len(gdf_stations) if gdf_stations is not None else 0,
         selected_stations_count=len(stations_for_analysis),
-        year_range=st.session_state.year_range,
-        selected_months_count=len(st.session_state.meses_numeros),
+        year_range=year_range_val,
+        selected_months_count=len(meses_numeros_val),
+        # [FIN CORRECCIÓN]
         analysis_mode=analysis_mode,
         selected_regions=selected_regions,
         selected_municipios=selected_municipios,
         selected_altitudes=selected_altitudes
     )
+
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
@@ -3300,7 +3330,7 @@ def display_enso_tab(df_enso, df_monthly_filtered, gdf_filtered, stations_for_an
                 with enso_variable_tabs[i]:
                     var_code = [code for code, name in enso_vars_available.items() if name ==
                                 var_name][0]
-                    enso_filtered = df_enso
+                    enso_filtered = df_enso # [CORRECCIÓN] Usar el df_enso completo pasado a la función
                     if not enso_filtered.empty and var_code in enso_filtered.columns and not \
                        enso_filtered[var_code].isnull().all():
 
@@ -3326,12 +3356,12 @@ def display_enso_tab(df_enso, df_monthly_filtered, gdf_filtered, stations_for_an
         phases = ['El Niño', 'La Niña']
         enso_anim_data['fase'] = np.select(conditions, phases, default='Neutral')
 
-        year_range_val = st.session_state.get('year_range', (2000, 2020))
+        # [CORRECCIÓN] Usar la variable local 'year_range_val'
         if isinstance(year_range_val, tuple) and len(year_range_val) == 2 and \
            isinstance(year_range_val[0], int):
             year_min, year_max = year_range_val
         else:
-            year_min, year_max = st.session_state.get('year_range_single', (2000, 2020))
+            year_min, year_max = (2000, 2020) # Fallback
 
         enso_anim_data_filtered = enso_anim_data[
             (enso_anim_data[Config.DATE_COL].dt.year >= year_min) &
@@ -3391,11 +3421,20 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                                     df_anual_melted, df_monthly_filtered, analysis_mode, selected_regions,
                                     selected_municipios, selected_altitudes, **kwargs):
     st.header("Análisis de Tendencias y Pronósticos")
+
+    # [INICIO CORRECCIÓN] Obtener datos pesados de kwargs y ligeros de session_state
+    gdf_stations = kwargs.get('gdf_stations')
+    year_range_val = st.session_state.get('year_range', (2000, 2020))
+    meses_numeros_val = st.session_state.get('meses_numeros', list(range(1,13)))
+    # [FIN CORRECCIÓN]
+
     display_filter_summary(
-        total_stations_count=len(st.session_state.gdf_stations),
+        # [INICIO CORRECCIÓN] Usar variables locales en lugar de st.session_state
+        total_stations_count=len(gdf_stations) if gdf_stations is not None else 0,
         selected_stations_count=len(stations_for_analysis),
-        year_range=st.session_state.year_range,
-        selected_months_count=len(st.session_state.meses_numeros),
+        year_range=year_range_val,
+        selected_months_count=len(meses_numeros_val),
+        # [FIN CORRECCIÓN]
         analysis_mode=analysis_mode,
         selected_regions=selected_regions,
         selected_municipios=selected_municipios,
@@ -3959,8 +3998,18 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
                     'Ppt Media Sep (mm)': '{:.1f}', 'Ppt Media Oct (mm)': '{:.1f}', 
                     'Ppt Media Nov (mm)': '{:.1f}', 'Ppt Media Dic (mm)': '{:.1f}'
                 }
+                
+                # [CORRECCIÓN] Mostrar solo los primeros 200 registros en UI para evitar "Bad message format"
+                if not final_df_display.empty:
+                    st.markdown("Mostrando los primeros 200 registros. Descarga completa disponible abajo.")
+                    st.dataframe(final_df_display.head(200).style.format({k: v for k, v in format_dict.items() if k in final_df_display.columns}))
+                    
+                    # [CORRECCIÓN] Usar final_df_display (el DataFrame reordenado) para el CSV
+                    csv_bytes = final_df_display.to_csv(index=False).encode('utf-8')
+                    st.download_button("Descargar tabla completa (CSV)", data=csv_bytes, file_name="estadisticas_estaciones.csv", mime="text/csv")
+                else:
+                    st.info("No se generaron estadísticas (resultado vacío).")
 
-                st.dataframe(final_df_display.style.format({k: v for k, v in format_dict.items() if k in final_df_display.columns}))
 
             except Exception as e:
                 st.error(f"Ocurrió un error al calcular las estadísticas: {e}")
@@ -4716,14 +4765,14 @@ def display_life_zones_tab(**kwargs):
             basin_name_mask = st.session_state.get('selected_basins_title')
             if basin_to_mask is not None and not basin_to_mask.empty:
                 st.success(f"Se usará la máscara: {basin_name_mask}")
-                mask_geometry_to_use = basin_to_mask.geometry
+                mask_geometry_to_use = basin_to_mask # [CORRECCIÓN] Pasar el GDF, no solo la geometría
             else:
                 st.warning("No hay cuenca seleccionada en 'Mapas Avanzados' para usar como máscara."); apply_basin_mask = False
     # --- Fin Controles ---
 
     if st.button("Generar Mapa de Zonas de Vida", key="gen_life_zone_map"):
         
-        mask_arg = mask_geometry_to_use if apply_basin_mask else None
+        mask_arg = basin_to_mask if apply_basin_mask else None # [CORRECCIÓN] Pasar el GDF
         
         # --- CORRECCIÓN LLAMADA (Error 4): SIN 'maskgeometry' ---
         classified_raster, output_profile, name_map = generate_life_zone_map(
@@ -4869,46 +4918,3 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
