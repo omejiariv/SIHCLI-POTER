@@ -209,77 +209,6 @@ def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader, max_pixels=
         except Exception:
             pass
 
-# -- Ajuste en display_station_table_tab: mostrar solo head + descarga --
-def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered,
-                              stations_for_analysis, **kwargs):
-    st.header("Información Detallada de las Estaciones")
-    if not stations_for_analysis:
-        st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
-        return
-
-    st.info("Presiona el botón para generar una tabla detallada con estadísticas calculadas para cada estación seleccionada.")
-
-    if st.button("Calcular Estadísticas Detalladas"):
-        with st.spinner("Realizando cálculos, por favor espera..."):
-            try:
-                @st.cache_data
-                def calculate_comprehensive_stats(_df_anual, _df_monthly, _stations):
-                    results = []
-                    import numpy as np
-                    from scipy import stats
-                    try:
-                        import pymannkendall as mk
-                    except Exception:
-                        mk = None
-                    for station in _stations:
-                        stats_dict = {"Estación": station}
-                        station_anual = _df_anual[_df_anual[Config.STATION_NAME_COL] == station].dropna(subset=[Config.PRECIPITATION_COL])
-                        station_monthly = _df_monthly[_df_monthly[Config.STATION_NAME_COL] == station].dropna(subset=[Config.PRECIPITATION_COL])
-                        if not station_anual.empty:
-                            stats_dict['Años con Datos'] = int(station_anual[Config.PRECIPITATION_COL].count())
-                            stats_dict['Ppt. Media Anual (mm)'] = station_anual[Config.PRECIPITATION_COL].mean()
-                            stats_dict['Desv. Estándar Anual (mm)'] = station_anual[Config.PRECIPITATION_COL].std()
-                            max_anual_row = station_anual.loc[station_anual[Config.PRECIPITATION_COL].idxmax()]
-                            stats_dict['Ppt. Máxima Anual (mm)'] = max_anual_row[Config.PRECIPITATION_COL]
-                            stats_dict['Año Ppt. Máxima'] = int(max_anual_row[Config.YEAR_COL])
-                            min_anual_row = station_anual.loc[station_anual[Config.PRECIPITATION_COL].idxmin()]
-                            stats_dict['Ppt. Mínima Anual (mm)'] = min_anual_row[Config.PRECIPITATION_COL]
-                            stats_dict['Año Ppt. Mínima'] = int(min_anual_row[Config.YEAR_COL])
-                            if len(station_anual) >= 4 and mk is not None:
-                                mk_result = mk.original_test(station_anual[Config.PRECIPITATION_COL])
-                                stats_dict['Tendencia (mm/año)'] = mk_result.slope
-                                stats_dict['Significancia (p-valor)'] = mk_result.p
-                            else:
-                                stats_dict['Tendencia (mm/año)'] = np.nan
-                                stats_dict['Significancia (p-valor)'] = np.nan
-                        if not station_monthly.empty:
-                            meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
-                            monthly_means = station_monthly.groupby(station_monthly[Config.DATE_COL].dt.month)[Config.PRECIPITATION_COL].mean()
-                            for i, mes in enumerate(meses, 1):
-                                stats_dict[f'Ppt Media {mes} (mm)'] = monthly_means.get(i, 0)
-                        results.append(stats_dict)
-                    return pd.DataFrame(results)
-
-                detailed_stats_df = calculate_comprehensive_stats(df_anual_melted, df_monthly_filtered, stations_for_analysis)
-                base_info_df = gdf_filtered[[Config.STATION_NAME_COL, Config.ALTITUDE_COL, Config.MUNICIPALITY_COL, Config.REGION_COL]].copy()
-                base_info_df.rename(columns={Config.STATION_NAME_COL: 'Estación'}, inplace=True)
-                final_df = pd.merge(base_info_df.drop_duplicates(subset=['Estación']), detailed_stats_df, on="Estación", how="right")
-
-                # Mostrar solo los primeros 200 registros en UI para evitar "Bad message format"
-                if not final_df.empty:
-                    st.markdown("Mostrando los primeros 200 registros. Descarga completa disponible abajo.")
-                    st.dataframe(final_df.head(200).style.format("{:.2f}"), use_container_width=True)
-                    csv_bytes = final_df.to_csv(index=False).encode('utf-8')
-                    st.download_button("Descargar tabla completa (CSV)", data=csv_bytes, file_name="estadisticas_estaciones.csv", mime="text/csv")
-                else:
-                    st.info("No se generaron estadísticas (resultado vacío).")
-
-            except Exception as e:
-                st.error(f"Ocurrió un error al calcular las estadísticas: {e}")
-
-
-
-
 import streamlit as st
 import pandas as pd
 import base64
@@ -299,7 +228,7 @@ import branca.colormap as cm
 import matplotlib.pyplot as plt
 import pymannkendall as mk
 from scipy import stats
-# from prophet.plot import plot_plotly # Comentado si no se usa
+
 import io
 from datetime import datetime, timedelta, date
 import requests
@@ -4946,6 +4875,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
