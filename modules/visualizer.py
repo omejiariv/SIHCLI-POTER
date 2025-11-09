@@ -135,11 +135,6 @@ def add_stations_layer(m, stations_gdf, popup_fields=None, max_markers=1000, clu
             pass
         return m
 
-# --- Ejemplo de uso (inserta esto en el lugar donde construyes el mapa en la UI) ---
-# m = create_folium_map(location=..., zoom=..., base_map_config=..., overlays_config=..., fit_bounds_data=...)
-# m = add_stations_layer(m, gdf_display, popup_fields=[Config.STATION_NAME_COL, Config.ALTITUDE_COL], max_markers=500, cluster=True, show=True)
-# folium.LayerControl().add_to(m)   # asegúrate de añadir LayerControl después de agregar la capa de estaciones
-
 # [CORRECCIÓN] Importar calculate_hypsometric_curve
 from modules.analysis import calculate_hypsometric_curve 
 import plotly.graph_objects as go # Asegurar importación
@@ -837,12 +832,6 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                     fit_bounds_data=gdf_display
                 )
                 
-                # [CORRECCIÓN] Leer gdf_municipios desde kwargs
-                gdf_municipios = kwargs.get('gdf_municipios')
-                if gdf_municipios is not None:
-                    folium.GeoJson(gdf_municipios.to_json(),
-                                   name='Municipios').add_to(m)
-
                 marker_cluster = MarkerCluster(name='Estaciones').add_to(m)
 
                 for _, row in gdf_display.iterrows():
@@ -854,8 +843,7 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
                     ).add_to(marker_cluster)
 
                 m.add_child(MiniMap(toggle_display=True))
-                folium.LayerControl().add_to(m)
-
+               
                 folium_static(m, height=500, width=None)
 
                 add_folium_download_button(m, "mapa_distribucion_espacial.html")
@@ -4947,6 +4935,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
