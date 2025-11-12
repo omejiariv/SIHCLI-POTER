@@ -3744,9 +3744,9 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 
     with pronostico_sarima_tab:
         st.subheader("Pronóstico (Modelo SARIMA)")
-        st.info("Los pronósticos se generan utilizando los datos procesados...")
+        st.info("Los pronósticos se generan utilizando la serie temporal completa de la estación seleccionada.")
         station_to_forecast = st.selectbox("Seleccione una estación:",
-                                            options=stations_for_analysis, key="sarima_station_select")
+                                             options=stations_for_analysis, key="sarima_station_select")
         c1, c2 = st.columns(2)
         with c1:
             forecast_horizon = st.slider("Meses a pronosticar:", 12, 36, 12, step=12,
@@ -3754,16 +3754,21 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         with c2:
             test_size = st.slider("Meses para evaluación:", 12, 36, 12, step=6,
                                   key="sarima_test_size")
+        
+        # --- CORRECCIÓN: Auto-ARIMA deshabilitado por defecto ---
         use_auto_arima = st.checkbox("Encontrar parámetros óptimos automáticamente (Auto-ARIMA)",
-                                      value=True)
+                                     value=False)
+        
         if station_to_forecast and st.button("Generar Pronóstico SARIMA"):
+            
+            # --- CORRECCIÓN: Usa df_full_monthly (la serie completa) ---
             with st.spinner(f"Preparando y completando datos (SARIMA) para {station_to_forecast}..."):
                 original_station_data_sarima = \
                     df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
                                         station_to_forecast].copy()
                 from modules.data_processor import complete_series # Asume importación
                 ts_data_sarima = complete_series(original_station_data_sarima)
-    
+            
             if len(ts_data_sarima.dropna(subset=[Config.PRECIPITATION_COL])) < test_size + 36:
                 st.warning("No hay suficientes datos para un pronóstico confiable (se necesitan al menos 3 años más que el período de evaluación).")
             else:
@@ -3771,35 +3776,85 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     from modules.forecasting import auto_arima_search, generate_sarima_forecast
                     if use_auto_arima:
                         with st.spinner("Buscando el mejor modelo Auto-ARIMA (esto puede tardar)..."):
+                            # Asegúrate de que @st.cache_data esté en auto_arima_search
                             order, seasonal_order = auto_arima_search(ts_data_sarima, test_size)
                         st.success(f"Modelo óptimo encontrado: orden={order}, orden estacional={seasonal_order}")
                     else:
-                        order, seasonal_order = (1, 1, 1), (1, 1, 1, 12)
+                        order, seasonal_order = (1, 1, 1), (1, 1, 1, 12) # Parámetros por defecto
+                    
                     with st.spinner("Entrenando y evaluando modelo SARIMA..."):
+                        # Asegúrate de que @st.cache_data esté en generate_sarima_forecast
                         ts_hist, forecast_mean, forecast_ci, metrics, sarima_df_export = \
                             generate_sarima_forecast(ts_data_sarima, order, seasonal_order, forecast_horizon,
                                                      test_size)
                         st.session_state['sarima_results'] = {'forecast': sarima_df_export, 'metrics':
-                                                              metrics, 'history': ts_hist}
-                        st.markdown("##### Resultados del Pronóstico")
-                        fig_pronostico = go.Figure()
-                        fig_pronostico.add_trace(go.Scatter(x=ts_hist.index, y=ts_hist, mode='lines',
-                                                             name='Datos Históricos'))
-                        fig_pronostico.add_trace(go.Scatter(x=forecast_mean.index, y=forecast_mean,
-                                                             mode='lines', name='Pronóstico SARIMA', line=dict(color='red', dash='dash')))
-                        fig_pronostico.add_trace(go.Scatter(x=forecast_ci.index, y=forecast_ci.iloc[:, 0],
-                                                             mode='lines', line=dict(width=0), showlegend=False))
-                        fig_pronostico.add_trace(go.Scatter(x=forecast_ci.index, y=forecast_ci.iloc[:, 1],
-                                                             mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)',
-                                                             name='Intervalo de Confianza'))
-                        st.plotly_chart(fig_pronostico, use_container_width=True)
-                        st.markdown("##### Evaluación del Modelo")
-                        st.info(f"El modelo se evaluó usando los últimos **{test_size} meses** de datos históricos como conjunto de prueba.")
-                        m1, m2 = st.columns(2)
-                        m1.metric("RMSE (Error Cuadrático Medio)", f"{metrics['RMSE']:.2f}")
-                        m2.metric("MAE (Error Absoluto Medio)", f"{metrics['MAE']:.2f}")
+                                                               metrics, 'history': ts_hist}
+                    
+                    # ----- INICIO NUEVO BLOQUE DE GRÁFICO SARIMA -----
+                    st.markdown("##### Resultados del Pronóstico")
+                    st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
+                    
+                    fig_pronostico = go.Figure()
+
+                    # 1. Añadir banda de confianza (Intervalo de Incertidumbre)
+                    fig_pronostico.add_trace(go.Scatter(
+                        x=forecast_ci.index,
+                        y=forecast_ci.iloc[:, 0], # Límite inferior
+                        mode='lines',
+                        line=dict(width=0),
+                        name='Incertidumbre (Baja)',
+                        legendgroup='forecast'
+                    ))
+                    fig_pronostico.add_trace(go.Scatter(
+                        x=forecast_ci.index,
+                        y=forecast_ci.iloc[:, 1], # Límite superior
+                        mode='lines',
+                        line=dict(width=0),
+                        fill='tonexty',
+                        fillcolor='rgba(255,0,0,0.2)',
+                        name='Intervalo de Confianza',
+                        legendgroup='forecast'
+                    ))
+
+                    # 2. Añadir la línea del pronóstico
+                    fig_pronostico.add_trace(go.Scatter(
+                        x=forecast_mean.index,
+                        y=forecast_mean,
+                        mode='lines',
+                        line=dict(color='red', dash='dash', width=3),
+                        name='Pronóstico SARIMA',
+                        legendgroup='forecast'
+                    ))
+
+                    # 3. Añadir los datos reales (solo del conjunto de prueba)
+                    test_data_plot = ts_hist.iloc[-test_size:]
+                    fig_pronostico.add_trace(go.Scatter(
+                        x=test_data_plot.index,
+                        y=test_data_plot,
+                        mode='markers',
+                        marker=dict(color='black', size=5),
+                        name='Datos Reales (Prueba)'
+                    ))
+
+                    fig_pronostico.update_layout(
+                        title=f"Pronóstico SARIMA para {station_to_forecast}",
+                        xaxis_title="Fecha",
+                        yaxis_title="Precipitación (mm)",
+                        height=600,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    st.plotly_chart(fig_pronostico, use_container_width=True)
+                    # ----- FIN NUEVO BLOQUE DE GRÁFICO SARIMA -----
+                    
+                    st.markdown("##### Evaluación del Modelo")
+                    st.info(f"El modelo se evaluó usando los últimos **{test_size} meses** de datos históricos como conjunto de prueba.")
+                    m1, m2 = st.columns(2)
+                    m1.metric("RMSE (Error Cuadrático Medio)", f"{metrics['RMSE']:.2f}")
+                    m2.metric("MAE (Error Absoluto Medio)", f"{metrics['MAE']:.2f}")
+                
                 except Exception as e:
                     st.error(f"No se pudo generar el pronóstico SARIMA. Error: {e}")
+                    st.exception(e) # Añadido para más detalles
 
     with pronostico_prophet_tab:
         st.subheader("Pronóstico (Modelo Prophet)")
@@ -5076,6 +5131,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
