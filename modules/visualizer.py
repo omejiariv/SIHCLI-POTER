@@ -215,6 +215,8 @@ import base64
 import geopandas as gpd
 import altair as alt
 import folium
+from prophet import Prophet
+from prophet.plot import plot_plotly
 from rasterstats import zonal_stats
 from folium.plugins import MarkerCluster, MiniMap
 from folium.raster_layers import WmsTileLayer
@@ -3639,19 +3641,18 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                                     selected_municipios, selected_altitudes, **kwargs):
     st.header("Análisis de Tendencias y Pronósticos")
 
-    # [INICIO CORRECCIÓN] Obtener datos pesados de kwargs y ligeros de session_state
     gdf_stations = kwargs.get('gdf_stations')
     year_range_val = st.session_state.get('year_range', (2000, 2020))
     meses_numeros_val = st.session_state.get('meses_numeros', list(range(1,13)))
-    # [FIN CORRECCIÓN]
+    
+    # --- OBTENER DATOS DE ENSO ---
+    df_enso = kwargs.get('df_enso')
 
     display_filter_summary(
-        # [INICIO CORRECCIÓN] Usar variables locales en lugar de st.session_state
         total_stations_count=len(gdf_stations) if gdf_stations is not None else 0,
         selected_stations_count=len(stations_for_analysis),
         year_range=year_range_val,
         selected_months_count=len(meses_numeros_val),
-        # [FIN CORRECCIÓN]
         analysis_mode=analysis_mode,
         selected_regions=selected_regions,
         selected_municipios=selected_municipios,
@@ -3661,59 +3662,81 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
 
-    tab_names = ["Pronóstico ENSO", "Análisis Lineal", "Tendencia Mann-Kendall", "Tabla Comparativa",
-                 "Descomposición de Series", "Autocorrelación (ACF/PACF)", "Pronóstico SARIMA",
-                 "Pronóstico Prophet", "SARIMA vs Prophet"]
-    pronostico_enso_tab, tendencia_individual_tab, mann_kendall_tab, tendencia_tabla_tab, \
-        descomposicion_tab, autocorrelacion_tab, pronostico_sarima_tab, \
-        pronostico_prophet_tab, compare_forecast_tab = st.tabs(tab_names)
+    tab_names = [
+        "Pronóstico ENSO", # <-- NUEVA
+        "Análisis Lineal", "Tendencia Mann-Kendall", "Tabla Comparativa",
+        "Descomposición de Series", "Autocorrelación (ACF/PACF)", "Pronóstico SARIMA",
+        "Pronóstico Prophet", "SARIMA vs Prophet"
+    ]
+    pronostico_enso_tab, tendencia_individual_tab, mann_kendall_tab, \
+    tendencia_tabla_tab, descomposicion_tab, autocorrelacion_tab, \
+    pronostico_sarima_tab, pronostico_prophet_tab, compare_forecast_tab = st.tabs(tab_names)
 
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 1: PRONÓSTICO ENSO ---
+    # -------------------------------------------------------------------------
     with pronostico_enso_tab:
         st.subheader("Pronóstico del Índice ENSO (ONI)")
+        st.info("Genere un pronóstico para el índice ENSO. Este pronóstico se guardará y podrá ser usado como regresor externo en los modelos de precipitación.")
 
-        # Preparar datos de ENSO para Prophet
-        df_enso_prophet = df_enso.rename(columns={Config.DATE_COL: 'ds', Config.ENSO_ONI_COL: 'y'})
-        df_enso_prophet = df_enso_prophet[['ds', 'y']].dropna()
-
-        horizon_enso = st.slider("Meses a pronosticar (ENSO):", 12, 36, 12, key="enso_horizon")
-
-        if st.button("Generar Pronóstico ENSO (con Prophet)"):
-            with st.spinner("Entrenando modelo ENSO..."):
-                # (Aquí iría la lógica de generate_prophet_forecast adaptada para ENSO)
-
-                # 1. Entrenar el modelo
-                model_enso = Prophet(yearly_seasonality=True).fit(df_enso_prophet)
-
-                # 2. Crear fechas futuras
-                future_enso = model_enso.make_future_dataframe(periods=horizon_enso, freq='MS')
-
-                # 3. Generar el pronóstico
+        if df_enso is None or df_enso.empty:
+            st.warning("Datos de ENSO (requeridos para esta pestaña) no están disponibles.")
+        else:
+            df_enso_prophet = df_enso.rename(columns={Config.DATE_COL: 'ds', Config.ENSO_ONI_COL: 'y'})
+            df_enso_prophet = df_enso_prophet[['ds', 'y']].dropna()
+            
+            horizon_enso = st.slider("Meses a pronosticar (ENSO):", 12, 36, 12, key="enso_horizon_slider")
+            
+            # --- Función de Prophet cacheada para ENSO ---
+            @st.cache_data
+            def train_and_forecast_enso(data, horizon):
+                # Importaciones locales para la función cacheada
+                from prophet import Prophet
+                
+                model_enso = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False).fit(data)
+                future_enso = model_enso.make_future_dataframe(periods=horizon, freq='MS')
                 forecast_enso = model_enso.predict(future_enso)
+                return model_enso, forecast_enso
+            
+            if st.button("Generar Pronóstico ENSO (con Prophet)"):
+                with st.spinner("Entrenando modelo ENSO..."):
+                    model_enso, forecast_enso = train_and_forecast_enso(df_enso_prophet, horizon_enso)
+                    
+                    # Guardar el pronóstico COMPLETO (histórico + futuro)
+                    # Lo guardamos con los nombres de columna que los modelos de precipitación esperan
+                    st.session_state['enso_regressor_df_prophet'] = forecast_enso[['ds', 'yhat']].rename(columns={'yhat': Config.ENSO_ONI_COL})
+                    st.session_state['enso_regressor_df_sarima'] = forecast_enso[['ds', 'yhat']].rename(columns={'ds': Config.DATE_COL, 'yhat': Config.ENSO_ONI_COL})
+                    
+                    # Guardar el modelo y el pronóstico para el gráfico
+                    st.session_state['enso_model_fitted'] = model_enso
+                    st.session_state['enso_forecast_full'] = forecast_enso
+                    st.session_state['enso_forecast_horizon'] = horizon_enso
+                    st.success("¡Pronóstico ENSO generado y listo para usar en las otras pestañas!")
+            
+            if 'enso_model_fitted' in st.session_state and 'enso_forecast_full' in st.session_state:
+                st.markdown("---")
+                st.markdown("##### Gráfico del Pronóstico ENSO")
+                
+                fig_enso = plot_plotly(st.session_state['enso_model_fitted'], st.session_state['enso_forecast_full'])
+                st.plotly_chart(fig_enso, use_container_width=True)
+                
+                st.markdown("##### Clasificación del Pronóstico Futuro")
+                forecast_data = st.session_state['enso_forecast_full'].tail(st.session_state['enso_forecast_horizon'])
+                
+                def classify_enso(yhat):
+                    if yhat >= 0.5: return "El Niño 🔴"
+                    if yhat <= -0.5: return "La Niña 🔵"
+                    return "Neutral ⚪"
+                
+                # Usamos 'yhat' porque es el nombre de columna en 'forecast_enso'
+                forecast_data['Clasificación'] = forecast_data['yhat'].apply(classify_enso)
+                st.dataframe(forecast_data[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}), use_container_width=True)
 
-                # 4. ¡GUARDARLO EN LA SESIÓN!
-                st.session_state['future_enso_forecast'] = forecast_enso[['ds', 'yhat']]
-                st.session_state['model_enso_fitted'] = model_enso
-
-                st.success("¡Pronóstico ENSO generado y listo para usar!")
-
-        # 5. Mostrar el gráfico (si ya se generó)
-        if 'model_enso_fitted' in st.session_state and 'future_enso_forecast' in st.session_state:
-            fig_enso = st.session_state['model_enso_fitted'].plot(st.session_state['future_enso_forecast'])
-            st.pyplot(fig_enso)
-
-            # 6. Mostrar la clasificación (Niño/Niña/Neutral)
-            st.subheader("Clasificación del Pronóstico")
-            forecast_data = st.session_state['future_enso_forecast'].tail(horizon_enso)
-
-            def classify_enso(yhat):
-                if yhat >= 0.5: return "El Niño 🔴"
-                if yhat <= -0.5: return "La Niña 🔵"
-                return "Neutral ⚪"
-
-            forecast_data['Clasificación'] = forecast_data['yhat'].apply(classify_enso)
-            st.dataframe(forecast_data[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}))
-                                        
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 2: ANÁLISIS LINEAL ---
+    # -------------------------------------------------------------------------
     with tendencia_individual_tab:
+        # ... (Tu código para esta pestaña no cambia) ...
         st.subheader("Tendencia de Precipitación Anual (Regresión Lineal)")
         analysis_type = st.radio("Tipo de Análisis de Tendencia:", ["Promedio de la selección",
                                                                     "Estación individual"], horizontal=True, key="linear_trend_type")
@@ -3724,7 +3747,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 df_anual_melted.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].mean().reset_index()
         else:
             station_to_analyze = st.selectbox("Seleccione una estación para analizar:",
-                                              options=stations_for_analysis, key="tendencia_station_select")
+                                            options=stations_for_analysis, key="tendencia_station_select")
             if station_to_analyze:
                 df_to_analyze = df_anual_melted[df_anual_melted[Config.STATION_NAME_COL] == station_to_analyze]
 
@@ -3734,6 +3757,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
             df_clean = df_to_analyze.dropna(subset=[Config.PRECIPITATION_COL])
             slope, intercept, r_value, p_value, std_err = stats.linregress(df_clean['año_num'],
                                                                            df_clean[Config.PRECIPITATION_COL])
+            
             tendencia_texto = "aumentando" if slope > 0 else "disminuyendo"
             significancia_texto = "**estadísticamente significativa**" if p_value < 0.05 else "no es **estadísticamente significativa**"
             st.markdown(f"La tendencia de la precipitación es de **{slope:.2f} mm/año** (es decir, está {tendencia_texto}). Con un valor p de **{p_value:.3f}**, esta tendencia {significancia_texto}.")
@@ -3750,14 +3774,19 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         else:
             st.warning("No hay suficientes datos en el período seleccionado para calcular una tendencia.")
 
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 3: MANN-KENDALL ---
+    # -------------------------------------------------------------------------
     with mann_kendall_tab:
+        # ... (Tu código para esta pestaña no cambia) ...
         st.subheader("Tendencia de Precipitación Anual (Prueba de Mann-Kendall y Pendiente de Sen)")
         with st.expander("¿Qué es la prueba de Mann-Kendall?"):
             st.markdown("""
             - **Prueba de Mann-Kendall**: Detecta si existe una tendencia (creciente o decreciente) en el tiempo.
             - **Valor p**: Si es < 0.05, la tendencia es estadísticamente significativa.
-            - **Pendiente de Sen**: Cuantifica la magnitud de la tendencia (ej. "aumento de 5 mm/año"). Es un método robusto que no se ve muy afectado por valores atípicos.
-            """)
+            - **Pendiente de Sen**: Cuantifica la magnitud de la tendencia (ej. "aumento de 5 mm/año").
+            Es un método robusto que no se ve muy afectado por valores atípicos.
+        """)
 
         mk_analysis_type = st.radio("Tipo de Análisis de Tendencia:", ["Promedio de la selección", "Estación individual"], horizontal=True, key="mk_trend_type")
         df_to_analyze_mk = None
@@ -3804,7 +3833,11 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         else:
             st.warning("No hay suficientes datos (se requieren al menos 4 puntos) para calcular la tendencia de Mann-Kendall.")
 
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 4: TABLA COMPARATIVA ---
+    # -------------------------------------------------------------------------
     with tendencia_tabla_tab:
+        # ... (Tu código para esta pestaña no cambia) ...
         st.subheader("Tabla Comparativa de Tendencias de Precipitación Anual")
         st.info("Presione el botón para calcular los valores para todas las estaciones seleccionadas.")
         if st.button("Calcular Tendencias para Todas las Estaciones Seleccionadas"):
@@ -3813,7 +3846,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 df_anual_calc = df_anual_melted.copy()
                 for station in stations_for_analysis:
                     station_data = df_anual_calc[df_anual_calc[Config.STATION_NAME_COL] ==
-                                                  station].dropna(subset=[Config.PRECIPITATION_COL]).sort_values(by=Config.YEAR_COL)
+                                               station].dropna(subset=[Config.PRECIPITATION_COL]).sort_values(by=Config.YEAR_COL)
 
                     slope_lin, p_lin = np.nan, np.nan
                     trend_mk, p_mk, slope_sen = "Datos insuficientes", np.nan, np.nan
@@ -3824,7 +3857,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         slope_lin, p_lin = res.slope, res.pvalue
                     if len(station_data) > 3:
                         mk_result_table = \
-                            mk.original_test(station_data[Config.PRECIPITATION_COL])
+                             mk.original_test(station_data[Config.PRECIPITATION_COL])
                         trend_mk = mk_result_table.trend.capitalize()
                         p_mk = mk_result_table.p
                         slope_sen = mk_result_table.slope
@@ -3838,55 +3871,43 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         color = 'lightgreen' if val < 0.05 else 'lightcoral'
                         return f'background-color: {color}'
                     st.dataframe(results_df.style.format({"Tendencia Lineal (mm/año)": "{:.2f}",
-                                                           "Valor p (Lineal)": "{:.4f}", "Valor p (MK)": "{:.4f}", "Pendiente de Sen (mm/año)":
-                                                           "{:.2f}"}).applymap(style_p_value, subset=['Valor p (Lineal)', 'Valor p (MK)']),
+                                                      "Valor p (Lineal)": "{:.4f}", "Valor p (MK)": "{:.4f}", "Pendiente de Sen (mm/año)":
+                                                      "{:.2f}"}).applymap(style_p_value, subset=['Valor p (Lineal)', 'Valor p (MK)']),
                                  use_container_width=True)
 
-    with descomposicion_tab: # Asegúrate que 'descomposicion_tab' sea el nombre correcto de tu variable
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 5: DESCOMPOSICIÓN ---
+    # -------------------------------------------------------------------------
+    with descomposicion_tab: 
+        # ... (Tu código para esta pestaña no cambia) ...
         st.subheader("Descomposición de Series de Tiempo Mensual")
         
-        # Widget para seleccionar la estación
         station_to_decompose = st.selectbox(
             "Seleccione una estación para la descomposición:",
             options=stations_for_analysis, 
-            key="decompose_station_select" # Asegúrate que la key sea única
+            key="decompose_station_select"
         )
         
-        # Procesar SOLO si se seleccionó una estación
         if station_to_decompose:
-            # Filtrar datos para la estación seleccionada
             df_station_decomp = df_monthly_filtered[
                 df_monthly_filtered[Config.STATION_NAME_COL] == station_to_decompose
             ].copy()
 
-            # Verificar si hay datos después de filtrar
             if not df_station_decomp.empty:
-                # Preparar la serie de tiempo (índice de fecha, asegurar frecuencia, interpolar)
                 df_station_decomp.set_index(Config.DATE_COL, inplace=True)
-                # Usar asfreq('MS') para asegurar frecuencia mensual
-                # Usar 'linear' para consistencia con complete_series
                 series_for_decomp = df_station_decomp[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear') 
-                series_for_decomp.dropna(inplace=True) # Eliminar NaNs al principio/final después de interpolar
+                series_for_decomp.dropna(inplace=True)
 
-                # Proceder solo si hay suficientes datos para descomponer (ej. > 2 periodos)
-                period = 12 # Asumiendo estacionalidad anual
+                period = 12
                 if len(series_for_decomp) >= period * 2:
                     try:
-                        # Asegúrate que las funciones estén importadas al principio de visualizer.py
-                        # from modules.forecasting import get_decomposition_results
-                        # from plotly.subplots import make_subplots
-                        # import plotly.graph_objects as go
+                        result = get_decomposition_results(series_for_decomp, period=period)
                         
-                        # Realizar la descomposición
-                        result = get_decomposition_results(series_for_decomp, period=period) # Pasar el periodo
-                        
-                        # Crear la figura con subplots
                         fig = make_subplots(
                             rows=4, cols=1, 
                             shared_xaxes=True,
                             subplot_titles=("Observado", "Tendencia", "Estacionalidad", "Residuo")
                         )
-                        # Añadir trazas
                         if result.observed is not None:
                              fig.add_trace(go.Scatter(x=result.observed.index, y=result.observed, mode='lines', name='Observado'), row=1, col=1)
                         if result.trend is not None:
@@ -3896,7 +3917,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         if result.resid is not None:
                              fig.add_trace(go.Scatter(x=result.resid.index, y=result.resid, mode='markers', name='Residuo'), row=4, col=1)
                         
-                        # Actualizar layout
                         fig.update_layout(
                             height=700, 
                             title_text=f"Descomposición de la Serie para {station_to_decompose}", 
@@ -3905,61 +3925,50 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         st.plotly_chart(fig, use_container_width=True)
                         
                     except ImportError:
-                        st.error("Función 'get_decomposition_results' o 'make_subplots' no encontrada.")
+                         st.error("Función 'get_decomposition_results' o 'make_subplots' no encontrada.")
                     except ValueError as e_decomp:
-                         st.error(f"Error durante la descomposición: {e_decomp}") # Mostrar errores específicos (ej. serie muy corta)
+                         st.error(f"Error durante la descomposición: {e_decomp}")
                     except Exception as e:
                         st.error(f"No se pudo realizar la descomposición. Error inesperado: {e}")
-                # Else para if len(series_for_decomp) >= period * 2:
                 else:
-                    st.warning(f"No hay suficientes datos ({len(series_for_decomp)} meses) para realizar la descomposición estacional con periodo {period}.")
-            # Else para if not df_station_decomp.empty:
+                     st.warning(f"No hay suficientes datos ({len(series_for_decomp)} meses) para realizar la descomposición estacional con periodo {period}.")
             else:
                 st.warning(f"No se encontraron datos mensuales para la estación '{station_to_decompose}' con los filtros actuales.")
 
-    with autocorrelacion_tab: # Asegúrate que 'autocorrelacion_tab' sea el nombre correcto
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 6: AUTOCORRELACIÓN ---
+    # -------------------------------------------------------------------------
+    with autocorrelacion_tab: 
+        # ... (Tu código para esta pestaña no cambia) ...
         st.subheader("Análisis de Autocorrelación (ACF) y Autocorrelación Parcial (PACF)")
         
-        # Widget para seleccionar la estación
         station_to_analyze_acf = st.selectbox(
             "Seleccione una estación:",
             options=stations_for_analysis, 
-            key="acf_station_select" # Asegúrate que la key sea única
+            key="acf_station_select"
         )
         
-        # Widget para seleccionar el número de rezagos
         max_lag = st.slider(
             "Número máximo de rezagos (meses):", 
             min_value=12,
             max_value=60, 
             value=24, 
             step=12,
-            key="acf_max_lag_slider" # Asegúrate que la key sea única
+            key="acf_max_lag_slider"
         )
 
-        # Procesar SOLO si se seleccionó una estación
         if station_to_analyze_acf:
-            # Filtrar datos para la estación seleccionada
             df_station_acf = \
                 df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] ==
                                     station_to_analyze_acf].copy()
             
-            # Verificar si hay datos después de filtrar
             if not df_station_acf.empty:
-                # Preparar la serie de tiempo (índice de fecha, interpolar, quitar NaNs)
                 df_station_acf.set_index(Config.DATE_COL, inplace=True)
-                # Usar asfreq para asegurar frecuencia mensual y luego interpolar
                 series_acf = df_station_acf[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear') 
-                series_acf.dropna(inplace=True) # Quitar NaNs restantes (al principio/final)
+                series_acf.dropna(inplace=True)
 
-                # --- DEBUG ELIMINADO ---
-
-                # Verificar si hay suficientes datos DESPUÉS de procesar
                 if len(series_acf) > max_lag:
                     try:
-                        # Asegúrate de que las funciones estén importadas al principio de visualizer.py
-                        # from modules.forecasting import create_acf_chart, create_pacf_chart 
-                        
                         fig_acf = create_acf_chart(series_acf, max_lag)
                         st.plotly_chart(fig_acf, use_container_width=True)
                         
@@ -3969,18 +3978,17 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     except ImportError:
                          st.error("Funciones 'create_acf_chart' o 'create_pacf_chart' no encontradas.")
                     except Exception as e:
-                        st.error(f"No se pudieron generar los gráficos de autocorrelación. Error: {e}")
-                # Else para if len(series_acf) > max_lag:
+                         st.error(f"No se pudieron generar los gráficos de autocorrelación. Error: {e}")
                 else:
                     st.warning(f"No hay suficientes datos ({len(series_acf)}) para el análisis de autocorrelación con {max_lag} rezagos después de procesar la serie.")
-            # Else para if not df_station_acf.empty:
             else:
                 st.warning(f"No se encontraron datos mensuales para la estación '{station_to_analyze_acf}' con los filtros actuales.")
                 
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 7: PRONÓSTICO SARIMA (MODIFICADA) ---
+    # -------------------------------------------------------------------------
     with pronostico_sarima_tab:
         st.subheader("Pronóstico (Modelo SARIMA)")
-        
-        # --- INICIO BLOQUE MODIFICADO ---
         
         analysis_type_sarima = st.radio(
             "Seleccionar tipo de pronóstico SARIMA:",
@@ -3989,7 +3997,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         )
         
         station_to_forecast = None
-        station_name_for_title = "" # Para el título del gráfico
+        station_name_for_title = ""
         
         if analysis_type_sarima == "Estación Individual":
             station_to_forecast = st.selectbox("Seleccione una estación:",
@@ -3998,7 +4006,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         else:
             st.info(f"Se generará un pronóstico para la serie regional (promedio de {len(stations_for_analysis)} estaciones).")
             station_name_for_title = "Serie Regional"
-        # --- FIN BLOQUE MODIFICADO ---
 
         c1, c2 = st.columns(2)
         with c1:
@@ -4011,32 +4018,35 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         use_auto_arima = st.checkbox("Encontrar parámetros óptimos automáticamente (Auto-ARIMA)",
                                      value=False)
         
-        # --- INICIO BLOQUE MODIFICADO ---
-        # El botón se activa si (se seleccionó una estación) O (se seleccionó el promedio)
+        # --- NUEVO BLOQUE ENSO ---
+        use_enso_regressor_sarima = st.checkbox("Usar pronóstico ENSO como regresor (Recomendado)", key="sarima_enso_cb")
+        regresores_sarima = None
+        
+        if use_enso_regressor_sarima:
+            if 'enso_regressor_df_sarima' not in st.session_state:
+                st.warning("¡Error! Debe generar el 'Pronóstico ENSO' en la primera pestaña antes de poder usarlo.")
+                st.stop()
+            else:
+                regresores_sarima = st.session_state['enso_regressor_df_sarima']
+                st.success("Usando pronóstico ENSO como regresor.")
+        # --- FIN NUEVO BLOQUE ---
+
         if (station_to_forecast or analysis_type_sarima == "Promedio Regional") and st.button("Generar Pronóstico SARIMA"):
             
             with st.spinner(f"Preparando y completando datos (SARIMA) para {station_name_for_title}..."):
                 
                 if analysis_type_sarima == "Estación Individual":
-                    # Lógica para estación individual (la que ya teníamos)
                     original_station_data_sarima = \
                         df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
                                             station_to_forecast].copy()
-                else:
-                    # Lógica para Serie Regional
-                    # 1. Obtener todos los datos de las estaciones seleccionadas
+                else: # Promedio Regional
                     regional_data_full = df_full_monthly[
                         df_full_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)
                     ].copy()
-                    
-                    # 2. Calcular el promedio mensual
                     regional_data_avg = regional_data_full.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-                    
-                    # 3. "Disfrazar" la serie regional como si fuera una estación para que 'complete_series' funcione
                     regional_data_avg[Config.STATION_NAME_COL] = "Serie Regional"
                     original_station_data_sarima = regional_data_avg
 
-                # El resto del código funciona igual para ambas
                 from modules.data_processor import complete_series
                 ts_data_sarima = complete_series(original_station_data_sarima)
             
@@ -4055,23 +4065,22 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     with st.spinner("Entrenando y evaluando modelo SARIMA..."):
                         ts_hist, forecast_mean, forecast_ci, metrics, sarima_df_export = \
                             generate_sarima_forecast(ts_data_sarima, order, seasonal_order, forecast_horizon,
-                                                     test_size)
+                                                     test_size,
+                                                     regressors=regresores_sarima # <-- PASAR REGRESOR
+                                                    )
                         
-                        # Guardar el nombre de lo que se pronosticó
                         st.session_state['sarima_results'] = {
                             'forecast': sarima_df_export, 
                             'metrics': metrics, 
                             'history': ts_hist,
-                            'name': station_name_for_title # <-- Guardar el nombre
+                            'name': station_name_for_title
                         }
                     
-                    # ----- INICIO NUEVO BLOQUE DE GRÁFICO SARIMA -----
                     st.markdown("##### Resultados del Pronóstico")
                     st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
                     
                     fig_pronostico = go.Figure()
 
-                    # 1. Añadir banda de confianza
                     fig_pronostico.add_trace(go.Scatter(
                         x=forecast_ci.index, y=forecast_ci.iloc[:, 0], mode='lines',
                         line=dict(width=0), name='Incertidumbre (Baja)', legendgroup='forecast'
@@ -4081,15 +4090,11 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)',
                         name='Intervalo de Confianza', legendgroup='forecast'
                     ))
-
-                    # 2. Añadir la línea del pronóstico
                     fig_pronostico.add_trace(go.Scatter(
                         x=forecast_mean.index, y=forecast_mean, mode='lines',
                         line=dict(color='red', dash='dash', width=3),
                         name='Pronóstico SARIMA', legendgroup='forecast'
                     ))
-
-                    # 3. Añadir los datos reales (solo del conjunto de prueba)
                     test_data_plot = ts_hist.iloc[-test_size:]
                     fig_pronostico.add_trace(go.Scatter(
                         x=test_data_plot.index, y=test_data_plot, mode='markers',
@@ -4097,12 +4102,11 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     ))
 
                     fig_pronostico.update_layout(
-                        title=f"Pronóstico SARIMA para {station_name_for_title}", # <-- Título dinámico
+                        title=f"Pronóstico SARIMA para {station_name_for_title}",
                         xaxis_title="Fecha", yaxis_title="Precipitación (mm)", height=600,
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                     )
                     st.plotly_chart(fig_pronostico, use_container_width=True)
-                    # ----- FIN NUEVO BLOQUE DE GRÁFICO SARIMA -----
                     
                     st.markdown("##### Evaluación del Modelo")
                     st.info(f"El modelo se evaluó usando los últimos **{test_size} meses** de datos históricos como conjunto de prueba.")
@@ -4114,10 +4118,12 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     st.error(f"No se pudo generar el pronóstico SARIMA. Error: {e}")
                     st.exception(e)
 
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 8: PRONÓSTICO PROPHET (MODIFICADA) ---
+    # -------------------------------------------------------------------------
     with pronostico_prophet_tab:
         st.subheader("Pronóstico (Modelo Prophet)")
         
-        # --- INICIO BLOQUE MODIFICADO ---
         analysis_type_prophet = st.radio(
             "Seleccionar tipo de pronóstico Prophet:",
             ("Estación Individual", "Promedio Regional"),
@@ -4125,7 +4131,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         )
         
         station_to_forecast_prophet = None
-        station_name_for_title = "" # Para el título del gráfico
+        station_name_for_title = ""
 
         if analysis_type_prophet == "Estación Individual":
             station_to_forecast_prophet = st.selectbox("Seleccione una estación:",
@@ -4134,7 +4140,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         else:
             st.info(f"Se generará un pronóstico para la serie regional (promedio de {len(stations_for_analysis)} estaciones).")
             station_name_for_title = "Serie Regional"
-        # --- FIN BLOQUE MODIFICADO ---
         
         c1, c2 = st.columns(2)
         with c1:
@@ -4144,7 +4149,19 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
             test_size_prophet = st.slider("Meses para evaluación:", 12, 36, 12, step=6,
                                            key="prophet_test_size")
         
-        # --- INICIO BLOQUE MODIFICADO ---
+        # --- NUEVO BLOQUE ENSO ---
+        use_enso_regressor_prophet = st.checkbox("Usar pronóstico ENSO como regresor (Recomendado)", key="prophet_enso_cb")
+        regresores_prophet = None
+        
+        if use_enso_regressor_prophet:
+            if 'enso_regressor_df_prophet' not in st.session_state:
+                st.warning("¡Error! Debe generar el 'Pronóstico ENSO' en la primera pestaña antes de poder usarlo.")
+                st.stop()
+            else:
+                regresores_prophet = st.session_state['enso_regressor_df_prophet']
+                st.success("Usando pronóstico ENSO como regresor.")
+        # --- FIN NUEVO BLOQUE ---
+
         if (station_to_forecast_prophet or analysis_type_prophet == "Promedio Regional") and st.button("Generar Pronóstico Prophet"):
             
             with st.spinner(f"Preparando y completando datos (Prophet) para {station_name_for_title}..."):
@@ -4154,7 +4171,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
                                         station_to_forecast_prophet].copy()
                 else:
-                    # Lógica para Serie Regional
                     regional_data_full = df_full_monthly[
                         df_full_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)
                     ].copy()
@@ -4173,23 +4189,24 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     from modules.forecasting import generate_prophet_forecast
                     
                     with st.spinner("Entrenando y evaluando modelo Prophet..."):
-                        model, forecast, metrics = generate_prophet_forecast(ts_data_prophet,
-                                                                             forecast_horizon_prophet, test_size_prophet, regressors=None)
+                        model, forecast, metrics = generate_prophet_forecast(
+                            ts_data_prophet,
+                            forecast_horizon_prophet, 
+                            test_size_prophet, 
+                            regressors=regresores_prophet # <-- PASAR REGRESOR
+                        )
                     
-                    # Guardar el nombre de lo que se pronosticó
                     st.session_state['prophet_results'] = {
                         'forecast': forecast[['ds', 'yhat']], 
                         'metrics': metrics,
-                        'name': station_name_for_title # <-- Guardar el nombre
+                        'name': station_name_for_title
                     }
                     
-                    # ----- INICIO DEL NUEVO BLOQUE DE GRÁFICO -----
                     st.markdown("##### Resultados del Pronóstico")
                     st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
                     
                     fig_prophet = go.Figure()
                     
-                    # 1. Añadir banda de confianza
                     forecast_plot_data = forecast.iloc[-forecast_horizon_prophet:]
                     
                     fig_prophet.add_trace(go.Scatter(
@@ -4201,20 +4218,16 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         line=dict(width=0), fill='tonexty', fillcolor='rgba(0,176,246,0.2)',
                         name='Incertidumbre (Baja)', legendgroup='forecast'
                     ))
-                    
-                    # 2. Añadir la línea del pronóstico
                     fig_prophet.add_trace(go.Scatter(
                         x=forecast_plot_data['ds'], y=forecast_plot_data['yhat'], mode='lines',
                         line=dict(color='rgba(0,176,246,1)', width=3),
                         name='Pronóstico (yhat)', legendgroup='forecast'
                     ))
                     
-                    # 3. Renombrar ts_data_prophet para el gráfico
                     ts_data_prophet_renamed = ts_data_prophet.rename(columns={
                         Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'
                     })
                     
-                    # 4. Añadir los datos reales (solo del conjunto de prueba)
                     test_data_plot = ts_data_prophet_renamed.iloc[-test_size_prophet:]
                     fig_prophet.add_trace(go.Scatter(
                         x=test_data_plot['ds'], y=test_data_plot['y'], mode='markers',
@@ -4222,12 +4235,11 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     ))
 
                     fig_prophet.update_layout(
-                        title=f"Pronóstico Prophet para {station_name_for_title}", # <-- Título dinámico
+                        title=f"Pronóstico Prophet para {station_name_for_title}",
                         xaxis_title="Fecha (ds)", yaxis_title="Precipitación (y)", height=600,
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                     )
                     st.plotly_chart(fig_prophet, use_container_width=True)
-                    # ----- FIN DEL NUEVO BLOQUE DE GRÁFICO -----
 
                     st.markdown("##### Evaluación del Modelo")
                     st.info(f"El modelo se evaluó usando los últimos **{test_size_prophet} meses** de datos históricos como conjunto de prueba.")
@@ -4237,7 +4249,10 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 except Exception as e:
                     st.error(f"No se pudo generar el pronóstico con Prophet. Error: {e}")
                     st.exception(e)
-                        
+
+    # -------------------------------------------------------------------------
+    # --- PESTAÑA 9: SARIMA vs PROPHET (MODIFICADA) ---
+    # -------------------------------------------------------------------------
     with compare_forecast_tab:
         st.subheader("Comparación de Pronósticos: SARIMA vs Prophet")
         sarima_results = st.session_state.get('sarima_results')
@@ -4246,19 +4261,16 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         if not sarima_results or not prophet_results:
             st.warning("Debe generar un pronóstico SARIMA y Prophet en sus respectivas pestañas para poder compararlos.")
         
-        # --- INICIO BLOQUE MODIFICADO ---
-        # Comprobar que los pronósticos sean del mismo objetivo
+        # --- NUEVA COMPROBACIÓN: Asegurar que ambos pronósticos son del mismo objetivo ---
         elif sarima_results.get('name') != prophet_results.get('name'):
             st.error(f"Los pronósticos no son comparables.")
             st.warning(f"SARIMA se ejecutó para: **{sarima_results.get('name')}**")
             st.warning(f"Prophet se ejecutó para: **{prophet_results.get('name')}**")
             st.info("Por favor, ejecute ambos pronósticos para el mismo objetivo (ambos para 'Serie Regional' o ambos para la misma estación).")
-        # --- FIN BLOQUE MODIFICADO ---
         
         else:
             fig_compare = go.Figure()
             
-            # Gráfico de datos históricos (del resultado de SARIMA)
             if sarima_results.get('history') is not None:
                 hist_data = sarima_results['history']
                 # Mostrar solo los últimos 20 años de historia para un gráfico más limpio
@@ -4277,7 +4289,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                                                  mode='lines', name='Pronóstico Prophet', line=dict(color='blue', dash='dash')))
 
             fig_compare.update_layout(
-                title=f"Pronóstico Comparativo para {sarima_results.get('name')}", # <-- Título dinámico
+                title=f"Pronóstico Comparativo para {sarima_results.get('name')}", # Título dinámico
                 xaxis_title="Fecha",
                 yaxis_title="Precipitación (mm)", height=500, legend=dict(x=0.01, y=0.99)
             )
@@ -5424,6 +5436,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
