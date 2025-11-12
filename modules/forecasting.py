@@ -201,51 +201,69 @@ def generate_sarima_forecast(ts_data_raw, order, seasonal_order, horizon, test_s
 @st.cache_data
 def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=None):
     """Entrena, evalúa y genera un pronóstico con Prophet, incluyendo regresores opcionales."""
+    
+    # 1. Preparar datos de precipitación
     ts_data = ts_data_raw.rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
     ts_data = ts_data.drop_duplicates(subset=['ds'], keep='first')
-    ts_data['y'] = ts_data['y'].interpolate()
+    ts_data['y'] = ts_data['y'].interpolate(method='time')
 
     if len(ts_data) < test_size + 24:
         raise ValueError(f"Se necesitan al menos {test_size + 24} meses de datos para Prophet.")
 
-    if regressors is not None and not regressors.empty:
-        ts_data = pd.merge(ts_data, regressors.rename(columns={Config.DATE_COL: 'ds'}), on='ds', how='left')
-        for col in regressors.columns:
-            if col != Config.DATE_COL:
-                ts_data[col] = ts_data[col].interpolate()
-
-    train, test = ts_data.iloc[:-test_size], ts_data.iloc[-test_size:]
-
+    # 2. Inicializar el modelo de *evaluación*
     model = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
-    if regressors is not None:
+
+    # 3. Preparar regresores (si existen)
+    regressor_cols = []
+    if regressors is not None and not regressors.empty:
+        # Unir el pronóstico ENSO (regressors) con los datos de precipitación (ts_data)
+        ts_data = pd.merge(ts_data, regressors, on='ds', how='left')
+        
         for col in regressors.columns:
-            if col != Config.DATE_COL:
-                model.add_regressor(col)
+            if col == 'ds':
+                continue # 'ds' es la columna de fecha, no un regresor
+            
+            # Interpolar el regresor (ej. 'anomalia_oni') en la serie temporal completa
+            ts_data[col] = ts_data[col].interpolate(method='linear', limit_direction='both')
+            
+            # Añadir el regresor al modelo
+            model.add_regressor(col)
+            regressor_cols.append(col) # Guardar el nombre para usarlo en el modelo final
+
+    # 4. Dividir datos y entrenar modelo de evaluación
+    train, test = ts_data.iloc[:-test_size], ts_data.iloc[-test_size:]
     model.fit(train)
 
+    # 5. Evaluar modelo
     test_dates = model.make_future_dataframe(periods=test_size, freq='MS').tail(test_size)
-    if regressors is not None:
-        test_regressors = ts_data[ts_data['ds'].isin(test_dates['ds'])]
+    if regressor_cols: # Si usamos regresores, añadirlos a las fechas de prueba
+        # Los datos ya están en 'ts_data' (gracias al merge anterior)
+        test_regressors = ts_data[ts_data['ds'].isin(test_dates['ds'])][['ds'] + regressor_cols]
         test_dates = pd.merge(test_dates, test_regressors, on='ds', how='left')
-        test_dates.interpolate(inplace=True)
+        # Interpolar por si acaso
+        test_dates[regressor_cols] = test_dates[regressor_cols].interpolate(method='linear', limit_direction='both')
     
     y_pred_test = model.predict(test_dates)['yhat']
     metrics = evaluate_forecast(test['y'], y_pred_test)
 
+    # 6. Entrenar modelo completo (Full Model)
     full_model = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
-    if regressors is not None:
-        for col in regressors.columns:
-            if col != Config.DATE_COL:
-                full_model.add_regressor(col)
-    full_model.fit(ts_data)
+    if regressor_cols:
+        for col in regressor_cols: # Añadir los mismos regresores al modelo final
+            full_model.add_regressor(col)
+    
+    full_model.fit(ts_data) # Entrenar con TODOS los datos
 
+    # 7. Crear DataFrame futuro
     future = full_model.make_future_dataframe(periods=horizon, freq='MS')
-    if regressors is not None:
-        last_regressor_values = regressors.iloc[-1:].drop(Config.DATE_COL, axis=1)
-        future_regressors = pd.DataFrame(np.tile(last_regressor_values.values, (horizon, 1)), columns=last_regressor_values.columns)
-        future_regressors['ds'] = future['ds'].iloc[-horizon:]
-        future = pd.merge(future, future_regressors, on='ds', how='left')
+    
+    if regressor_cols:
+        # Unir los valores futuros del regresor (que están en 'regressors')
+        future = pd.merge(future, regressors, on='ds', how='left')
+        # Rellenar (interpolar) los valores del regresor en el futuro
+        future[regressor_cols] = future[regressor_cols].interpolate(method='linear', limit_direction='both')
 
+    # 8. Generar pronóstico final
     forecast = full_model.predict(future)
     return full_model, forecast, metrics
 
@@ -271,6 +289,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
