@@ -3216,10 +3216,16 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
+        
+    # --- INICIO BLOQUE AÑADIDO (Helper de Descarga) ---
+    def convert_df_to_csv_corr(df):
+        """Helper local para convertir DF a CSV con ;"""
+        # index=False es el default, pero lo ponemos por claridad
+        return df.to_csv(index=False, sep=';').encode('utf-8')
+    # --- FIN BLOQUE AÑADIDO ---
 
     st.markdown("Esta sección cuantifica la relación lineal entre la precipitación y diferentes variables utilizando el coeficiente de correlación de Pearson.")
 
-    # AÑADIMOS UNA NUEVA PESTAÑA A LA LISTA
     tab_names = ["Correlación con ENSO (ONI)", "Matriz entre Estaciones", "Comparación 1 a 1", "Correlación con Otros Índices"]
 
     enso_corr_tab, matrix_corr_tab, station_corr_tab, indices_climaticos_tab = \
@@ -3229,7 +3235,6 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
         if Config.ENSO_ONI_COL not in df_monthly_filtered.columns or \
            df_monthly_filtered[Config.ENSO_ONI_COL].isnull().all():
             st.warning(f"No se puede realizar el análisis de correlación con ENSO. La columna '{Config.ENSO_ONI_COL}' no fue encontrada o no tiene datos en el período seleccionado.")
-            # [CORRECCIÓN] Cambiado 'return' por 'st.stop()' para detener solo esta pestaña
             st.stop() 
 
         st.subheader("Configuración del Análisis de Correlación con ENSO")
@@ -3245,23 +3250,25 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
 
         if df_corr_analysis.empty:
             st.warning("No hay datos coincidentes entre la precipitación y el ENSO para la selección actual.")
-            st.stop() # [CORRECCIÓN] Cambiado 'return' por 'st.stop()'
+            st.stop()
 
         analysis_level = st.radio("Nivel de Análisis de Correlación con ENSO", ["Promedio de la selección", "Por Estación Individual"], horizontal=True, key="enso_corr_level")
 
         df_plot_corr = pd.DataFrame()
         title_text = ""
+        station_to_corr = "regional" # Default para el nombre del archivo
 
         if analysis_level == "Por Estación Individual":
-            station_to_corr = st.selectbox("Seleccione Estación:",
+            station_to_corr_select = st.selectbox("Seleccione Estación:",
                                            options=sorted(df_corr_analysis[Config.STATION_NAME_COL].unique()),
                                            key="enso_corr_station")
-            if station_to_corr:
+            if station_to_corr_select:
                 df_plot_corr = df_corr_analysis[df_corr_analysis[Config.STATION_NAME_COL] ==
-                                                station_to_corr].copy()
-                title_text = f"Correlación para la estación: {station_to_corr}"
+                                                station_to_corr_select].copy()
+                title_text = f"Correlación para la estación: {station_to_corr_select}"
+                station_to_corr = station_to_corr_select # Actualizar para nombre de archivo
             else:
-                st.stop()  # Si no se selecciona estación [CORRECCIÓN]
+                st.stop()
 
         else:
             df_plot_corr = df_corr_analysis.groupby(Config.DATE_COL).agg(
@@ -3282,10 +3289,9 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                 oni_column_to_use = 'anomalia_oni'
                 lag_text = ""
 
-            # [CORRECCIÓN] Añadir chequeo de datos > 2 después del shift
             if len(df_plot_corr) > 2:
                 corr, p_value = stats.pearsonr(df_plot_corr[oni_column_to_use],
-                                            df_plot_corr['precipitation'])
+                                                 df_plot_corr['precipitation'])
 
                 st.subheader(title_text + lag_text)
 
@@ -3305,6 +3311,18 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                             'precipitation': 'Precipitación Mensual (mm)'}
                 )
                 st.plotly_chart(fig_corr, use_container_width=True)
+                
+                # --- INICIO BLOQUE AÑADIDO ---
+                st.markdown("---")
+                st.download_button(
+                    label="Descargar Datos (ENSO vs Precipitación)",
+                    data=convert_df_to_csv_corr(df_plot_corr),
+                    file_name=f"corr_enso_vs_precip_{station_to_corr}.csv",
+                    mime="text/csv",
+                    key="dl_corr_enso"
+                )
+                # --- FIN BLOQUE AÑADIDO ---
+                
             else:
                 st.warning("No hay suficientes datos superpuestos después de aplicar el desfase temporal.")
 
@@ -3329,12 +3347,23 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                 text_auto=True,
                 aspect="auto",
                 color_continuous_scale='RdBu_r',
-                zmin=-1, # [CORRECCIÓN] Fijar rango de color
-                zmax=1,  # [CORRECCIÓN] Fijar rango de color
+                zmin=-1,
+                zmax=1,
                 title="Mapa de Calor de Correlaciones de Precipitación Mensual"
             )
             fig_matrix.update_layout(height=max(400, len(stations_for_analysis) * 25))
             st.plotly_chart(fig_matrix, use_container_width=True)
+            
+            # --- INICIO BLOQUE AÑADIDO ---
+            st.markdown("---")
+            st.download_button(
+                label="Descargar Matriz de Correlación (CSV)",
+                data=corr_matrix.to_csv(sep=';').encode('utf-8'), # Matriz necesita el índice
+                file_name="corr_matriz_estaciones.csv",
+                mime="text/csv",
+                key="dl_corr_matrix"
+            )
+            # --- FIN BLOQUE AÑADIDO ---
 
     with station_corr_tab:
         if len(stations_for_analysis) < 2:
@@ -3344,7 +3373,7 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
             station_options = sorted(stations_for_analysis)
             col1, col2 = st.columns(2)
             station1_name = col1.selectbox("Estación 1:", options=station_options,
-                                           key="corr_station_1")
+                                             key="corr_station_1")
             station2_name = col2.selectbox("Estación 2:", options=station_options, index=1 if
                                            len(station_options) > 1 else 0, key="corr_station_2")
 
@@ -3372,12 +3401,11 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                     else:
                         st.warning(f"La correlación no es estadísticamente significativa (p={p_value:.4f}).")
 
-                    # [CORRECCIÓN] Usar stats.linregress para obtener la línea de tendencia
                     try:
                         slope, intercept, r_val, p_val_reg, std_err = stats.linregress(df_merged[station1_name], df_merged[station2_name])
                         st.info(f"Ecuación de regresión: y = {slope:.2f}x + {intercept:.2f} (R² = {r_val**2:.3f})")
                     except Exception:
-                         st.info("No se pudo calcular la regresión lineal.")
+                        st.info("No se pudo calcular la regresión lineal.")
 
 
                     fig_scatter = px.scatter(
@@ -3387,6 +3415,18 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                                 station2_name: f'Precipitación en {station2_name} (mm)'}
                     )
                     st.plotly_chart(fig_scatter, use_container_width=True)
+                    
+                    # --- INICIO BLOQUE AÑADIDO ---
+                    st.markdown("---")
+                    st.download_button(
+                        label=f"Descargar Datos ({station1_name} vs {station2_name})",
+                        data=convert_df_to_csv_corr(df_merged),
+                        file_name=f"corr_{station1_name}_vs_{station2_name}.csv",
+                        mime="text/csv",
+                        key="dl_corr_1v1"
+                    )
+                    # --- FIN BLOQUE AÑADIDO ---
+                    
                 else:
                     st.warning("No hay suficientes datos superpuestos para calcular la correlación para las estaciones seleccionadas.")
 
@@ -3394,7 +3434,7 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
         st.subheader("Análisis de Correlación con Índices Climáticos (SOI, IOD)")
         available_indices = []
         if Config.SOI_COL in df_monthly_filtered.columns and not \
-           df_monthly_filtered[Config.SOI_COL].isnull().all():
+            df_monthly_filtered[Config.SOI_COL].isnull().all():
             available_indices.append("SOI")
         if Config.IOD_COL in df_monthly_filtered.columns and not \
            df_monthly_filtered[Config.IOD_COL].isnull().all():
@@ -3422,7 +3462,7 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                                                      index_col_name], inplace=True)
                 else:
                     st.error(f"La columna para el índice '{selected_index}' no se encontró en los datos de la estación.")
-                    st.stop() # [CORRECCIÓN]
+                    st.stop()
                     
 
                 if not df_merged_indices.empty and len(df_merged_indices) > 2:
@@ -3444,6 +3484,18 @@ def display_correlation_tab(df_monthly_filtered, stations_for_analysis, analysis
                                 Config.PRECIPITATION_COL: 'Precipitación Mensual (mm)'}
                     )
                     st.plotly_chart(fig_scatter_indices, use_container_width=True)
+                    
+                    # --- INICIO BLOQUE AÑADIDO ---
+                    st.markdown("---")
+                    st.download_button(
+                        label=f"Descargar Datos ({selected_index} vs {selected_station_corr})",
+                        data=convert_df_to_csv_corr(df_merged_indices),
+                        file_name=f"corr_{selected_index}_vs_{selected_station_corr}.csv",
+                        mime="text/csv",
+                        key="dl_corr_indices"
+                    )
+                    # --- FIN BLOQUE AÑADIDO ---
+                    
                 else:
                     st.warning("No hay suficientes datos superpuestos entre la estación y el índice para calcular la correlación.")
 
@@ -5327,6 +5379,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
