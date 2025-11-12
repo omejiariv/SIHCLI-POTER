@@ -202,6 +202,7 @@ def generate_sarima_forecast(ts_data_raw, order, seasonal_order, horizon, test_s
 def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=None):
     """Entrena, evalúa y genera un pronóstico con Prophet, incluyendo regresores opcionales."""
     ts_data = ts_data_raw.rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
+    ts_data = ts_data.drop_duplicates(subset=['ds'], keep='first')
     ts_data['y'] = ts_data['y'].interpolate()
 
     if len(ts_data) < test_size + 24:
@@ -270,6 +271,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
