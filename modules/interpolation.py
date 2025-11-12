@@ -163,25 +163,37 @@ def perform_loocv_for_all_methods(_year, _gdf_metadata, _df_anual_non_na):
 # PESTAÑA DE SUPERFICIES DE INTERPOLACIÓN
 # -----------------------------------------------------------------------------
 @st.cache_data
-def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_metadata, df_anual_non_na):
-    """Crea una superficie de interpolación y calcula el error RMSE."""
+def create_interpolation_surface(df_period_mean, period_name, method, variogram_model, gdf_bounds, gdf_metadata):
+    """
+    Crea una superficie de interpolación para un DataFrame de precipitación promedio de un período.
+    
+    Args:
+        df_period_mean (pd.DataFrame): DataFrame con [Config.STATION_NAME_COL, Config.PRECIPITATION_COL]
+                                      conteniendo la precipitación media del período.
+        period_name (str): Nombre del período (ej. "1990-2000") para el título del gráfico.
+        method (str): "Kriging Ordinario", "IDW", etc.
+        variogram_model (str): Modelo de variograma a usar.
+        gdf_bounds (list): Límites [minx, miny, maxx, maxy] para la grilla.
+        gdf_metadata (gpd.GeoDataFrame): Metadatos de las estaciones (para unir geometría y elevación).
+    """
 
     fig_var = None
     error_msg = None
     
-    # --- Data Preparation ---
-    df_year = pd.merge(
-        df_anual_non_na[df_anual_non_na[Config.YEAR_COL] == year],
+    # --- Data Preparation (Modificada) ---
+    # Unir los datos de precipitación promedio con los metadatos (geometría, etc.)
+    df_clean = pd.merge(
+        df_period_mean,
         gdf_metadata,
         on=Config.STATION_NAME_COL,
-        how='inner'
+        how='inner' 
     )
     
     clean_cols = [Config.LONGITUDE_COL, Config.LATITUDE_COL, Config.PRECIPITATION_COL]
-    if method == "Kriging con Deriva Externa (KED)" and Config.ELEVATION_COL in df_year.columns:
+    if method == "Kriging con Deriva Externa (KED)" and Config.ELEVATION_COL in df_clean.columns:
         clean_cols.append(Config.ELEVATION_COL)
         
-    df_clean = df_year.dropna(subset=clean_cols).copy()
+    df_clean = df_clean.dropna(subset=clean_cols).copy()
     df_clean[Config.LONGITUDE_COL] = pd.to_numeric(df_clean[Config.LONGITUDE_COL], errors='coerce')
     df_clean[Config.LATITUDE_COL] = pd.to_numeric(df_clean[Config.LATITUDE_COL], errors='coerce')
     df_clean[Config.PRECIPITATION_COL] = pd.to_numeric(df_clean[Config.PRECIPITATION_COL], errors='coerce')
@@ -191,7 +203,7 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
     df_clean = df_clean.drop_duplicates(subset=[Config.LONGITUDE_COL, Config.LATITUDE_COL])
 
     if len(df_clean) < 4:
-        error_msg = f"Se necesitan al menos 4 estaciones con datos válidos para el año {year} para interpolar (encontradas: {len(df_clean)})."
+        error_msg = f"Se necesitan al menos 4 estaciones con datos válidos para el período {period_name} para interpolar (encontradas: {len(df_clean)})."
         fig = go.Figure().update_layout(title=error_msg, xaxis_visible=False, yaxis_visible=False)
         return fig, None, error_msg
 
@@ -200,15 +212,9 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
     vals = df_clean[Config.PRECIPITATION_COL].values
     elevs = df_clean[Config.ELEVATION_COL].values if Config.ELEVATION_COL in df_clean else None
 
-    # Calculate RMSE using the auxiliary function
-    rmse = None
-    try:
-        # --- CORRECCIÓN ---
-        # Llamamos a la función _perform_loocv que ahora sí existe
-        metrics = _perform_loocv(method, lons, lats, vals, elevs) 
-        rmse = metrics.get('RMSE')
-    except Exception as e_rmse:
-         print(f"Warning: Error calculando RMSE con _perform_loocv: {e_rmse}")
+    # --- CÁLCULO DE RMSE ELIMINADO ---
+    # El RMSE basado en LOOCV solo tiene sentido para un año específico,
+    # no para un promedio de período.
 
     # Define grid based on bounds
     if gdf_bounds is None or len(gdf_bounds) != 4 or not all(np.isfinite(gdf_bounds)):
@@ -237,7 +243,7 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
                 ax.plot(bin_center, gamma, 'o', label='Experimental')
                 model.plot(ax=ax, label='Modelo Ajustado')
                 ax.set_xlabel('Distancia'); ax.set_ylabel('Semivarianza')
-                ax.set_title(f'Variograma para {year}'); ax.legend()
+                ax.set_title(f'Variograma para {period_name}'); ax.legend()
                 plt.tight_layout() 
                 plt.close(fig_variogram_plt)
             except Exception as e_plot:
@@ -311,7 +317,7 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
              f"<b>{row[Config.STATION_NAME_COL]}</b><br>" +
              f"Municipio: {row.get(Config.MUNICIPALITY_COL, 'N/A')}<br>" + 
              f"Altitud: {row.get(Config.ALTITUDE_COL, 'N/A')} m<br>" +     
-             f"Precipitación: {row[Config.PRECIPITATION_COL]:.0f} mm"
+             f"Ppt. Promedio: {row[Config.PRECIPITATION_COL]:.0f} mm"
              for _, row in df_clean.iterrows() 
         ]
 
@@ -323,15 +329,10 @@ def create_interpolation_surface(year, method, variogram_model, gdf_bounds, gdf_
             text=hover_texts 
         ))
         
-        if rmse is not None:
-            fig.add_annotation(
-                x=0.01, y=0.99, xref="paper", yref="paper",
-                text=f"<b>RMSE: {rmse:.1f} mm</b>", align='left',
-                showarrow=False, font=dict(size=12, color="black"),
-                bgcolor="rgba(255, 255, 255, 0.7)", bordercolor="black", borderwidth=1
-            )
+        # Anotación de RMSE eliminada
+        
         fig.update_layout(
-            title=f"Precipitación en {year} ({method})",
+            title=f"Precipitación Promedio en {period_name} ({method})", # <-- Título Modificado
             xaxis_title="Longitud", yaxis_title="Latitud", height=600,
             legend=dict(x=0.01, y=0.01, bgcolor="rgba(0,0,0,0)")
         )
@@ -380,3 +381,4 @@ def create_kriging_by_basin(gdf_points, grid_lon, grid_lat, value_col='Valor'):
         variance = np.zeros_like(grid_z)
 
     return grid_z, variance
+
