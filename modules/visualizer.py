@@ -2132,7 +2132,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                         except Exception as e_val: error_val = f"Error validación: {e_val}\n{traceback.format_exc() if import_tb else ''}"
 
                         if results_df is not None and not results_df.empty:
-                            st.dataframe(results_df.style.format({'RMSE': '{:.2f}'}), use_container_width=True)
+                            st.dataframe(results_df.style.format({'RMSE': '{:.0f}', 'MAE': '{:.0f}'}), use_container_width=True)
                             fig_val = px.bar(results_df.sort_values('RMSE'), x='Método', y='RMSE', title=f"RMSE por Método (LOOCV - {selected_year_val})", labels={'RMSE': 'RMSE (mm)'})
                             fig_val.update_layout(xaxis_title="Método")
                             st.plotly_chart(fig_val, use_container_width=True)
@@ -5005,6 +5005,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
