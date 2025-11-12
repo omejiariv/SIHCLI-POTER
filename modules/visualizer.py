@@ -333,29 +333,30 @@ def display_map_controls(container_object, key_prefix):
             "transparent": True,
             "attr": "IDEAM",
         },
-        # Nuevas capas GeoJSON (CON TOOLTIPS)
+        # Nuevas capas GeoJSON (CON TOOLTIPS USANDO CAMPOS CORRECTOS)
         "Predios Ejecutados": {
             "type": "geojson",
             "url": f"{base_url}PrediosEjecutados.geojson",
             "attr": "Predios",
             "style": {"color": "#ff7800", "weight": 2, "opacity": 0.7},
-            "tooltip_fields": ["Nombre", "Area_ha"] # <-- CAMBIO (Adivinación de campos)
+            "tooltip_fields": ["NOMBRE_PRE", "NOMB_MPIO", "AREA_HA", "AÑO_ACUER"] 
         },
         "Subcuencas de Influencia": {
             "type": "geojson",
             "url": f"{base_url}SubcuencasAinfluencia.geojson",
             "attr": "Subcuencas",
             "style": {"color": "#4682B4", "weight": 2, "opacity": 0.7},
-            "tooltip_fields": ["SUBC_LBL", "Area_km2"] # <-- CAMBIO (Usando 'SUBC_LBL' de tu config)
+            "tooltip_fields": ["SUBC_LBL", "depto_region", "Shape_Area"] 
         },
         "Municipios de Antioquia": {
             "type": "geojson",
             "url": f"{base_url}MunicipiosAntioquia.geojson",
             "attr": "Municipios Antioquia",
             "style": {"color": "#33a02c", "weight": 1, "opacity": 0.6},
-            "tooltip_fields": ["municipio"] # <-- CAMBIO (Usando 'municipio' de tu config)
+            "tooltip_fields": ["MPIO_CNMBR", "DPTO_CNMBR"] 
         }
     }
+    
     selected_base_map_name = container_object.selectbox(
         "Seleccionar Mapa Base",
         list(base_map_options.keys()),
@@ -541,6 +542,7 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
                         attr=layer_name
                     ).add_to(m)
 
+                # --- INICIO DEL BLOQUE DE REEMPLAZO ---
                 elif layer_type == "geojson":
                     geojson_data = None
                     try:
@@ -553,6 +555,26 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
                         fg.add_to(m)
                         continue
 
+                    # 1. Crear el Tooltip ANTES de la lógica de simplificación
+                    tooltip_config = None
+                    tooltip_fields = layer_config.get("tooltip_fields")
+                    
+                    if tooltip_fields:
+                        try:
+                            # Crear etiquetas amigables (ej: "SUBC_LBL" -> "Subc lbl:")
+                            aliases = [f"{field.replace('_', ' ').capitalize()}:" for field in tooltip_fields]
+                            
+                            tooltip_config = folium.GeoJsonTooltip(
+                                fields=tooltip_fields,
+                                aliases=aliases,
+                                sticky=True, # El tooltip sigue al mouse
+                                style=("background-color: rgba(255,255,255,0.8); color: black; font-family: sans-serif; font-size: 12px; padding: 10px;")
+                            )
+                        except Exception as e_tooltip:
+                            print(f"Error creando tooltip para {layer_name}: {e_tooltip}")
+                            tooltip_config = None # Desactivar tooltip si falla
+
+                    # 2. Reutilizar la lógica de simplificación que YA TENÍAS
                     # medir tamaño aproximado
                     try:
                         geojson_bytes = json.dumps(geojson_data).encode('utf-8')
@@ -569,16 +591,38 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
                             gdf_temp['geometry'] = gdf_temp.geometry.simplify(tolerance=0.001, preserve_topology=True)
                             # build simplified geojson
                             simplified = gdf_temp.__geo_interface__
-                            folium.GeoJson(simplified, name=layer_name, style_function=lambda x: layer_config.get("style", {})).add_to(fg)
+                            
+                            # Añadir GeoJson CON tooltip
+                            folium.GeoJson(
+                                simplified, 
+                                name=layer_name, 
+                                style_function=lambda x: layer_config.get("style", {}),
+                                tooltip=tooltip_config, # <-- AÑADIDO
+                                highlight_function=lambda x: {'weight': 3, 'color': '#FFFF00', 'fillOpacity': 0.1} # Resaltado
+                            ).add_to(fg)
+                            
                         except Exception as e_simp:
-                            # Fallback: si falla geopandas, intentamos añadir el geojson original (puede ser pesado)
-                            folium.GeoJson(geojson_data, name=layer_name, style_function=lambda x: layer_config.get("style", {})).add_to(fg)
-                            # además añadimos una nota para el usuario
+                            # Fallback CON tooltip
+                            folium.GeoJson(
+                                geojson_data, 
+                                name=layer_name, 
+                                style_function=lambda x: layer_config.get("style", {}),
+                                tooltip=tooltip_config, # <-- AÑADIDO
+                                highlight_function=lambda x: {'weight': 3, 'color': '#FFFF00', 'fillOpacity': 0.1} # Resaltado
+                            ).add_to(fg)
                             folium.Marker(location=location, popup=f"Capa '{layer_name}' añadida (original, grande).").add_to(fg)
                     else:
-                        folium.GeoJson(geojson_data, name=layer_name, style_function=lambda x: layer_config.get("style", {})).add_to(fg)
+                        # Archivo pequeño CON tooltip
+                        folium.GeoJson(
+                            geojson_data, 
+                            name=layer_name, 
+                            style_function=lambda x: layer_config.get("style", {}),
+                            tooltip=tooltip_config, # <-- AÑADIDO
+                            highlight_function=lambda x: {'weight': 3, 'color': '#FFFF00', 'fillOpacity': 0.1} # Resaltado
+                        ).add_to(fg)
 
                     fg.add_to(m)
+                # --- FIN DEL BLOQUE DE REEMPLAZO ---
 
                 else:  # tile
                     folium.TileLayer(tiles=url, attr=layer_name, name=layer_name, overlay=True, control=True, show=False).add_to(m)
@@ -5191,6 +5235,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
