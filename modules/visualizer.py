@@ -3661,13 +3661,58 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
 
-    tab_names = ["Análisis Lineal", "Tendencia Mann-Kendall", "Tabla Comparativa",
+    tab_names = ["Pronóstico ENSO", "Análisis Lineal", "Tendencia Mann-Kendall", "Tabla Comparativa",
                  "Descomposición de Series", "Autocorrelación (ACF/PACF)", "Pronóstico SARIMA",
                  "Pronóstico Prophet", "SARIMA vs Prophet"]
-    tendencia_individual_tab, mann_kendall_tab, tendencia_tabla_tab, \
+    pronostico_enso_tab, tendencia_individual_tab, mann_kendall_tab, tendencia_tabla_tab, \
         descomposicion_tab, autocorrelacion_tab, pronostico_sarima_tab, \
         pronostico_prophet_tab, compare_forecast_tab = st.tabs(tab_names)
 
+    with pronostico_enso_tab:
+        st.subheader("Pronóstico del Índice ENSO (ONI)")
+
+        # Preparar datos de ENSO para Prophet
+        df_enso_prophet = df_enso.rename(columns={Config.DATE_COL: 'ds', Config.ENSO_ONI_COL: 'y'})
+        df_enso_prophet = df_enso_prophet[['ds', 'y']].dropna()
+
+        horizon_enso = st.slider("Meses a pronosticar (ENSO):", 12, 36, 12, key="enso_horizon")
+
+        if st.button("Generar Pronóstico ENSO (con Prophet)"):
+            with st.spinner("Entrenando modelo ENSO..."):
+                # (Aquí iría la lógica de generate_prophet_forecast adaptada para ENSO)
+
+                # 1. Entrenar el modelo
+                model_enso = Prophet(yearly_seasonality=True).fit(df_enso_prophet)
+
+                # 2. Crear fechas futuras
+                future_enso = model_enso.make_future_dataframe(periods=horizon_enso, freq='MS')
+
+                # 3. Generar el pronóstico
+                forecast_enso = model_enso.predict(future_enso)
+
+                # 4. ¡GUARDARLO EN LA SESIÓN!
+                st.session_state['future_enso_forecast'] = forecast_enso[['ds', 'yhat']]
+                st.session_state['model_enso_fitted'] = model_enso
+
+                st.success("¡Pronóstico ENSO generado y listo para usar!")
+
+        # 5. Mostrar el gráfico (si ya se generó)
+        if 'model_enso_fitted' in st.session_state and 'future_enso_forecast' in st.session_state:
+            fig_enso = st.session_state['model_enso_fitted'].plot(st.session_state['future_enso_forecast'])
+            st.pyplot(fig_enso)
+
+            # 6. Mostrar la clasificación (Niño/Niña/Neutral)
+            st.subheader("Clasificación del Pronóstico")
+            forecast_data = st.session_state['future_enso_forecast'].tail(horizon_enso)
+
+            def classify_enso(yhat):
+                if yhat >= 0.5: return "El Niño 🔴"
+                if yhat <= -0.5: return "La Niña 🔵"
+                return "Neutral ⚪"
+
+            forecast_data['Clasificación'] = forecast_data['yhat'].apply(classify_enso)
+            st.dataframe(forecast_data[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}))
+                                        
     with tendencia_individual_tab:
         st.subheader("Tendencia de Precipitación Anual (Regresión Lineal)")
         analysis_type = st.radio("Tipo de Análisis de Tendencia:", ["Promedio de la selección",
@@ -5379,6 +5424,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
