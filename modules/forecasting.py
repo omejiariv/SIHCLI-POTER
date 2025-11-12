@@ -158,6 +158,7 @@ def evaluate_forecast(y_true, y_pred):
 def generate_sarima_forecast(ts_data_raw, order, seasonal_order, horizon, test_size=12, regressors=None):
     """Entrena, evalúa y genera un pronóstico con SARIMAX, incluyendo regresores opcionales."""
     ts_data = ts_data_raw[[Config.DATE_COL, Config.PRECIPITATION_COL]].copy()
+    ts_data = ts_data.drop_duplicates(subset=[Config.DATE_COL], keep='first')
     ts_data = ts_data.set_index(Config.DATE_COL).sort_index()
     ts = ts_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time').dropna()
 
@@ -269,5 +270,6 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
