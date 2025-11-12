@@ -3815,22 +3815,88 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                                     station_to_forecast_prophet].copy()
                 from modules.data_processor import complete_series # Asume importación
                 ts_data_prophet = complete_series(original_station_data)
+                
                 if len(ts_data_prophet.dropna(subset=[Config.PRECIPITATION_COL])) < \
                    test_size_prophet + 24:
                     st.warning(f"Incluso después de completar, no hay suficientes datos para un pronóstico confiable.")
                 else:
                     try:
                         from modules.forecasting import generate_prophet_forecast
-                        from prophet.plot import plot_plotly
+                        # from prophet.plot import plot_plotly # Ya no se necesita
+                        
                         with st.spinner("Entrenando y evaluando modelo Prophet..."):
+                            # Asegúrate de añadir @st.cache_data a esta función en forecasting.py
                             model, forecast, metrics = generate_prophet_forecast(ts_data_prophet,
                                                                                  forecast_horizon_prophet, test_size_prophet, regressors=None)
 
                         st.session_state['prophet_results'] = {'forecast': forecast[['ds', 'yhat']], 'metrics':
                                                                metrics}
+                        
+                        # ----- INICIO DEL NUEVO BLOQUE DE GRÁFICO -----
                         st.markdown("##### Resultados del Pronóstico")
-                        fig_prophet = plot_plotly(model, forecast)
+                        st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
+                        
+                        fig_prophet = go.Figure()
+                        
+                        # 1. Añadir banda de confianza (Intervalo de Incertidumbre)
+                        # Seleccionamos solo el pronóstico futuro
+                        forecast_plot_data = forecast.iloc[-forecast_horizon_prophet:]
+                        
+                        fig_prophet.add_trace(go.Scatter(
+                            x=forecast_plot_data['ds'],
+                            y=forecast_plot_data['yhat_upper'],
+                            mode='lines',
+                            line=dict(width=0),
+                            name='Incertidumbre (Alta)',
+                            legendgroup='forecast'
+                        ))
+                        fig_prophet.add_trace(go.Scatter(
+                            x=forecast_plot_data['ds'],
+                            y=forecast_plot_data['yhat_lower'],
+                            mode='lines',
+                            line=dict(width=0),
+                            fill='tonexty',
+                            fillcolor='rgba(0,176,246,0.2)',
+                            name='Incertidumbre (Baja)',
+                            legendgroup='forecast'
+                        ))
+                        
+                        # 2. Añadir la línea del pronóstico (yhat)
+                        fig_prophet.add_trace(go.Scatter(
+                            x=forecast_plot_data['ds'],
+                            y=forecast_plot_data['yhat'],
+                            mode='lines',
+                            line=dict(color='rgba(0,176,246,1)', width=3),
+                            name='Pronóstico (yhat)',
+                            legendgroup='forecast'
+                        ))
+                        
+                        # 3. Renombrar ts_data_prophet para el gráfico
+                        ts_data_prophet_renamed = ts_data_prophet.rename(columns={
+                            Config.DATE_COL: 'ds', 
+                            Config.PRECIPITATION_COL: 'y'
+                        })
+                        
+                        # 4. Añadir los datos reales (solo del conjunto de prueba)
+                        test_data_plot = ts_data_prophet_renamed.iloc[-test_size_prophet:]
+                        fig_prophet.add_trace(go.Scatter(
+                            x=test_data_plot['ds'],
+                            y=test_data_plot['y'],
+                            mode='markers',
+                            marker=dict(color='black', size=5),
+                            name='Datos Reales (Prueba)'
+                        ))
+
+                        fig_prophet.update_layout(
+                            title=f"Pronóstico Prophet para {station_to_forecast_prophet}",
+                            xaxis_title="Fecha (ds)",
+                            yaxis_title="Precipitación (y)",
+                            height=600,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
                         st.plotly_chart(fig_prophet, use_container_width=True)
+                        # ----- FIN DEL NUEVO BLOQUE DE GRÁFICO -----
+
                         st.markdown("##### Evaluación del Modelo")
                         st.info(f"El modelo se evaluó usando los últimos **{test_size_prophet} meses** de datos históricos como conjunto de prueba.")
                         m1, m2 = st.columns(2)
@@ -3838,7 +3904,8 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         m2.metric("MAE", f"{metrics['MAE']:.2f}")
                     except Exception as e:
                         st.error(f"No se pudo generar el pronóstico con Prophet. Error: {e}")
-
+                        st.exception(e) # Añadido para más detalles de depuración
+                        
     with compare_forecast_tab:
         st.subheader("Comparación de Pronósticos: SARIMA vs Prophet")
         sarima_results = st.session_state.get('sarima_results')
@@ -5005,6 +5072,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
