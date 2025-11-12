@@ -3757,9 +3757,13 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         use_auto_arima = st.checkbox("Encontrar parámetros óptimos automáticamente (Auto-ARIMA)",
                                       value=True)
         if station_to_forecast and st.button("Generar Pronóstico SARIMA"):
-            ts_data_sarima = \
-                df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] ==
-                                    station_to_forecast].copy()
+            with st.spinner(f"Preparando y completando datos (SARIMA) para {station_to_forecast}..."):
+                original_station_data_sarima = \
+                    df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
+                                        station_to_forecast].copy()
+                from modules.data_processor import complete_series # Asume importación
+                ts_data_sarima = complete_series(original_station_data_sarima)
+    
             if len(ts_data_sarima.dropna(subset=[Config.PRECIPITATION_COL])) < test_size + 36:
                 st.warning("No hay suficientes datos para un pronóstico confiable (se necesitan al menos 3 años más que el período de evaluación).")
             else:
@@ -5072,6 +5076,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
