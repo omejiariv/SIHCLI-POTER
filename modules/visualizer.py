@@ -333,27 +333,29 @@ def display_map_controls(container_object, key_prefix):
             "transparent": True,
             "attr": "IDEAM",
         },
-        # Nuevas capas GeoJSON
+        # Nuevas capas GeoJSON (CON TOOLTIPS)
         "Predios Ejecutados": {
             "type": "geojson",
             "url": f"{base_url}PrediosEjecutados.geojson",
             "attr": "Predios",
-            "style": {"color": "#ff7800", "weight": 2, "opacity": 0.7}
+            "style": {"color": "#ff7800", "weight": 2, "opacity": 0.7},
+            "tooltip_fields": ["Nombre", "Area_ha"] # <-- CAMBIO (Adivinación de campos)
         },
         "Subcuencas de Influencia": {
             "type": "geojson",
             "url": f"{base_url}SubcuencasAinfluencia.geojson",
             "attr": "Subcuencas",
-            "style": {"color": "#4682B4", "weight": 2, "opacity": 0.7}
+            "style": {"color": "#4682B4", "weight": 2, "opacity": 0.7},
+            "tooltip_fields": ["SUBC_LBL", "Area_km2"] # <-- CAMBIO (Usando 'SUBC_LBL' de tu config)
         },
         "Municipios de Antioquia": {
             "type": "geojson",
             "url": f"{base_url}MunicipiosAntioquia.geojson",
             "attr": "Municipios Antioquia",
-            "style": {"color": "#33a02c", "weight": 1, "opacity": 0.6}
+            "style": {"color": "#33a02c", "weight": 1, "opacity": 0.6},
+            "tooltip_fields": ["municipio"] # <-- CAMBIO (Usando 'municipio' de tu config)
         }
     }
-
     selected_base_map_name = container_object.selectbox(
         "Seleccionar Mapa Base",
         list(base_map_options.keys()),
@@ -546,35 +548,36 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
                     except Exception as e_lg:
                         geojson_data = None
                     if not geojson_data:
-                        # No data: añadir nota en el FeatureGroup y continuar
                         folium.Marker(location=location, popup=f"Capa '{layer_name}' no disponible.").add_to(fg)
                         fg.add_to(m)
                         continue
 
-                    # medir tamaño aproximado
-                    try:
-                        geojson_bytes = json.dumps(geojson_data).encode('utf-8')
-                    except Exception:
-                        geojson_bytes = b''
+                    # --- INICIO DEL BLOQUE MODIFICADO (LÓGICA DE TOOLTIP) ---
+                    
+                    tooltip_config = None
+                    tooltip_fields = layer_config.get("tooltip_fields")
+                    
+                    if tooltip_fields:
+                        # Crear etiquetas amigables (ej: "SUBC_LBL:" -> "Subc Lbl:")
+                        aliases = [f"{field.replace('_', ' ').capitalize()}:" for field in tooltip_fields]
+                        
+                        tooltip_config = folium.GeoJsonTooltip(
+                            fields=tooltip_fields,
+                            aliases=aliases,
+                            sticky=True, # El tooltip sigue al mouse
+                            style=("background-color: rgba(255,255,255,0.8); color: black; font-family: sans-serif; font-size: 12px; padding: 10px;")
+                        )
 
-                    # if large try to simplify using geopandas if available
-                    if len(geojson_bytes) > MAX_GEOJSON_BYTES:
-                        try:
-                            import geopandas as gpd
-                            import io as _io
-                            gdf_temp = gpd.read_file(_io.StringIO(json.dumps(geojson_data)))
-                            # Simplify geometry (tolerance configurable)
-                            gdf_temp['geometry'] = gdf_temp.geometry.simplify(tolerance=0.001, preserve_topology=True)
-                            # build simplified geojson
-                            simplified = gdf_temp.__geo_interface__
-                            folium.GeoJson(simplified, name=layer_name, style_function=lambda x: layer_config.get("style", {})).add_to(fg)
-                        except Exception as e_simp:
-                            # Fallback: si falla geopandas, intentamos añadir el geojson original (puede ser pesado)
-                            folium.GeoJson(geojson_data, name=layer_name, style_function=lambda x: layer_config.get("style", {})).add_to(fg)
-                            # además añadimos una nota para el usuario
-                            folium.Marker(location=location, popup=f"Capa '{layer_name}' añadida (original, grande).").add_to(fg)
-                    else:
-                        folium.GeoJson(geojson_data, name=layer_name, style_function=lambda x: layer_config.get("style", {})).add_to(fg)
+                    # Añadir la capa GeoJSON con el tooltip y una función de resaltado
+                    folium.GeoJson(
+                        geojson_data, 
+                        name=layer_name, 
+                        style_function=lambda x: layer_config.get("style", {}),
+                        tooltip=tooltip_config, # <-- Aquí se añade el tooltip
+                        highlight_function=lambda x: {'weight': 3, 'color': '#FFFF00', 'fillOpacity': 0.1} # Resaltado amarillo
+                    ).add_to(fg)
+                    
+                    # --- FIN DEL BLOQUE MODIFICADO ---
 
                     fg.add_to(m)
 
@@ -1620,7 +1623,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                 else: st.warning("Datos de subcuencas no disponibles.")
 
                 selected_basins = st.multiselect("Seleccione una o más subcuencas:", options=basin_names, key="basin_multiselect")
-                buffer_km = st.slider("Buffer de influencia (km):", 0, 50, 10, 5, key="buffer_slider")
+                buffer_km = st.slider("Buffer de influencia (km):", 0, 50, 50, 5, key="buffer_slider")
                 df_anual_non_na = df_anual_melted.dropna(subset=[Config.PRECIPITATION_COL])
                 years = sorted(df_anual_non_na[Config.YEAR_COL].unique()) if not df_anual_non_na.empty else []
 
@@ -5189,6 +5192,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
