@@ -322,6 +322,7 @@ def display_map_controls(container_object, key_prefix):
     }
 
     # AÑADIR NUEVAS CAPAS GEOJSON AQUÍ
+    # --- INICIO DEL BLOQUE DE REEMPLAZO ---
     base_url = "https://raw.githubusercontent.com/omejiariv/Chaac-SIHCLI/main/data/"
     overlay_map_options = {
         # Capa WMS existente
@@ -333,20 +334,34 @@ def display_map_controls(container_object, key_prefix):
             "transparent": True,
             "attr": "IDEAM",
         },
-        # Nuevas capas GeoJSON (CON TOOLTIPS USANDO CAMPOS CORRECTOS)
+        # Nuevas capas GeoJSON (CON LOS CAMPOS ADICIONALES)
         "Predios Ejecutados": {
             "type": "geojson",
             "url": f"{base_url}PrediosEjecutados.geojson",
             "attr": "Predios",
             "style": {"color": "#ff7800", "weight": 2, "opacity": 0.7},
-            "tooltip_fields": ["NOMBRE_PRE", "NOMB_MPIO", "AREA_HA", "AÑO_ACUER"] 
+            "tooltip_fields": [
+                "NOMBRE_PRE", 
+                "NOMB_MPIO", 
+                "AREA_HA", 
+                "AÑO_ACUER", 
+                "EMBALSE",        # <-- AÑADIDO
+                "NOMBRE_VER",     # <-- AÑADIDO
+                "MECANISM"        # <-- AÑADIDO
+            ] 
         },
         "Subcuencas de Influencia": {
             "type": "geojson",
             "url": f"{base_url}SubcuencasAinfluencia.geojson",
             "attr": "Subcuencas",
             "style": {"color": "#4682B4", "weight": 2, "opacity": 0.7},
-            "tooltip_fields": ["SUBC_LBL", "depto_region", "Shape_Area"] 
+            "tooltip_fields": [
+                "SUBC_LBL", 
+                "depto_region", 
+                "Shape_Area",     # <-- AÑADIDO (ver nota abajo)
+                "SZH",            # <-- AÑADIDO
+                "N_NSS1"          # <-- AÑADIDO
+            ] 
         },
         "Municipios de Antioquia": {
             "type": "geojson",
@@ -356,6 +371,7 @@ def display_map_controls(container_object, key_prefix):
             "tooltip_fields": ["MPIO_CNMBR", "DPTO_CNMBR"] 
         }
     }
+    # --- FIN DEL BLOQUE DE REEMPLAZO ---
     
     selected_base_map_name = container_object.selectbox(
         "Seleccionar Mapa Base",
@@ -5235,6 +5251,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
