@@ -3744,9 +3744,27 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 
     with pronostico_sarima_tab:
         st.subheader("Pronóstico (Modelo SARIMA)")
-        st.info("Los pronósticos se generan utilizando la serie temporal completa de la estación seleccionada.")
-        station_to_forecast = st.selectbox("Seleccione una estación:",
-                                             options=stations_for_analysis, key="sarima_station_select")
+        
+        # --- INICIO BLOQUE MODIFICADO ---
+        
+        analysis_type_sarima = st.radio(
+            "Seleccionar tipo de pronóstico SARIMA:",
+            ("Estación Individual", "Promedio Regional"),
+            key="sarima_analysis_type", horizontal=True
+        )
+        
+        station_to_forecast = None
+        station_name_for_title = "" # Para el título del gráfico
+        
+        if analysis_type_sarima == "Estación Individual":
+            station_to_forecast = st.selectbox("Seleccione una estación:",
+                                                 options=stations_for_analysis, key="sarima_station_select")
+            station_name_for_title = station_to_forecast
+        else:
+            st.info(f"Se generará un pronóstico para la serie regional (promedio de {len(stations_for_analysis)} estaciones).")
+            station_name_for_title = "Serie Regional"
+        # --- FIN BLOQUE MODIFICADO ---
+
         c1, c2 = st.columns(2)
         with c1:
             forecast_horizon = st.slider("Meses a pronosticar:", 12, 36, 12, step=12,
@@ -3755,18 +3773,36 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
             test_size = st.slider("Meses para evaluación:", 12, 36, 12, step=6,
                                   key="sarima_test_size")
         
-        # --- CORRECCIÓN: Auto-ARIMA deshabilitado por defecto ---
         use_auto_arima = st.checkbox("Encontrar parámetros óptimos automáticamente (Auto-ARIMA)",
                                      value=False)
         
-        if station_to_forecast and st.button("Generar Pronóstico SARIMA"):
+        # --- INICIO BLOQUE MODIFICADO ---
+        # El botón se activa si (se seleccionó una estación) O (se seleccionó el promedio)
+        if (station_to_forecast or analysis_type_sarima == "Promedio Regional") and st.button("Generar Pronóstico SARIMA"):
             
-            # --- CORRECCIÓN: Usa df_full_monthly (la serie completa) ---
-            with st.spinner(f"Preparando y completando datos (SARIMA) para {station_to_forecast}..."):
-                original_station_data_sarima = \
-                    df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
-                                        station_to_forecast].copy()
-                from modules.data_processor import complete_series # Asume importación
+            with st.spinner(f"Preparando y completando datos (SARIMA) para {station_name_for_title}..."):
+                
+                if analysis_type_sarima == "Estación Individual":
+                    # Lógica para estación individual (la que ya teníamos)
+                    original_station_data_sarima = \
+                        df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
+                                            station_to_forecast].copy()
+                else:
+                    # Lógica para Serie Regional
+                    # 1. Obtener todos los datos de las estaciones seleccionadas
+                    regional_data_full = df_full_monthly[
+                        df_full_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)
+                    ].copy()
+                    
+                    # 2. Calcular el promedio mensual
+                    regional_data_avg = regional_data_full.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+                    
+                    # 3. "Disfrazar" la serie regional como si fuera una estación para que 'complete_series' funcione
+                    regional_data_avg[Config.STATION_NAME_COL] = "Serie Regional"
+                    original_station_data_sarima = regional_data_avg
+
+                # El resto del código funciona igual para ambas
+                from modules.data_processor import complete_series
                 ts_data_sarima = complete_series(original_station_data_sarima)
             
             if len(ts_data_sarima.dropna(subset=[Config.PRECIPITATION_COL])) < test_size + 36:
@@ -3776,19 +3812,23 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     from modules.forecasting import auto_arima_search, generate_sarima_forecast
                     if use_auto_arima:
                         with st.spinner("Buscando el mejor modelo Auto-ARIMA (esto puede tardar)..."):
-                            # Asegúrate de que @st.cache_data esté en auto_arima_search
                             order, seasonal_order = auto_arima_search(ts_data_sarima, test_size)
                         st.success(f"Modelo óptimo encontrado: orden={order}, orden estacional={seasonal_order}")
                     else:
-                        order, seasonal_order = (1, 1, 1), (1, 1, 1, 12) # Parámetros por defecto
+                        order, seasonal_order = (1, 1, 1), (1, 1, 1, 12)
                     
                     with st.spinner("Entrenando y evaluando modelo SARIMA..."):
-                        # Asegúrate de que @st.cache_data esté en generate_sarima_forecast
                         ts_hist, forecast_mean, forecast_ci, metrics, sarima_df_export = \
                             generate_sarima_forecast(ts_data_sarima, order, seasonal_order, forecast_horizon,
                                                      test_size)
-                        st.session_state['sarima_results'] = {'forecast': sarima_df_export, 'metrics':
-                                                               metrics, 'history': ts_hist}
+                        
+                        # Guardar el nombre de lo que se pronosticó
+                        st.session_state['sarima_results'] = {
+                            'forecast': sarima_df_export, 
+                            'metrics': metrics, 
+                            'history': ts_hist,
+                            'name': station_name_for_title # <-- Guardar el nombre
+                        }
                     
                     # ----- INICIO NUEVO BLOQUE DE GRÁFICO SARIMA -----
                     st.markdown("##### Resultados del Pronóstico")
@@ -3796,51 +3836,34 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     
                     fig_pronostico = go.Figure()
 
-                    # 1. Añadir banda de confianza (Intervalo de Incertidumbre)
+                    # 1. Añadir banda de confianza
                     fig_pronostico.add_trace(go.Scatter(
-                        x=forecast_ci.index,
-                        y=forecast_ci.iloc[:, 0], # Límite inferior
-                        mode='lines',
-                        line=dict(width=0),
-                        name='Incertidumbre (Baja)',
-                        legendgroup='forecast'
+                        x=forecast_ci.index, y=forecast_ci.iloc[:, 0], mode='lines',
+                        line=dict(width=0), name='Incertidumbre (Baja)', legendgroup='forecast'
                     ))
                     fig_pronostico.add_trace(go.Scatter(
-                        x=forecast_ci.index,
-                        y=forecast_ci.iloc[:, 1], # Límite superior
-                        mode='lines',
-                        line=dict(width=0),
-                        fill='tonexty',
-                        fillcolor='rgba(255,0,0,0.2)',
-                        name='Intervalo de Confianza',
-                        legendgroup='forecast'
+                        x=forecast_ci.index, y=forecast_ci.iloc[:, 1], mode='lines',
+                        line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)',
+                        name='Intervalo de Confianza', legendgroup='forecast'
                     ))
 
                     # 2. Añadir la línea del pronóstico
                     fig_pronostico.add_trace(go.Scatter(
-                        x=forecast_mean.index,
-                        y=forecast_mean,
-                        mode='lines',
+                        x=forecast_mean.index, y=forecast_mean, mode='lines',
                         line=dict(color='red', dash='dash', width=3),
-                        name='Pronóstico SARIMA',
-                        legendgroup='forecast'
+                        name='Pronóstico SARIMA', legendgroup='forecast'
                     ))
 
                     # 3. Añadir los datos reales (solo del conjunto de prueba)
                     test_data_plot = ts_hist.iloc[-test_size:]
                     fig_pronostico.add_trace(go.Scatter(
-                        x=test_data_plot.index,
-                        y=test_data_plot,
-                        mode='markers',
-                        marker=dict(color='black', size=5),
-                        name='Datos Reales (Prueba)'
+                        x=test_data_plot.index, y=test_data_plot, mode='markers',
+                        marker=dict(color='black', size=5), name='Datos Reales (Prueba)'
                     ))
 
                     fig_pronostico.update_layout(
-                        title=f"Pronóstico SARIMA para {station_to_forecast}",
-                        xaxis_title="Fecha",
-                        yaxis_title="Precipitación (mm)",
-                        height=600,
+                        title=f"Pronóstico SARIMA para {station_name_for_title}", # <-- Título dinámico
+                        xaxis_title="Fecha", yaxis_title="Precipitación (mm)", height=600,
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                     )
                     st.plotly_chart(fig_pronostico, use_container_width=True)
@@ -3854,12 +3877,30 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 
                 except Exception as e:
                     st.error(f"No se pudo generar el pronóstico SARIMA. Error: {e}")
-                    st.exception(e) # Añadido para más detalles
+                    st.exception(e)
 
     with pronostico_prophet_tab:
         st.subheader("Pronóstico (Modelo Prophet)")
-        station_to_forecast_prophet = st.selectbox("Seleccione una estación:",
-                                                    options=stations_for_analysis, key="prophet_station_select")
+        
+        # --- INICIO BLOQUE MODIFICADO ---
+        analysis_type_prophet = st.radio(
+            "Seleccionar tipo de pronóstico Prophet:",
+            ("Estación Individual", "Promedio Regional"),
+            key="prophet_analysis_type", horizontal=True
+        )
+        
+        station_to_forecast_prophet = None
+        station_name_for_title = "" # Para el título del gráfico
+
+        if analysis_type_prophet == "Estación Individual":
+            station_to_forecast_prophet = st.selectbox("Seleccione una estación:",
+                                                        options=stations_for_analysis, key="prophet_station_select")
+            station_name_for_title = station_to_forecast_prophet
+        else:
+            st.info(f"Se generará un pronóstico para la serie regional (promedio de {len(stations_for_analysis)} estaciones).")
+            station_name_for_title = "Serie Regional"
+        # --- FIN BLOQUE MODIFICADO ---
+        
         c1, c2 = st.columns(2)
         with c1:
             forecast_horizon_prophet = st.slider("Meses a pronosticar:", 12, 36, 12, step=12,
@@ -3867,116 +3908,128 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         with c2:
             test_size_prophet = st.slider("Meses para evaluación:", 12, 36, 12, step=6,
                                            key="prophet_test_size")
-        if station_to_forecast_prophet and st.button("Generar Pronóstico Prophet"):
-            with st.spinner(f"Preparando y completando datos para {station_to_forecast_prophet}..."):
-                original_station_data = \
-                    df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
-                                    station_to_forecast_prophet].copy()
-                from modules.data_processor import complete_series # Asume importación
-                ts_data_prophet = complete_series(original_station_data)
+        
+        # --- INICIO BLOQUE MODIFICADO ---
+        if (station_to_forecast_prophet or analysis_type_prophet == "Promedio Regional") and st.button("Generar Pronóstico Prophet"):
+            
+            with st.spinner(f"Preparando y completando datos (Prophet) para {station_name_for_title}..."):
                 
-                if len(ts_data_prophet.dropna(subset=[Config.PRECIPITATION_COL])) < \
-                   test_size_prophet + 24:
-                    st.warning(f"Incluso después de completar, no hay suficientes datos para un pronóstico confiable.")
+                if analysis_type_prophet == "Estación Individual":
+                    original_station_data = \
+                        df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
+                                        station_to_forecast_prophet].copy()
                 else:
-                    try:
-                        from modules.forecasting import generate_prophet_forecast
-                        # from prophet.plot import plot_plotly # Ya no se necesita
-                        
-                        with st.spinner("Entrenando y evaluando modelo Prophet..."):
-                            # Asegúrate de añadir @st.cache_data a esta función en forecasting.py
-                            model, forecast, metrics = generate_prophet_forecast(ts_data_prophet,
-                                                                                 forecast_horizon_prophet, test_size_prophet, regressors=None)
+                    # Lógica para Serie Regional
+                    regional_data_full = df_full_monthly[
+                        df_full_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)
+                    ].copy()
+                    regional_data_avg = regional_data_full.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+                    regional_data_avg[Config.STATION_NAME_COL] = "Serie Regional"
+                    original_station_data = regional_data_avg
+                
+                from modules.data_processor import complete_series
+                ts_data_prophet = complete_series(original_station_data)
+            
+            if len(ts_data_prophet.dropna(subset=[Config.PRECIPITATION_COL])) < \
+                   test_size_prophet + 24:
+                st.warning(f"Incluso después de completar, no hay suficientes datos para un pronóstico confiable.")
+            else:
+                try:
+                    from modules.forecasting import generate_prophet_forecast
+                    
+                    with st.spinner("Entrenando y evaluando modelo Prophet..."):
+                        model, forecast, metrics = generate_prophet_forecast(ts_data_prophet,
+                                                                             forecast_horizon_prophet, test_size_prophet, regressors=None)
+                    
+                    # Guardar el nombre de lo que se pronosticó
+                    st.session_state['prophet_results'] = {
+                        'forecast': forecast[['ds', 'yhat']], 
+                        'metrics': metrics,
+                        'name': station_name_for_title # <-- Guardar el nombre
+                    }
+                    
+                    # ----- INICIO DEL NUEVO BLOQUE DE GRÁFICO -----
+                    st.markdown("##### Resultados del Pronóstico")
+                    st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
+                    
+                    fig_prophet = go.Figure()
+                    
+                    # 1. Añadir banda de confianza
+                    forecast_plot_data = forecast.iloc[-forecast_horizon_prophet:]
+                    
+                    fig_prophet.add_trace(go.Scatter(
+                        x=forecast_plot_data['ds'], y=forecast_plot_data['yhat_upper'], mode='lines',
+                        line=dict(width=0), name='Incertidumbre (Alta)', legendgroup='forecast'
+                    ))
+                    fig_prophet.add_trace(go.Scatter(
+                        x=forecast_plot_data['ds'], y=forecast_plot_data['yhat_lower'], mode='lines',
+                        line=dict(width=0), fill='tonexty', fillcolor='rgba(0,176,246,0.2)',
+                        name='Incertidumbre (Baja)', legendgroup='forecast'
+                    ))
+                    
+                    # 2. Añadir la línea del pronóstico
+                    fig_prophet.add_trace(go.Scatter(
+                        x=forecast_plot_data['ds'], y=forecast_plot_data['yhat'], mode='lines',
+                        line=dict(color='rgba(0,176,246,1)', width=3),
+                        name='Pronóstico (yhat)', legendgroup='forecast'
+                    ))
+                    
+                    # 3. Renombrar ts_data_prophet para el gráfico
+                    ts_data_prophet_renamed = ts_data_prophet.rename(columns={
+                        Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'
+                    })
+                    
+                    # 4. Añadir los datos reales (solo del conjunto de prueba)
+                    test_data_plot = ts_data_prophet_renamed.iloc[-test_size_prophet:]
+                    fig_prophet.add_trace(go.Scatter(
+                        x=test_data_plot['ds'], y=test_data_plot['y'], mode='markers',
+                        marker=dict(color='black', size=5), name='Datos Reales (Prueba)'
+                    ))
 
-                        st.session_state['prophet_results'] = {'forecast': forecast[['ds', 'yhat']], 'metrics':
-                                                               metrics}
-                        
-                        # ----- INICIO DEL NUEVO BLOQUE DE GRÁFICO -----
-                        st.markdown("##### Resultados del Pronóstico")
-                        st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
-                        
-                        fig_prophet = go.Figure()
-                        
-                        # 1. Añadir banda de confianza (Intervalo de Incertidumbre)
-                        # Seleccionamos solo el pronóstico futuro
-                        forecast_plot_data = forecast.iloc[-forecast_horizon_prophet:]
-                        
-                        fig_prophet.add_trace(go.Scatter(
-                            x=forecast_plot_data['ds'],
-                            y=forecast_plot_data['yhat_upper'],
-                            mode='lines',
-                            line=dict(width=0),
-                            name='Incertidumbre (Alta)',
-                            legendgroup='forecast'
-                        ))
-                        fig_prophet.add_trace(go.Scatter(
-                            x=forecast_plot_data['ds'],
-                            y=forecast_plot_data['yhat_lower'],
-                            mode='lines',
-                            line=dict(width=0),
-                            fill='tonexty',
-                            fillcolor='rgba(0,176,246,0.2)',
-                            name='Incertidumbre (Baja)',
-                            legendgroup='forecast'
-                        ))
-                        
-                        # 2. Añadir la línea del pronóstico (yhat)
-                        fig_prophet.add_trace(go.Scatter(
-                            x=forecast_plot_data['ds'],
-                            y=forecast_plot_data['yhat'],
-                            mode='lines',
-                            line=dict(color='rgba(0,176,246,1)', width=3),
-                            name='Pronóstico (yhat)',
-                            legendgroup='forecast'
-                        ))
-                        
-                        # 3. Renombrar ts_data_prophet para el gráfico
-                        ts_data_prophet_renamed = ts_data_prophet.rename(columns={
-                            Config.DATE_COL: 'ds', 
-                            Config.PRECIPITATION_COL: 'y'
-                        })
-                        
-                        # 4. Añadir los datos reales (solo del conjunto de prueba)
-                        test_data_plot = ts_data_prophet_renamed.iloc[-test_size_prophet:]
-                        fig_prophet.add_trace(go.Scatter(
-                            x=test_data_plot['ds'],
-                            y=test_data_plot['y'],
-                            mode='markers',
-                            marker=dict(color='black', size=5),
-                            name='Datos Reales (Prueba)'
-                        ))
+                    fig_prophet.update_layout(
+                        title=f"Pronóstico Prophet para {station_name_for_title}", # <-- Título dinámico
+                        xaxis_title="Fecha (ds)", yaxis_title="Precipitación (y)", height=600,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    st.plotly_chart(fig_prophet, use_container_width=True)
+                    # ----- FIN DEL NUEVO BLOQUE DE GRÁFICO -----
 
-                        fig_prophet.update_layout(
-                            title=f"Pronóstico Prophet para {station_to_forecast_prophet}",
-                            xaxis_title="Fecha (ds)",
-                            yaxis_title="Precipitación (y)",
-                            height=600,
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                        )
-                        st.plotly_chart(fig_prophet, use_container_width=True)
-                        # ----- FIN DEL NUEVO BLOQUE DE GRÁFICO -----
-
-                        st.markdown("##### Evaluación del Modelo")
-                        st.info(f"El modelo se evaluó usando los últimos **{test_size_prophet} meses** de datos históricos como conjunto de prueba.")
-                        m1, m2 = st.columns(2)
-                        m1.metric("RMSE", f"{metrics['RMSE']:.2f}")
-                        m2.metric("MAE", f"{metrics['MAE']:.2f}")
-                    except Exception as e:
-                        st.error(f"No se pudo generar el pronóstico con Prophet. Error: {e}")
-                        st.exception(e) # Añadido para más detalles de depuración
+                    st.markdown("##### Evaluación del Modelo")
+                    st.info(f"El modelo se evaluó usando los últimos **{test_size_prophet} meses** de datos históricos como conjunto de prueba.")
+                    m1, m2 = st.columns(2)
+                    m1.metric("RMSE", f"{metrics['RMSE']:.2f}")
+                    m2.metric("MAE", f"{metrics['MAE']:.2f}")
+                except Exception as e:
+                    st.error(f"No se pudo generar el pronóstico con Prophet. Error: {e}")
+                    st.exception(e)
                         
     with compare_forecast_tab:
         st.subheader("Comparación de Pronósticos: SARIMA vs Prophet")
         sarima_results = st.session_state.get('sarima_results')
         prophet_results = st.session_state.get('prophet_results')
+        
         if not sarima_results or not prophet_results:
             st.warning("Debe generar un pronóstico SARIMA y Prophet en sus respectivas pestañas para poder compararlos.")
+        
+        # --- INICIO BLOQUE MODIFICADO ---
+        # Comprobar que los pronósticos sean del mismo objetivo
+        elif sarima_results.get('name') != prophet_results.get('name'):
+            st.error(f"Los pronósticos no son comparables.")
+            st.warning(f"SARIMA se ejecutó para: **{sarima_results.get('name')}**")
+            st.warning(f"Prophet se ejecutó para: **{prophet_results.get('name')}**")
+            st.info("Por favor, ejecute ambos pronósticos para el mismo objetivo (ambos para 'Serie Regional' o ambos para la misma estación).")
+        # --- FIN BLOQUE MODIFICADO ---
+        
         else:
             fig_compare = go.Figure()
+            
+            # Gráfico de datos históricos (del resultado de SARIMA)
             if sarima_results.get('history') is not None:
                 hist_data = sarima_results['history']
-                fig_compare.add_trace(go.Scatter(x=hist_data.index, y=hist_data, mode='lines',
-                                                 name='Histórico', line=dict(color='gray')))
+                # Mostrar solo los últimos 20 años de historia para un gráfico más limpio
+                hist_data_plot = hist_data.iloc[- (12 * 20):] 
+                fig_compare.add_trace(go.Scatter(x=hist_data_plot.index, y=hist_data_plot, mode='lines',
+                                                 name='Histórico (Últimos 20 años)', line=dict(color='gray')))
 
             if sarima_results.get('forecast') is not None:
                 sarima_fc = sarima_results['forecast']
@@ -3988,25 +4041,30 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 fig_compare.add_trace(go.Scatter(x=prophet_fc['ds'], y=prophet_fc['yhat'],
                                                  mode='lines', name='Pronóstico Prophet', line=dict(color='blue', dash='dash')))
 
-            fig_compare.update_layout(title="Pronóstico Comparativo", xaxis_title="Fecha",
-                                     yaxis_title="Precipitación (mm)", height=500, legend=dict(x=0.01, y=0.99))
+            fig_compare.update_layout(
+                title=f"Pronóstico Comparativo para {sarima_results.get('name')}", # <-- Título dinámico
+                xaxis_title="Fecha",
+                yaxis_title="Precipitación (mm)", height=500, legend=dict(x=0.01, y=0.99)
+            )
             st.plotly_chart(fig_compare, use_container_width=True)
 
             st.markdown("#### Comparación de Precisión (sobre el conjunto de prueba)")
             sarima_metrics = sarima_results.get('metrics')
             prophet_metrics = prophet_results.get('metrics')
+            
             if sarima_metrics and prophet_metrics:
-                m_data = {'Métrica': ['RMSE', 'MAE'], 'SARIMA': [sarima_metrics['RMSE'],
-                                                                 sarima_metrics['MAE']], 'Prophet': [prophet_metrics['RMSE'], prophet_metrics['MAE']]}
+                m_data = {'Métrica': ['RMSE', 'MAE'], 
+                          'SARIMA': [sarima_metrics['RMSE'], sarima_metrics['MAE']], 
+                          'Prophet': [prophet_metrics['RMSE'], prophet_metrics['MAE']]}
                 metrics_df = pd.DataFrame(m_data)
                 st.dataframe(metrics_df.style.format({'SARIMA': '{:.2f}', 'Prophet': '{:.2f}'}))
-                rmse_winner = 'SARIMA' if sarima_metrics['RMSE'] < prophet_metrics['RMSE'] \
-                    else 'Prophet'
-                mae_winner = 'SARIMA' if sarima_metrics['MAE'] < prophet_metrics['MAE'] else \
-                    'Prophet'
+                
+                rmse_winner = 'SARIMA' if sarima_metrics['RMSE'] < prophet_metrics['RMSE'] else 'Prophet'
+                mae_winner = 'SARIMA' if sarima_metrics['MAE'] < prophet_metrics['MAE'] else 'Prophet'
+                
                 st.success(f"**Ganador (menor error):** **{rmse_winner}** basado en RMSE y **{mae_winner}** basado en MAE.")
             else:
-                st.info("Genere ambos pronósticos (SARIMA y Prophet) para ver la comparación de precisión.")
+                st.info("No se encontraron métricas de evaluación para la comparación.")
 
 def display_downloads_tab(df_anual_melted, df_monthly_filtered, stations_for_analysis,
                              analysis_mode):
@@ -5131,6 +5189,7 @@ def display_life_zones_tab(**kwargs):
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
+
 
 
 
