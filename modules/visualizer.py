@@ -5522,14 +5522,14 @@ def display_alerts_tab(**kwargs):
             st.metric("Precipitación Acumulada (7 días)", f"{total_precip:.1f} mm")
             
             if total_precip > 50:
-                st.warning(f"**Alerta de Humedad:** Se esperan lluvias significativas. El día con mayor precipitación será el {max_precip_day['date'].strftime('%A')} ({max_precip_day['precipitation_sum']:.1f} mm).")
+                st.warning(f"**Alerta de Humedad:** Se esperan lluvias significativas. El día con mayor precipitación será el {pd.to_datetime(max_precip_day['date']).strftime('%A')} ({max_precip_day['precipitation_sum']:.1f} mm).")
             elif total_precip < 5:
                 st.info("**Condiciones Secas:** No se esperan lluvias significativas en los próximos 7 días.")
             
             with st.expander("Ver pronóstico semanal detallado"):
                 st.dataframe(weekly_forecast)
         else:
-            st.warning("No se ha generado un pronóstico semanal. Vaya a la pestaña 'Pronóstico Semanal' para generarlo.")
+            st.warning("No se ha generado un pronóstico. Vaya a la pestaña 'Pronóstico Semanal' para generarlo.")
 
     # --- COLUMNA 2: ESTADO ENSO (MEDIANO PLAZO) ---
     with col2:
@@ -5558,7 +5558,7 @@ def display_alerts_tab(**kwargs):
             else:
                  st.error("El pronóstico ENSO en memoria está desactualizado.")
         else:
-            st.warning("No se ha generado un pronóstico ENSO. Vaya a 'Tendencias y Pronósticos > Pronóstico ENSO' para generarlo.")
+            st.warning("No se ha generado un pronóstico. Vaya a 'Tendencias y Pronósticos > Pronóstico ENSO' para generarlo.")
 
     st.markdown("---")
 
@@ -5568,14 +5568,14 @@ def display_alerts_tab(**kwargs):
     # Decidir qué pronóstico de precipitación usar
     forecast_to_use = None
     model_name = ""
-    if sarima_results:
+    if sarima_results and sarima_results.get('history') is not None:
         forecast_to_use = sarima_results
         model_name = "SARIMA"
-    elif prophet_results:
+    elif prophet_results and prophet_results.get('history') is not None:
         forecast_to_use = prophet_results
         model_name = "Prophet"
     
-    if forecast_to_use and forecast_to_use.get('history') is not None:
+    if forecast_to_use:
         st.success(f"Usando pronóstico de precipitación de **{model_name}** para la **{forecast_to_use.get('name', 'serie')}**.")
         
         try:
@@ -5598,9 +5598,11 @@ def display_alerts_tab(**kwargs):
                 
                 # Concatenar
                 full_series_for_spi = pd.concat([hist_series, forecast_series])
-                
+                # Convertir a Series si es necesario (para calculate_spi)
+                if isinstance(full_series_for_spi, pd.DataFrame):
+                    full_series_for_spi = full_series_for_spi.squeeze()
+
                 # 2. Calcular SPI a 6 meses
-                # (Asumiendo que 'calculate_spi' está importada en visualizer.py)
                 spi_forecasted = calculate_spi(full_series_for_spi, window=6)
                 
                 # 3. Obtener solo los valores futuros
@@ -5638,10 +5640,7 @@ def display_alerts_tab(**kwargs):
                     st.info("No se pudieron calcular valores futuros de SPI.")
         except Exception as e:
             st.error(f"Error al calcular el pronóstico de SPI: {e}")
+            st.exception(e) # Imprimir el traceback completo para depuración
             
     else:
         st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
-
-
-
-
