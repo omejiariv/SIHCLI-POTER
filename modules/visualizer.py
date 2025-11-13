@@ -3689,7 +3689,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         st.subheader("Pronóstico de Índices Climáticos")
         st.info("Genere un pronóstico para un índice climático (ONI, SOI, etc.). Estos pronósticos se guardarán y podrán ser usados como regresores.")
 
-        if df_enso is None or df_long is None:
+        if df_enso is None or df_full_monthly is None:
             st.warning("Datos climáticos (requeridos para esta pestaña) no están disponibles.")
             st.stop()
             
@@ -3697,8 +3697,8 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         # Mapeo de nombres amigables a columnas y DataFrames
         index_map = {
             "ONI (ENSO)": (Config.ENSO_ONI_COL, df_enso.rename(columns={Config.DATE_COL: 'ds', Config.ENSO_ONI_COL: 'y'})[['ds', 'y']].dropna()),
-            "SOI": (Config.SOI_COL, df_long.rename(columns={Config.DATE_COL: 'ds', Config.SOI_COL: 'y'})[['ds', 'y']].dropna()),
-            "IOD": (Config.IOD_COL, df_long.rename(columns={Config.DATE_COL: 'ds', Config.IOD_COL: 'y'})[['ds', 'y']].dropna()),
+            "SOI": (Config.SOI_COL, df_full_monthly.rename(columns={Config.DATE_COL: 'ds', Config.SOI_COL: 'y'})[['ds', 'y']].dropna()),
+            "IOD": (Config.IOD_COL, df_full_monthly.rename(columns={Config.DATE_COL: 'ds', Config.IOD_COL: 'y'})[['ds', 'y']].dropna()),
         }
         
         index_choice_name = st.selectbox(
@@ -5872,6 +5872,7 @@ def display_climate_scenarios_tab(**kwargs):
             modificando los rasters de precipitación y temperatura para visualizar el 
             desplazamiento geográfico de los ecosistemas.
             """)
+
 
 
 
