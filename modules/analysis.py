@@ -315,10 +315,12 @@ def get_mean_altitude_for_basin(_basin_geometry):
         st.warning(error_message)
         return None, error_message
 
-def calculate_hydrological_balance(mean_precip_mm, mean_altitude_m, basin_geometry_input):
+def calculate_hydrological_balance(mean_precip_mm, mean_altitude_m, basin_geometry_input, delta_temp_c=0.0):
     """
     Calcula el balance hídrico (P - ET = Q) para una cuenca.
-    Recibe la altitud media como parámetro (del DEM) en lugar de llamarla de una API.
+    
+    NUEVO: Acepta un 'delta_temp_c' para modelar escenarios.
+    Asume un incremento del 6% en ETP por cada 1°C de aumento.
     """
     results = {
         "P_media_anual_mm": mean_precip_mm,
@@ -334,16 +336,20 @@ def calculate_hydrological_balance(mean_precip_mm, mean_altitude_m, basin_geomet
         results["error"] = "No se pudo calcular el balance; la altitud media es desconocida (N/A). Verifique el DEM."
         return results
 
-    # 1. Calcular Evapotranspiración (ET) usando la altitud
-    eto_dia = 4.37 * np.exp(-0.0002 * mean_altitude_m)
-    eto_anual_mm = eto_dia * 365.25
+    # 1. Calcular Evapotranspiración (ET) base
+    eto_dia_base = 4.37 * np.exp(-0.0002 * mean_altitude_m)
+    
+    # 2. Aplicar el delta de temperatura (Asumir +6% ETP por cada +1°C)
+    etp_increase_factor = (1.0 + (0.06 * delta_temp_c))
+    eto_dia_escenario = eto_dia_base * etp_increase_factor
+    eto_anual_mm = eto_dia_escenario * 365.25
     results["ET_media_anual_mm"] = eto_anual_mm
 
-    # 2. Calcular la Escorrentía (Q)
+    # 3. Calcular la Escorrentía (Q)
     q_mm = mean_precip_mm - eto_anual_mm
     results["Q_mm"] = q_mm
 
-    # 3. Calcular el Caudal en Volumen
+    # 4. Calcular el Caudal en Volumen
     try:
         basin_metric = basin_geometry_input.to_crs("EPSG:3116") # Proyección métrica para área
         area_m2 = basin_metric.area.sum()
@@ -506,6 +512,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
