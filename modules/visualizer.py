@@ -2,10 +2,12 @@
 
 import json
 import tempfile
+from datetime import date
+from pandas.tseries.offsets import DateOffset
 
 from modules.config import Config
-import pandas as pd # Asegurar que pandas esté importado
-import numpy as np # Asegurar que numpy esté importado
+import pandas as pd
+import numpy as np
 
 def _limit_markers_gdf(gdf, max_markers=500):
     """
@@ -5437,30 +5439,151 @@ def display_life_zones_tab(**kwargs):
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
 
+# --- PESTAÑA DE ALERTAS Y RESUMEN ---
+# -------------------------------------------------------------------------
+def display_alerts_tab(**kwargs):
+    st.header("Alertas y Resumen Ejecutivo")
+    st.info("Este panel resume los pronósticos de corto, mediano y largo plazo generados en las otras pestañas.")
 
+    # Cargar todos los datos necesarios desde la sesión y kwargs
+    sarima_results = st.session_state.get('sarima_results')
+    prophet_results = st.session_state.get('prophet_results')
+    enso_forecast_full = st.session_state.get('enso_forecast_full')
+    weekly_forecast = st.session_state.get('forecast_df')
+    df_long = kwargs.get('df_long') # Necesitamos el df_long original
+    
+    # Definir columnas
+    col1, col2 = st.columns(2)
 
+    # --- COLUMNA 1: PRONÓSTICO DE CORTO PLAZO (SEMANAL) ---
+    with col1:
+        st.subheader("🌦️ Pronóstico a 7 Días")
+        if weekly_forecast is not None and not weekly_forecast.empty:
+            st.success("Pronóstico semanal cargado.")
+            
+            # Resumen de precipitación
+            total_precip = weekly_forecast['precipitation_sum'].sum()
+            max_precip_day = weekly_forecast.loc[weekly_forecast['precipitation_sum'].idxmax()]
+            
+            st.metric("Precipitación Acumulada (7 días)", f"{total_precip:.1f} mm")
+            
+            if total_precip > 50:
+                st.warning(f"**Alerta de Humedad:** Se esperan lluvias significativas. El día con mayor precipitación será el {max_precip_day['date'].strftime('%A')} ({max_precip_day['precipitation_sum']:.1f} mm).")
+            elif total_precip < 5:
+                st.info("**Condiciones Secas:** No se esperan lluvias significativas en los próximos 7 días.")
+            
+            with st.expander("Ver pronóstico semanal detallado"):
+                st.dataframe(weekly_forecast)
+        else:
+            st.warning("No se ha generado un pronóstico semanal. Vaya a la pestaña 'Pronóstico Semanal' para generarlo.")
 
+    # --- COLUMNA 2: ESTADO ENSO (MEDIANO PLAZO) ---
+    with col2:
+        st.subheader("🌊 Estado ENSO (Próximos 6 Meses)")
+        if enso_forecast_full is not None and not enso_forecast_full.empty:
+            st.success("Pronóstico ENSO cargado.")
+            
+            def classify_enso(yhat):
+                if yhat >= 0.5: return "El Niño 🔴"
+                if yhat <= -0.5: return "La Niña 🔵"
+                return "Neutral ⚪"
+            
+            # Tomar los próximos 6 meses desde hoy
+            today = pd.to_datetime(date.today())
+            future_enso = enso_forecast_full[enso_forecast_full['ds'] > today].head(6).copy()
+            
+            if not future_enso.empty:
+                future_enso['Clasificación'] = future_enso['yhat'].apply(classify_enso)
+                
+                # Resumen de estado
+                current_state = future_enso['Clasificación'].iloc[0]
+                st.metric("Condición Esperada (Próximos 3-6 Meses)", current_state)
+                
+                with st.expander("Ver pronóstico ENSO detallado"):
+                    st.dataframe(future_enso[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}))
+            else:
+                 st.error("El pronóstico ENSO en memoria está desactualizado.")
+        else:
+            st.warning("No se ha generado un pronóstico ENSO. Vaya a 'Tendencias y Pronósticos > Pronóstico ENSO' para generarlo.")
 
+    st.markdown("---")
 
+    # --- ALERTA DE SEQUÍA (LARGO PLAZO) ---
+    st.subheader("🚨 Alerta de Sequía/Humedad (Largo Plazo)")
+    
+    # Decidir qué pronóstico de precipitación usar
+    forecast_to_use = None
+    model_name = ""
+    if sarima_results:
+        forecast_to_use = sarima_results
+        model_name = "SARIMA"
+    elif prophet_results:
+        forecast_to_use = prophet_results
+        model_name = "Prophet"
+    
+    if forecast_to_use and forecast_to_use.get('history') is not None:
+        st.success(f"Usando pronóstico de precipitación de **{model_name}** para la **{forecast_to_use.get('name', 'serie')}**.")
+        
+        try:
+            with st.spinner("Calculando SPI/SPEI pronosticado..."):
+                # 1. Unir historia y futuro
+                hist_series = forecast_to_use.get('history')
+                
+                forecast_df = forecast_to_use.get('forecast')
+                # Renombrar 'ds' (Prophet) o 'index' (SARIMA) a un índice de fecha
+                forecast_df_copy = forecast_df.copy()
+                if 'ds' in forecast_df_copy.columns:
+                    forecast_df_copy['ds'] = pd.to_datetime(forecast_df_copy['ds'])
+                    forecast_df_copy = forecast_df_copy.set_index('ds')
+                
+                forecast_series = forecast_df_copy['yhat']
+                
+                # Asegurarse de que el índice del pronóstico siga al histórico
+                last_hist_date = hist_series.index.max()
+                forecast_series = forecast_series[forecast_series.index > last_hist_date]
+                
+                # Concatenar
+                full_series_for_spi = pd.concat([hist_series, forecast_series])
+                
+                # 2. Calcular SPI a 6 meses
+                # (Asumiendo que 'calculate_spi' está importada en visualizer.py)
+                spi_forecasted = calculate_spi(full_series_for_spi, window=6)
+                
+                # 3. Obtener solo los valores futuros
+                future_spi = spi_forecasted[spi_forecasted.index > last_hist_date].dropna()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+                if not future_spi.empty:
+                    # 4. Mostrar gráfico de alerta
+                    fig_spi = go.Figure()
+                    fig_spi.add_trace(go.Scatter(
+                        x=future_spi.index, 
+                        y=future_spi, 
+                        mode='lines+markers', 
+                        name='SPI a 6 Meses (Pronosticado)',
+                        line=dict(color='blue')
+                    ))
+                    # Añadir líneas de alerta
+                    fig_spi.add_hline(y=-1.5, line=dict(color='red', dash='dash'), annotation_text='Sequía Severa')
+                    fig_spi.add_hline(y=1.5, line=dict(color='green', dash='dash'), annotation_text='Humedad Severa')
+                    
+                    fig_spi.update_layout(
+                        title="Pronóstico de Índice de Sequía (SPI a 6 Meses)",
+                        yaxis_title="Valor SPI",
+                        xaxis_title="Fecha"
+                    )
+                    st.plotly_chart(fig_spi, use_container_width=True)
+                    
+                    # 5. Mostrar alertas de texto
+                    if (future_spi <= -1.5).any():
+                        st.error("**ALERTA DE SEQUÍA:** El modelo predice condiciones de sequía severa (SPI < -1.5) en los próximos meses.")
+                    elif (future_spi >= 1.5).any():
+                        st.warning("**ALERTA DE HUMEDAD:** El modelo predice condiciones de humedad severa (SPI > 1.5) en los próximos meses.")
+                    else:
+                        st.info("No se predicen condiciones extremas (sequía o humedad) en el pronóstico de 6 meses.")
+                else:
+                    st.info("No se pudieron calcular valores futuros de SPI.")
+        except Exception as e:
+            st.error(f"Error al calcular el pronóstico de SPI: {e}")
+            
+    else:
+        st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
