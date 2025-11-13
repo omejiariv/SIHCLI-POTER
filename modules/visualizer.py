@@ -2592,13 +2592,21 @@ def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_anal
     with indices_sub_tab:
         st.subheader("Análisis con Índices Estandarizados")
 
-        with st.expander("¿Cómo interpretar los índices de sequía?"):
+        # --- INICIO DEL BLOQUE DE REEMPLAZO ---
+        with st.expander("Metodología de Índices de Sequía"):
             st.markdown("""
-            El **Índice de Precipitación Estandarizado (SPI)** mide la desviación de la precipitación respecto a su media histórica.
-            * **Valores Positivos (azul):** Indican condiciones más húmedas que el promedio.
-            * **Valores Negativos (rojo):** Indican condiciones más secas (sequía).
-            * **Valores cercanos a 0:** Representan condiciones normales.
+            [cite_start]El **Índice de Precipitación Estandarizado (SPI)** [cite: 1080-1081] [cite_start]y el **Índice Estandarizado de Precipitación-Evapotranspiración (SPEI)** [cite: 1081-1082] son herramientas clave para monitorear la sequía.
+            
+            * [cite_start]**SPI:** Mide la desviación de la precipitación acumulada (para un período de X meses) de su media histórica, ajustada a una distribución **Gamma** [cite: 1083, 1085-1087].
+            * [cite_start]**SPEI:** Es una versión avanzada del SPI que utiliza el balance hídrico (Precipitación menos Evapotranspiración) [cite: 1088-1090][cite_start], ajustado a una distribución **Log-Laplace** [cite: 1091-1092].
+            
+            **Interpretación:**
+            * **Valores Positivos (Azul):** Más húmedo que el promedio.
+            * **Valores Negativos (Rojo):** Más seco que el promedio (sequía).
+            * **Valores <-1.5:** Sequía Severa.
+            * **Valores <-2.0:** Sequía Extrema.
             """)
+        # --- FIN DEL BLOQUE DE REEMPLAZO ---
 
         col1_idx, col2_idx = st.columns([1, 3])
         index_values = pd.Series(dtype=float)
@@ -3680,6 +3688,16 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     with pronostico_enso_tab:
         st.subheader("Pronóstico Oficial del Índice ENSO (IRI/CPC)")
         st.info("Presiona el botón para descargar y procesar el último pronóstico consolidado de ENSO (IRI/CPC). Este pronóstico se usará como regresor.")
+        with st.expander("Fuente de Datos y Metodología (ENSO)"):
+            st.markdown("""
+            **Fuente de Datos:**
+            Este pronóstico se basa en el **Pronóstico Consolidado Oficial de ENSO (IRI/CPC)**, publicado por el *International Research Institute for Climate and Society (IRI)* de la Universidad de Columbia y el *Climate Prediction Center (CPC)* de la NOAA.
+            
+            **Metodología:**
+            1.  La aplicación descarga el archivo de datos tabulados más reciente desde la [fuente oficial de IRI](https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv).
+            2.  Estos datos se publican estacionalmente (ej., 'JFM', 'FMA').
+            3.  La aplicación asigna estos valores al mes central de la temporada (ej., 'JFM' -> Febrero) y luego realiza una **interpolación lineal** para generar un pronóstico mensual (`MS`), que es el formato requerido por los modelos de precipitación.
+            """)        
 
         if df_enso is None or df_enso.empty:
             st.warning("Datos históricos de ENSO no están disponibles. El gráfico puede estar incompleto.")
@@ -4553,7 +4571,15 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
 
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     st.header("Pronóstico del Tiempo a 7 Días (Open-Meteo)")
-
+    with st.expander("Fuente de Datos (Pronóstico Semanal)"):
+        st.markdown("""
+        **Fuente de Datos:**
+        Este pronóstico se obtiene en tiempo real de la API **Open-Meteo**.
+        
+        **Metodología:**
+        Utiliza el modelo meteorológico de alta resolución (ICON) del *Deutscher Wetterdienst (DWD)*, el servicio meteorológico nacional de Alemania. Los datos se actualizan varias veces al día y proporcionan un pronóstico detallado para los próximos 7 días en las coordenadas exactas de la estación seleccionada.
+        """)
+    
     if not stations_for_analysis:
         st.warning("Seleccione al menos una estación para obtener el pronóstico.")
         return
@@ -4747,6 +4773,16 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
 def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
     st.header("Mapas de Variables Climáticas Adicionales (Open-Meteo)")
     st.info("Estos mapas usan datos históricos promediados de Open-Meteo para las ubicaciones de las estaciones seleccionadas y los interpolan.")
+    with st.expander("Fuente de Datos y Metodología (Variables Climáticas)"):
+        st.markdown("""
+        **Fuente de Datos:**
+        Los datos para estos mapas provienen del modelo de reanálisis **ERA5-Land**, accesible a través de la API histórica de **Open-Meteo**.
+        
+        **Metodología:**
+        1.  La aplicación consulta a la API de Open-Meteo para obtener la serie temporal histórica (ej. 1990-2020) de la variable seleccionada (ej. 'Temperatura Media') para *cada estación* visible en el mapa.
+        2.  Calcula el **promedio** de esa variable para el período seleccionado en cada estación.
+        3.  Interpola espacialmente (usando `IDW` o `Spline`) esos valores promedio para generar la superficie (mapa de calor) que se visualiza.
+        """)    
 
     if gdf_filtered is None or gdf_filtered.empty:
         st.warning("Seleccione al menos una estación en el panel de control para ver estos mapas.")
@@ -4914,7 +4950,20 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
 def display_satellite_imagery_tab(gdf_filtered, **kwargs):
     st.header("Imágenes Satelitales")
     st.info("Visualiza capas WMS de servicios meteorológicos. La disponibilidad y actualización dependen del proveedor.")
-
+    with st.expander("Fuente de Datos (Imágenes Satelitales)"):
+        st.markdown("""
+        **Fuente de Datos:**
+        Estas imágenes se obtienen de servicios **WMS (Web Map Service)** públicos.
+        
+        **Metodología:**
+        Un WMS es un protocolo estándar para servir imágenes georreferenciadas a través de internet. Esta aplicación actúa como un cliente que solicita las capas de imágenes más recientes de servidores operados por agencias como:
+        * **IDEAM** (Instituto de Hidrología, Meteorología y Estudios Ambientales de Colombia)
+        * **NOAA / SSEC** (Universidad de Wisconsin-Madison)
+        * **EUMETSAT** (Organización Europea para la Explotación de Satélites Meteorológicos)
+        
+        La disponibilidad y actualización de las imágenes dependen enteramente del proveedor del servicio.
+        """)
+    
     # --- Configuración de Capas WMS (ACTUALIZADA) ---
     # Usando la información proporcionada
     wms_layers_options = {
@@ -5614,4 +5663,5 @@ def display_alerts_tab(**kwargs):
             
     else:
         st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
+
 
