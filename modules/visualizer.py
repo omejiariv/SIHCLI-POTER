@@ -5663,7 +5663,7 @@ def display_climate_scenarios_tab(**kwargs):
     basin_gdf = st.session_state.get('unified_basin_gdf')
     basin_name = st.session_state.get('selected_basins_title', 'N/A')
     p_base = st.session_state.get('mean_precip') # Ppt media anual base
-    morph_results = st.session_state.get('morph_results', {})
+    morph_results = st.session_state.get('morph_results') or {}
     alt_base = morph_results.get('alt_prom_m') # Altitud media base
     
     # Necesitamos los datos completos y los filtros de kwargs
@@ -5813,3 +5813,4 @@ def display_climate_scenarios_tab(**kwargs):
             modificando los rasters de precipitación y temperatura para visualizar el 
             desplazamiento geográfico de los ecosistemas.
             """)
+
