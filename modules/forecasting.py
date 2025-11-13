@@ -9,6 +9,8 @@ import plotly.graph_objects as go
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import numpy as np
 from modules.config import Config
+from pandas.tseries.offsets import DateOffset
+from datetime import datetime
 
 # modules/forecast_api.py
 
@@ -121,40 +123,48 @@ def get_official_enso_forecast():
     try:
         DATA_URL = "https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv"
         
-        # --- INICIO DE LA CORRECCIÓN (Lector de texto manual) ---
+        # --- INICIO DE LA CORRECCIÓN (Lector de texto V3) ---
         
         # 1. Descargar el archivo como texto crudo
         response = requests.get(DATA_URL)
-        response.raise_for_status() # Asegurarse de que la descarga fue exitosa
+        response.raise_for_status()
         data_text = response.text
-
-        # 2. Procesar el texto línea por línea
         lines = data_text.split('\n')
-        
         data_rows = []
         
-        # Encontrar la línea del encabezado (Header)
-        # Buscamos 'NINO3.4_ANOM_FCST'
+        # 2. Encontrar la línea del encabezado (Header)
         header_line_index = -1
+        # Buscar la línea que contenga "MONTH" Y "YEAR" (más robusto)
         for i, line in enumerate(lines):
-            if "NINO3.4_ANOM_FCST" in line:
+            if "MONTH" in line and "YEAR" in line:
                 header_line_index = i
                 break
         
         if header_line_index == -1:
-            raise ValueError("No se pudo encontrar el encabezado 'NINO3.4_ANOM_FCST' en el archivo.")
+            raise ValueError("No se pudo encontrar la línea de encabezado (con 'MONTH' y 'YEAR') en el archivo.")
 
-        # Encontrar la posición de las columnas que queremos
+        # 3. Encontrar la posición de las columnas que queremos
         headers = lines[header_line_index].split()
+        
+        # Buscar el nombre de la columna que *contiene* NINO3.4_ANOM_FCST
+        forecast_header_name = None
+        for h in headers:
+            if "NINO3.4_ANOM_FCST" in h:
+                forecast_header_name = h
+                break
+        
+        if forecast_header_name is None:
+            raise ValueError("No se pudo encontrar la columna de pronóstico 'NINO3.4_ANOM_FCST' en el encabezado.")
+
         month_idx = headers.index("MONTH")
         year_idx = headers.index("YEAR")
-        forecast_idx = headers.index("NINO3.4_ANOM_FCST")
+        forecast_idx = headers.index(forecast_header_name) # <-- Usar el nombre encontrado
 
-        # 3. Iterar sobre las líneas de datos (después del encabezado)
+        # 4. Iterar sobre las líneas de datos (después del encabezado)
         for line in lines[header_line_index + 1:]:
             items = line.split()
             
-            # Si la línea está vacía o es un sub-encabezado, saltar
+            # Si la línea está vacía o es muy corta, saltar
             if len(items) < max(month_idx, year_idx, forecast_idx) + 1:
                 continue
                 
@@ -162,10 +172,9 @@ def get_official_enso_forecast():
             year_str = items[year_idx]
             forecast_val = items[forecast_idx]
             
-            # Solo nos interesan las filas que NO son 'OBS' (Observaciones)
+            # Solo nos interesan las filas que NO son 'OBS'
             if forecast_val != 'OBS':
                 try:
-                    # Convertir el año (puede ser '2025' o '2025-26')
                     year_int = int(year_str.split('-')[0])
                     data_rows.append({
                         "MONTH": month,
@@ -173,8 +182,7 @@ def get_official_enso_forecast():
                         "NINO3.4_ANOM_FCST": float(forecast_val)
                     })
                 except ValueError:
-                    # Ignorar líneas que no se puedan convertir (como el pie de página)
-                    continue
+                    continue # Ignorar líneas que no se puedan convertir
 
         df_forecast = pd.DataFrame(data_rows)
         
@@ -183,7 +191,7 @@ def get_official_enso_forecast():
 
         # --- FIN DE LA CORRECCIÓN ---
 
-        # El resto de la función es idéntica y funcionará correctamente
+        # El resto de la función es idéntica
         df_forecast['anomalia_oni'] = pd.to_numeric(df_forecast['NINO3.4_ANOM_FCST'])
         
         season_to_month_map = {
@@ -193,12 +201,13 @@ def get_official_enso_forecast():
         
         df_forecast['month'] = df_forecast['MONTH'].map(season_to_month_map)
         
-        # Manejar el caso 'DJF' que cruza el año
-        # (El año ya es 'year_int', por lo que podemos sumar)
         df_forecast['year_adj'] = df_forecast['YEAR'].where(df_forecast['MONTH'] != 'DJF', df_forecast['YEAR'] + 1)
         
+        # Asegurarse de que 'year_adj' y 'month' no tengan nulos
+        df_forecast.dropna(subset=['year_adj', 'month'], inplace=True)
+        
         df_forecast['ds'] = pd.to_datetime(
-            df_forecast['year_adj'].astype(str) + '-' + df_forecast['month'].astype(str) + '-01'
+            df_forecast['year_adj'].astype(int).astype(str) + '-' + df_forecast['month'].astype(int).astype(str) + '-01'
         )
         
         df_clean = df_forecast[['ds', 'anomalia_oni']].sort_values(by='ds').drop_duplicates()
@@ -220,7 +229,7 @@ def get_official_enso_forecast():
         return df_prophet_out, df_sarima_out
         
     except Exception as e:
-        # Esto capturará el error de tokenización y lo mostrará
+        # Esto capturará el error y lo mostrará en Streamlit
         st.error(f"Error al descargar el pronóstico oficial del ENSO: {e}")
         return None, None
         
@@ -418,6 +427,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
