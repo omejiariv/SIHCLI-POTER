@@ -349,59 +349,89 @@ def main():
     }
     
     #--- Renderizado de Pestañas ---
+    # Pestaña 0: Bienvenida
     with tabs[0]:
         display_welcome_tab()
+    
+    # Pestaña 1: Alertas y Resumen (NUEVA)
     with tabs[1]:
-       display_alerts_tab(**display_args)
+        display_alerts_tab(**display_args)
+    
+    # Pestaña 2: Distribución Espacial
     with tabs[2]:
         display_spatial_distribution_tab(**display_args)
+    
+    # Pestaña 3: Gráficos
     with tabs[3]:
         display_graphs_tab(**display_args)
+    
+    # Pestaña 4: Mapas Avanzados
     with tabs[4]:
         display_advanced_maps_tab(**display_args)
-    with tabs[5]: 
+    
+    # Pestaña 5: Variables Climáticas
+    with tabs[5]:
         display_additional_climate_maps_tab(**display_args)
-    with tabs[6]: 
+    
+    # Pestaña 6: Imágenes Satelitales
+    with tabs[6]:
         display_satellite_imagery_tab(**display_args)
-    with tabs[7]: 
+    
+    # Pestaña 7: Análisis Cobertura Suelo
+    with tabs[7]:
         display_land_cover_analysis_tab(**display_args)
-    with tabs[8]: 
+    
+    # Pestaña 8: Zonas de Vida
+    with tabs[8]:
         display_life_zones_tab(**display_args)
+        
+    # Pestaña 9: Escenarios Climáticos (NUEVA)
     with tabs[9]:
         display_climate_scenarios_tab(**display_args)
+    
+    # Pestaña 10: Análisis de Anomalías
     with tabs[10]:
         display_anomalies_tab(**display_args)
+    
+    # Pestaña 11: Análisis de Extremos
     with tabs[11]:
         display_drought_analysis_tab(**display_args)
+    
+    # Pestaña 12: Estadísticas
     with tabs[12]:
         display_stats_tab(**display_args)
+    
+    # Pestaña 13: Correlación
     with tabs[13]:
         display_correlation_tab(**display_args)
+    
+    # Pestaña 14: Análisis ENSO (La pestaña original)
     with tabs[14]:
-        # [CORRECCIÓN] Pasa la variable local df_enso
-        # Ya no se necesita 'df_enso=' porque está dentro de display_args
         display_enso_tab(**display_args)
+    
+    # Pestaña 15: Pronóstico Climático (La que REUTILIZA la lógica de Trends)
+    # NOTA: Esta es la pestaña que creamos para pronosticar ONI/SOI/IOD
     with tabs[15]:
-        # [CORRECCIÓN] Pasa la variable local df_long
         display_trends_and_forecast_tab(df_full_monthly=df_long, **display_args)
-        
+    
+    # Pestaña 16: Tendencias y Pronósticos (La que REUTILIZA la lógica de Semanal)
+    # NOTA: Esta pestaña muestra el pronóstico semanal
     with tabs[16]:
         display_weekly_forecast_tab(
-        stations_for_analysis=stations_for_analysis,
-        gdf_filtered=gdf_filtered
-    )
+            stations_for_analysis=stations_for_analysis,
+            gdf_filtered=gdf_filtered
+        )
     
+    # Pestaña 17: Pronóstico Semanal (La que REUTILIZA la lógica de Cuenca)
+    # NOTA: Esta pestaña ahora muestra el Análisis por Cuenca
     with tabs[17]: 
         st.header("Análisis Agregado por Cuenca Hidrográfica")
-        # [CORRECCIÓN] Usa la variable local gdf_subcuencas
         if gdf_subcuencas is not None and not gdf_subcuencas.empty:
             BASIN_NAME_COLUMN = 'SUBC_LBL' 
             if BASIN_NAME_COLUMN in gdf_subcuencas.columns:
-
+                # ... (Lógica de sjoin para encontrar cuencas relevantes) ...
                 basin_names = [] 
-                
                 regions_from_sidebar = sidebar_filters.get("selected_regions", []) 
-                # [CORRECCIÓN] Usa la variable local gdf_subcuencas
                 basins_in_selected_regions = gdf_subcuencas.copy() 
 
                 if regions_from_sidebar: 
@@ -410,14 +440,13 @@ def main():
                              basins_in_selected_regions[Config.REGION_COL].isin(regions_from_sidebar)
                          ]
                          if basins_in_selected_regions.empty:
-                              st.info("Ninguna subcuenca encontrada en las regiones seleccionadas.")
+                             st.info("Ninguna subcuenca encontrada en las regiones seleccionadas.")
                     else:
                          st.warning(f"El archivo de subcuencas no tiene la columna '{Config.REGION_COL}'. No se puede filtrar por región.")
                 
                 if not basins_in_selected_regions.empty and 'gdf_filtered' in sidebar_filters and not sidebar_filters['gdf_filtered'].empty:
                      if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(gdf_stations.crs, allow_override=True)
                      if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(gdf_stations.crs, allow_override=True)
-
                      target_crs_sjoin = "EPSG:4326"
                      try:
                           basins_for_sjoin = basins_in_selected_regions.to_crs(target_crs_sjoin)
@@ -427,28 +456,27 @@ def main():
                               basins_for_sjoin,
                               stations_for_sjoin,
                               how="inner", 
-                              predicate="intersects" 
+                              predicate="intersects"
                           )
                           if not relevant_basins_gdf.empty:
                               basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique())
-                          
                      except Exception as e_sjoin:
                           st.error(f"Error durante la unión espacial (sjoin): {e_sjoin}")
-                          basin_names = [] 
+                          basin_names = []
                           
                 if not basin_names:
                     st.info("Ninguna cuenca (en las regiones/filtros seleccionados) contiene estaciones que coincidan con todos los filtros actuales.")
                 else:
-                    selected_basin = st.selectbox(
+                     selected_basin = st.selectbox(
                         "Seleccione una cuenca para analizar:",
                         options=basin_names,
                         key="basin_selector" 
-                    )
-                    if selected_basin:
+                     )
+                     if selected_basin:
                         stats_df, stations_in_selected_basin, error_msg = calculate_basin_stats(
-                            sidebar_filters['gdf_filtered'], 
-                            gdf_subcuencas, # [CORRECCIÓN] Usa la variable local
-                            df_monthly_filtered, 
+                            sidebar_filters['gdf_filtered'],
+                            gdf_subcuencas,
+                            df_monthly_filtered,
                             selected_basin,
                             BASIN_NAME_COLUMN
                         )
@@ -471,8 +499,9 @@ def main():
             else:
                 st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.")
         else:
-            st.warning("Los datos de las subcuencas no están cargados o el archivo está vacío.")
-            
+           st.warning("Los datos de las subcuencas no están cargados o el archivo está vacío.")
+    
+    # Pestaña 18: Análisis por Cuenca (La que REUTILIZA la lógica de Comparación)
     with tabs[18]:
         st.header("Comparación de Periodos de Tiempo")
         analysis_level = st.radio(
@@ -484,7 +513,6 @@ def main():
 
         if analysis_level == "Por Cuenca Específica":
             st.markdown("---")
-            # [CORRECCIÓN] Usa la variable local gdf_subcuencas
             if gdf_subcuencas is not None and not gdf_subcuencas.empty:
                 BASIN_NAME_COLUMN = 'SUBC_LBL'
                 if BASIN_NAME_COLUMN in gdf_subcuencas.columns:
@@ -496,19 +524,18 @@ def main():
                     if not basin_names:
                         st.warning("Ninguna cuenca contiene estaciones que coincidan con los filtros actuales.", icon="⚠️")
                     else:
-                        selected_basin = st.selectbox(
+                         selected_basin = st.selectbox(
                             "Seleccione la cuenca a comparar:",
                             options=basin_names,
                             key="compare_basin_selector"
                         )
-                        # [CORRECCIÓN] Usa la variable local gdf_subcuencas
-                        target_basin_geom = gdf_subcuencas[gdf_subcuencas[BASIN_NAME_COLUMN] == selected_basin]
-                        stations_in_basin = gpd.sjoin(gdf_filtered, target_basin_geom, how="inner", predicate="within")
-                        station_names_in_basin = stations_in_basin[Config.STATION_NAME_COL].unique().tolist()
-                        df_to_compare = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL].isin(station_names_in_basin)]
-                        st.info(f"Análisis para **{len(station_names_in_basin)}** estaciones encontradas en la cuenca **{selected_basin}**.", icon="ℹ️")
+                         target_basin_geom = gdf_subcuencas[gdf_subcuencas[BASIN_NAME_COLUMN] == selected_basin]
+                         stations_in_basin = gpd.sjoin(gdf_filtered, target_basin_geom, how="inner", predicate="within")
+                         station_names_in_basin = stations_in_basin[Config.STATION_NAME_COL].unique().tolist()
+                         df_to_compare = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL].isin(station_names_in_basin)]
+                         st.info(f"Análisis para **{len(station_names_in_basin)}** estaciones encontradas en la cuenca **{selected_basin}**.", icon="ℹ️")
                 else:
-                    st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.")
+                     st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.")
             else:
                 st.warning("Los datos de las subcuencas no están cargados.", icon="⚠️")
         else: # Promedio Regional
@@ -560,31 +587,24 @@ def main():
                 with col2_stats:
                     st.write(f"**Periodo 2 ({periodo2[0]}-{periodo2[1]})**")
                     st.dataframe(df_periodo2[Config.PRECIPITATION_COL].describe().round(2))
-    
+
+    # Pestaña 19: Comparación de Periodos (La que REUTILIZA la lógica de Tabla de Estaciones)
     with tabs[19]:
         display_station_table_tab(**display_args)
     
+    # Pestaña 20: Tabla de Estaciones (La que REUTILIZA la lógica de Reporte)
     with tabs[20]:
         st.header("Generación de Reporte PDF")
-       
-        # Opciones para el reporte
+        
         st.subheader("Seleccionar Secciones para Incluir en el Reporte:")
         report_sections_options = [
-            "Resumen General",
-            "Tabla de Estaciones",
-            "Mapa de Distribución Espacial",
-            "Análisis de Precipitación Mensual y Anual",
-            "Análisis de Anomalías",
-            "Análisis de Extremos Hidrológicos (Percentiles)",
-            "Análisis de Índices de Sequía (SPI/SPEI)",
-            "Análisis de Frecuencia de Extremos",
-            "Análisis de Correlación",
-            "Análisis ENSO",
-            "Análisis de Tendencias y Pronósticos",
-            "Comparación de Periodos"
+            "Resumen General", "Tabla de Estaciones", "Mapa de Distribución Espacial",
+            "Análisis de Precipitación Mensual y Anual", "Análisis de Anomalías",
+            "Análisis de Extremos Hidrológicos (Percentiles)", "Análisis de Índices de Sequía (SPI/SPEI)",
+            "Análisis de Frecuencia de Extremos", "Análisis de Correlación", "Análisis ENSO",
+            "Análisis de Tendencias y Pronósticos", "Comparación de Periodos"
         ]
 
-        # Checkbox para seleccionar todas las secciones
         select_all_checkbox = st.checkbox("Seleccionar todas las secciones", value=st.session_state.select_all_report_sections_checkbox, key="select_all_report_sections_checkbox")
         
         if select_all_checkbox:
@@ -608,21 +628,17 @@ def main():
             else:
                 with st.spinner("Generando reporte PDF... Esto puede tardar unos minutos."):
                     try:
-                        # [CORRECCIÓN] Pasa las variables locales df_long y df_enso
                         report_pdf_bytes = generate_pdf_report(
                             selected_report_sections=selected_report_sections,
                             report_title=report_title,
                             author_name=author_name,
                             gdf_filtered=gdf_filtered,
-                            df_long=df_long, # Variable local
+                            df_long=df_long,
                             df_anual_melted=df_anual_melted,
                             df_monthly_filtered=df_monthly_filtered,
                             stations_for_analysis=stations_for_analysis,
-                            df_enso=df_enso, # Variable local
-                            # AÑADIR OTROS DATAFRAMES Y OBJETOS NECESARIOS AQUÍ
-                            # Por ejemplo:
-                            # df_anomalies=df_anomalies_calculadas, 
-                            # ...etc.
+                            df_enso=df_enso
+                            # (Añadir más dataframes aquí si es necesario para el reporte)
                         )
                         st.success("Reporte PDF generado exitosamente!")
                         st.download_button(
@@ -635,9 +651,10 @@ def main():
                     except Exception as e:
                         st.error(f"Error al generar el reporte PDF: {e}")
                         st.exception(e)
-
+                        
 if __name__ == "__main__":
     main()
+
 
 
 
