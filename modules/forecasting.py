@@ -206,9 +206,7 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     ts_data = ts_data_raw.rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
     ts_data = ts_data.drop_duplicates(subset=['ds'], keep='first')
     
-    # --- INICIO DE LA CORRECCIÓN PARA 'ValueError' ---
-    # 'interpolate(method="time")' requiere un DatetimeIndex.
-    
+    # --- CORRECCIÓN PARA 'ValueError: time-weighted interpolation' ---
     # Asegurarse de que 'ds' sea un objeto datetime
     ts_data['ds'] = pd.to_datetime(ts_data['ds'])
     
@@ -239,6 +237,7 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
                 continue # 'ds' es la columna de fecha, no un regresor
             
             # Interpolar el regresor (ej. 'anomalia_oni') en la serie temporal completa
+            # Esta línea (antes la 242) ahora funciona porque el merge SÍ añadió la columna
             ts_data[col] = ts_data[col].interpolate(method='linear', limit_direction='both')
             
             # Añadir el regresor al modelo
@@ -271,13 +270,15 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     future = full_model.make_future_dataframe(periods=horizon, freq='MS')
     
     if regressor_cols:
+        # Unir los valores futuros del regresor (que están en 'regressors')
         future = pd.merge(future, regressors, on='ds', how='left')
+        # Rellenar (interpolar) los valores del regresor en el futuro
         future[regressor_cols] = future[regressor_cols].interpolate(method='linear', limit_direction='both')
 
     # 8. Generar pronóstico final
     forecast = full_model.predict(future)
     return full_model, forecast, metrics
-
+    
 @st.cache_data(show_spinner=False)
 def auto_arima_search(ts_data, test_size):
     """Encuentra los parámetros óptimos para un modelo SARIMA usando auto_arima."""
@@ -300,6 +301,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
