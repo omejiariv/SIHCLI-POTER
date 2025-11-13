@@ -105,7 +105,7 @@ def get_weather_forecast(latitude, longitude):
         st.error(f"Ocurrió un error inesperado al obtener el pronóstico: {e}")
         return None
 
-@st.cache_data(ttl=86400) # Cachear por 1 día (el pronóstico se actualiza mensual/semanalmente)
+@st.cache_data(ttl=86400) # Cachear por 1 día
 def get_official_enso_forecast():
     """
     Descarga y procesa el pronóstico consolidado de ENSO (IRI/CPC).
@@ -118,25 +118,35 @@ def get_official_enso_forecast():
         - df_sarima: DataFrame listo para SARIMA (cols 'fecha_mes_año', 'anomalia_oni')
     """
     try:
-        # URL del archivo de datos oficial de IRI (Tab-Separated-Values)
         DATA_URL = "https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv"
         
-        # Leer los datos, saltando las filas de cabecera
-        # El archivo TSV usa múltiples espacios como separador, '\s+' lo maneja
-        df = pd.read_csv(DATA_URL, sep=r'\s+', skiprows=4)
+        # --- INICIO DE LA CORRECCIÓN ---
         
-        # Quedarnos solo con las columnas que necesitamos
-        # NINO3.4_ANOM_FCST es el valor pronosticado
+        # 1. Definimos los 8 nombres de columna que sabemos que existen en los datos
+        col_names = [
+            "MONTH", "YEAR", "NINO1+2_OBS", "NINO1+2_ANOM", 
+            "NINO3_ANOM", "NINO4_ANOM", "NINO3.4_ANOM", "NINO3.4_ANOM_FCST"
+        ]
+        
+        # 2. Saltamos 5 líneas (las 4 de basura + el encabezado defectuoso)
+        #    Le decimos header=None para que no intente leerlo.
+        #    Le pasamos nuestra lista de nombres.
+        df = pd.read_csv(
+            DATA_URL, 
+            sep=r'\s+', 
+            skiprows=5, 
+            header=None, 
+            names=col_names
+        )
+        # --- FIN DE LA CORRECCIÓN ---
+
+        # El resto de la función es idéntica y funcionará correctamente
         df_forecast = df[['MONTH', 'YEAR', 'NINO3.4_ANOM_FCST']].copy()
         
-        # El pronóstico incluye el mes actual como "observado", lo eliminamos para evitar duplicados
         df_forecast = df_forecast[df_forecast['NINO3.4_ANOM_FCST'] != 'OBS'].dropna()
         
-        # Convertir la columna de pronóstico a numérico
         df_forecast['anomalia_oni'] = pd.to_numeric(df_forecast['NINO3.4_ANOM_FCST'])
         
-        # Mapear las temporadas de 3 letras al mes CENTRAL de esa temporada
-        # (JFM -> Feb, FMA -> Mar, etc.)
         season_to_month_map = {
             'JFM': 2, 'FMA': 3, 'MAM': 4, 'AMJ': 5, 'MJJ': 6, 'JJA': 7,
             'JAS': 8, 'ASO': 9, 'SON': 10, 'OND': 11, 'NDJ': 12, 'DJF': 1
@@ -144,29 +154,22 @@ def get_official_enso_forecast():
         
         df_forecast['month'] = df_forecast['MONTH'].map(season_to_month_map)
         
-        # Manejar el caso 'DJF' que cruza el año (ej. DJF 2025 es Enero 2026)
         df_forecast['year_adj'] = df_forecast['YEAR'].where(df_forecast['MONTH'] != 'DJF', df_forecast['YEAR'] + 1)
         
-        # Crear la columna de fecha (datetime)
         df_forecast['ds'] = pd.to_datetime(
             df_forecast['year_adj'].astype(str) + '-' + df_forecast['month'].astype(str) + '-01'
         )
         
-        # Seleccionar y ordenar los datos
         df_clean = df_forecast[['ds', 'anomalia_oni']].sort_values(by='ds').drop_duplicates()
         
-        # --- Interpolar a frecuencia Mensual ---
         df_clean = df_clean.set_index('ds')
-        # Crear un rango de fechas mensual (MS) que cubra todo el pronóstico
         date_range = pd.date_range(start=df_clean.index.min(), end=df_clean.index.max(), freq='MS')
         
-        # Re-indexar y rellenar huecos
         df_monthly = df_clean.reindex(date_range)
         df_monthly['anomalia_oni'] = df_monthly['anomalia_oni'].interpolate(method='linear')
         
         df_monthly = df_monthly.reset_index().rename(columns={'index': 'ds'})
 
-        # Preparar los dos DataFrames de salida
         df_prophet_out = df_monthly.rename(columns={'anomalia_oni': Config.ENSO_ONI_COL})
         
         df_sarima_out = df_monthly.rename(
@@ -176,6 +179,7 @@ def get_official_enso_forecast():
         return df_prophet_out, df_sarima_out
         
     except Exception as e:
+        # Esto capturará el error de tokenización y lo mostrará
         st.error(f"Error al descargar el pronóstico oficial del ENSO: {e}")
         return None, None
 
@@ -373,6 +377,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
