@@ -111,13 +111,77 @@ def get_weather_forecast(latitude, longitude):
 @st.cache_data(ttl=86400) # Cachear por 1 día
 def get_official_enso_forecast():
     """
-    [FUNCIÓN DESACTIVADA]
-    El scrapeo del archivo TSV de IRI/CPC es demasiado inestable.
-    Esta función ahora retorna None y la lógica se ha movido
-    de nuevo a visualizer.py (Pronóstico Prophet de la historia).
+    Descarga y procesa el pronóstico consolidado de ENSO (IRI/CPC)
+    desde la fuente de datos JSON oficial.
+    
+    Esta función es robusta contra los bloqueos de HTML/TSV.
+    
+    Retorna:
+        - df_prophet: DataFrame listo para Prophet (cols 'ds', 'anomalia_oni')
+        - df_sarima: DataFrame listo para SARIMA (cols 'fecha_mes_año', 'anomalia_oni')
     """
-    st.error("La descarga de datos oficiales de IRI se ha desactivado por inestabilidad de la fuente.")
-    return None, None
+    try:
+        # --- NUEVA FUENTE DE DATOS: JSON ---
+        DATA_URL = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/graphics/ensoplume_full.json"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
+        }
+        
+        response = requests.get(DATA_URL, headers=headers)
+        response.raise_for_status()
+        json_data = response.json()
+
+        # --- PARSEO DEL JSON ---
+        
+        # 1. Obtener los datos del pronóstico (usamos el modelo estadístico de IRI)
+        # Los datos vienen como [ [año_decimal, valor], [año_decimal, valor], ... ]
+        forecast_data = json_data.get('stat_fcst', {}).get('IRI-AI', [])
+        if not forecast_data:
+            raise ValueError("No se encontró la clave 'IRI-AI' en el JSON del pronóstico.")
+            
+        df_forecast = pd.DataFrame(forecast_data, columns=['year_decimal', 'anomalia_oni'])
+        
+        # 2. Convertir año decimal a datetime
+        # (ej. 2025.5 -> 2025 + 0.5 * 12 = mes 6 (Junio))
+        def decimal_year_to_datetime(dec_year):
+            year = int(dec_year)
+            month_decimal = (dec_year - year) * 12
+            # El pronóstico es estacional (3 meses), lo centramos
+            month = int(round(month_decimal)) + 1 
+            if month > 12: # Manejar redondeo de fin de año
+                year += 1
+                month = 1
+            return datetime(year, month, 1)
+
+        df_forecast['ds'] = df_forecast['year_decimal'].apply(decimal_year_to_datetime)
+        
+        # 3. Limpiar y seleccionar
+        df_clean = df_forecast[['ds', 'anomalia_oni']].sort_values(by='ds').drop_duplicates()
+
+        # 4. Interpolar a frecuencia mensual ('MS')
+        df_clean = df_clean.set_index('ds')
+        date_range = pd.date_range(start=df_clean.index.min(), end=df_clean.index.max(), freq='MS')
+        
+        df_monthly = df_clean.reindex(date_range)
+        # Rellenar los meses faltantes (ej. Enero) usando interpolación lineal
+        df_monthly['anomalia_oni'] = df_monthly['anomalia_oni'].interpolate(method='linear', limit_direction='both')
+        
+        df_monthly = df_monthly.reset_index().rename(columns={'index': 'ds'})
+
+        # 5. Preparar los DataFrames de salida
+        df_prophet_out = df_monthly.rename(columns={'anomalia_oni': Config.ENSO_ONI_COL})
+        
+        df_sarima_out = df_monthly.rename(
+            columns={'ds': Config.DATE_COL, 'anomalia_oni': Config.ENSO_ONI_COL}
+        )
+        
+        return df_prophet_out, df_sarima_out
+        
+    except Exception as e:
+        st.error(f"Error al descargar el pronóstico oficial del ENSO: {e}")
+        st.exception(e) # Imprimir el traceback completo para depuración
+        return None, None
         
 @st.cache_data(show_spinner=False)
 def get_decomposition_results(series, period=12, model='additive'):
@@ -313,6 +377,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
