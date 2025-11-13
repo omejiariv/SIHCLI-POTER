@@ -5738,7 +5738,10 @@ def display_climate_scenarios_tab(**kwargs):
                     "Línea Base (mm/año)": [p_base, etp_base, q_base],
                     "Escenario (mm/año)": [p_escenario, etp_escenario, q_escenario]
                 })
-                st.dataframe(df_balance.style.format('{:.1f}'), use_container_width=True)
+                st.dataframe(df_balance.style.format({
+                    'Línea Base (mm/año)': '{:.1f}',
+                    'Escenario (mm/año)': '{:.1f}'
+                }), use_container_width=True)
 
             # --- 5. ANÁLISIS DE SEQUÍA (SPI) ---
             st.subheader("Impacto en la Frecuencia de Sequías (SPI)")
@@ -5813,4 +5816,5 @@ def display_climate_scenarios_tab(**kwargs):
             modificando los rasters de precipitación y temperatura para visualizar el 
             desplazamiento geográfico de los ecosistemas.
             """)
+
 
