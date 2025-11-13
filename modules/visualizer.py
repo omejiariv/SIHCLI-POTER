@@ -3694,10 +3694,13 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
             Este pronóstico se basa en el **Pronóstico Consolidado Oficial de ENSO (IRI/CPC)**, publicado por el *International Research Institute for Climate and Society (IRI)* de la Universidad de Columbia y el *Climate Prediction Center (CPC)* de la NOAA.
             
             **Metodología:**
-            1.  La aplicación descarga el archivo de datos tabulados más reciente desde la [fuente oficial de IRI](https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv).
+            1.  La aplicación descarga el archivo de datos tabulados más reciente desde la fuente oficial de IRI.
             2.  Estos datos se publican estacionalmente (ej., 'JFM', 'FMA').
             3.  La aplicación asigna estos valores al mes central de la temporada (ej., 'JFM' -> Febrero) y luego realiza una **interpolación lineal** para generar un pronóstico mensual (`MS`), que es el formato requerido por los modelos de precipitación.
-            """)        
+            
+            ---
+            *Datos proporcionados por The International Research Institute for Climate and Society, Columbia University Climate School. [Ver fuente](https://iri.columbia.edu/ENSO).*
+            """)
 
         if df_enso is None or df_enso.empty:
             st.warning("Datos históricos de ENSO no están disponibles. El gráfico puede estar incompleto.")
@@ -5663,5 +5666,6 @@ def display_alerts_tab(**kwargs):
             
     else:
         st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
+
 
 
