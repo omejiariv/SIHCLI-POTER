@@ -130,7 +130,7 @@ def main():
         "Zonas de Vida",
         "Escenarios Climáticos",
         "Análisis de Anomalías", "Análisis de Extremos", "Estadísticas",
-        "Correlación", "Análisis ENSO", "Tendencias y Pronósticos",
+        "Correlación", "Análisis ENSO", "Pronóstico Climático", "Tendencias y Pronósticos",
         "Pronóstico Semanal",
         "Análisis por Cuenca", "Comparación de Periodos",
         "Tabla de Estaciones", "Generar Reporte"
@@ -638,6 +638,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
