@@ -3683,104 +3683,79 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     pronostico_sarima_tab, pronostico_prophet_tab, compare_forecast_tab = st.tabs(tab_names)
 
     # -------------------------------------------------------------------------
-    # --- PESTAÑA 1: PRONÓSTICO ENSO (MODIFICADA PARA DATOS OFICIALES) ---
+# --- PESTAÑA 1: PRONÓSTICO ENSO (RESTAURADA A PROPHET-SOBRE-HISTORIA) ---
     # -------------------------------------------------------------------------
     with pronostico_enso_tab:
-        st.subheader("Pronóstico Oficial del Índice ENSO (IRI/CPC)")
-        st.info("Presiona el botón para descargar y procesar el último pronóstico consolidado de ENSO (IRI/CPC). Este pronóstico se usará como regresor.")
-        with st.expander("Fuente de Datos y Metodología (ENSO)"):
-            st.markdown("""
-            **Fuente de Datos:**
-            Este pronóstico se basa en el **Pronóstico Consolidado Oficial de ENSO (IRI/CPC)**, publicado por el *International Research Institute for Climate and Society (IRI)* de la Universidad de Columbia y el *Climate Prediction Center (CPC)* de la NOAA.
-            
-            **Metodología:**
-            1.  La aplicación descarga el archivo de datos tabulados más reciente desde la fuente oficial de IRI.
-            2.  Estos datos se publican estacionalmente (ej., 'JFM', 'FMA').
-            3.  La aplicación asigna estos valores al mes central de la temporada (ej., 'JFM' -> Febrero) y luego realiza una **interpolación lineal** para generar un pronóstico mensual (`MS`), que es el formato requerido por los modelos de precipitación.
-            
-            ---
-            *Datos proporcionados por The International Research Institute for Climate and Society, Columbia University Climate School. [Ver fuente](https://iri.columbia.edu/ENSO).*
-            """)
+        st.subheader("Pronóstico del Índice ENSO (ONI)")
+        st.info("Genere un pronóstico para el índice ENSO basado en la serie histórica. Este pronóstico se usará como regresor.")
 
         if df_enso is None or df_enso.empty:
-            st.warning("Datos históricos de ENSO no están disponibles. El gráfico puede estar incompleto.")
-        
-        # Importar la nueva función
-        try:
-            from modules.forecasting import get_official_enso_forecast
-        except ImportError:
-            st.error("Error: No se encontró la función 'get_official_enso_forecast' en forecasting.py")
-            st.stop()
-
-        if st.button("Descargar/Actualizar Pronóstico Oficial ENSO"):
-            with st.spinner("Descargando y procesando pronóstico oficial del IRI/CPC..."):
+            st.warning("Datos de ENSO (requeridos para esta pestaña) no están disponibles.")
+        else:
+            # Preparar datos de ENSO para Prophet
+            df_enso_prophet = df_enso.rename(columns={Config.DATE_COL: 'ds', Config.ENSO_ONI_COL: 'y'})
+            df_enso_prophet = df_enso_prophet[['ds', 'y']].dropna()
+            
+            horizon_enso = st.slider("Meses a pronosticar (ENSO):", 12, 36, 12, key="enso_horizon_slider")
+            
+            # --- Función de Prophet cacheada para ENSO ---
+            @st.cache_data
+            def train_and_forecast_enso(data, horizon):
+                # Importaciones locales para la función cacheada
+                from prophet import Prophet
                 
-                df_prophet_out, df_sarima_out = get_official_enso_forecast()
-                
-                if df_prophet_out is not None and df_sarima_out is not None:
-                    # ¡GUARDARLOS EN LA SESIÓN!
-                    st.session_state['enso_regressor_df_prophet'] = df_prophet_out
-                    st.session_state['enso_regressor_df_sarima'] = df_sarima_out
+                model_enso = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False).fit(data)
+                future_enso = model_enso.make_future_dataframe(periods=horizon, freq='MS')
+                forecast_enso = model_enso.predict(future_enso)
+                return model_enso, forecast_enso
+            
+            if st.button("Generar Pronóstico ENSO (con Prophet)"):
+                with st.spinner("Entrenando modelo ENSO (basado en la historia)..."):
+                    model_enso, forecast_enso = train_and_forecast_enso(df_enso_prophet, horizon_enso)
                     
-                    # Guardar para el gráfico
-                    st.session_state['enso_forecast_official'] = df_prophet_out
-                    st.success("¡Pronóstico oficial de ENSO cargado y listo para usar!")
-                else:
-                    st.error("No se pudieron cargar los datos del pronóstico de ENSO.")
-        
-        if 'enso_forecast_official' in st.session_state:
-            st.markdown("---")
-            st.markdown("##### Gráfico del Pronóstico Oficial ENSO")
+                    # ¡GUARDARLOS EN LA SESIÓN!
+                    # Guardar con los nombres de columna que los modelos esperan
+                    st.session_state['enso_regressor_df_prophet'] = forecast_enso[['ds', 'yhat']].rename(columns={'yhat': Config.ENSO_ONI_COL})
+                    st.session_state['enso_regressor_df_sarima'] = forecast_enso[['ds', 'yhat']].rename(columns={'ds': Config.DATE_COL, 'yhat': Config.ENSO_ONI_COL})
+                    
+                    # Guardar el modelo y el pronóstico para el gráfico
+                    st.session_state['enso_model_fitted'] = model_enso
+                    st.session_state['enso_forecast_full'] = forecast_enso
+                    st.session_state['enso_forecast_horizon'] = horizon_enso
+                    st.success("¡Pronóstico ENSO (basado en historia) generado y listo para usar!")
             
-            forecast_data = st.session_state['enso_forecast_official']
-            
-            fig_enso = go.Figure()
-
-            # Añadir línea de pronóstico
-            fig_enso.add_trace(go.Scatter(
-                x=forecast_data['ds'],
-                y=forecast_data[Config.ENSO_ONI_COL],
-                mode='lines+markers',
-                line=dict(color='red', width=3, dash='dot'),
-                name='Pronóstico Oficial (Interpolado)'
-            ))
-            
-            # Añadir líneas de umbral
-            fig_enso.add_hline(y=0.5, line=dict(color='red', dash='dash'), annotation_text='El Niño')
-            fig_enso.add_hline(y=-0.5, line=dict(color='blue', dash='dash'), annotation_text='La Niña')
-            fig_enso.add_hline(y=0, line=dict(color='grey', dash='solid'), annotation_text='Neutral')
-
-            # Opcional: Añadir datos históricos si están disponibles
-            if df_enso is not None and not df_enso.empty:
-                 # Mostrar últimos 5 años de historia
-                hist_data = df_enso[df_enso[Config.DATE_COL] > (datetime.now() - DateOffset(years=5))]
-                fig_enso.add_trace(go.Scatter(
-                    x=hist_data[Config.DATE_COL],
-                    y=hist_data[Config.ENSO_ONI_COL],
-                    mode='lines',
-                    line=dict(color='black'),
-                    name='Histórico (ONI)'
-                ))
-
-            fig_enso.update_layout(
-                title="Pronóstico ENSO Consolidado (IRI/CPC)",
-                xaxis_title="Fecha",
-                yaxis_title="Anomalía ONI (°C)"
-            )
-            st.plotly_chart(fig_enso, use_container_width=True)
-            
-            st.markdown("##### Clasificación del Pronóstico Futuro")
-            
-            def classify_enso(yhat):
-                if yhat >= 0.5: return "El Niño 🔴"
-                if yhat <= -0.5: return "La Niña 🔵"
-                return "Neutral ⚪"
-            
-            # Copiar para evitar SettingWithCopyWarning
-            classification_data = forecast_data.copy()
-            classification_data['Clasificación'] = classification_data[Config.ENSO_ONI_COL].apply(classify_enso)
-            
-            st.dataframe(classification_data.style.format({Config.ENSO_ONI_COL: '{:.2f}'}), use_container_width=True)
+            if 'enso_model_fitted' in st.session_state and 'enso_forecast_full' in st.session_state:
+                st.markdown("---")
+                st.markdown("##### Gráfico del Pronóstico ENSO (Prophet)")
+                
+                # Usar la importación de plot_plotly que ya deberías tener al inicio de visualizer.py
+                fig_enso = plot_plotly(st.session_state['enso_model_fitted'], st.session_state['enso_forecast_full'])
+                st.plotly_chart(fig_enso, use_container_width=True)
+                
+                st.markdown("##### Clasificación del Pronóstico Futuro")
+                
+                # Corrección para SettingWithCopyWarning
+                forecast_data = st.session_state['enso_forecast_full'].tail(st.session_state['enso_forecast_horizon']).copy()
+                
+                def classify_enso(yhat):
+                    if yhat >= 0.5: return "El Niño 🔴"
+                    if yhat <= -0.5: return "La Niña 🔵"
+                    return "Neutral ⚪"
+                
+                # Usamos 'yhat' porque es el nombre de columna en 'forecast_enso'
+                forecast_data['Clasificación'] = forecast_data['yhat'].apply(classify_enso)
+                st.dataframe(forecast_data[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}), use_container_width=True)
+                
+                with st.expander("Fuente de Datos y Metodología (ENSO)"):
+                    st.markdown("""
+                    **Fuente de Datos:**
+                    Este pronóstico se genera usando el modelo **Prophet (de Meta)**, entrenado sobre la **serie histórica del Índice Oceánico El Niño (ONI)** (columna `anomalia_oni`) incluida en tus datos.
+                    
+                    **Metodología:**
+                    1.  La aplicación entrena un modelo Prophet con los datos históricos completos del ONI.
+                    2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
+                    3.  Este pronóstico (que tiende a revertir a la media "Neutral" a largo plazo) se guarda y se utiliza como regresor externo para los modelos de precipitación.
+                    """)
 
     # -------------------------------------------------------------------------
     # --- PESTAÑA 2: ANÁLISIS LINEAL ---
@@ -5666,6 +5641,7 @@ def display_alerts_tab(**kwargs):
             
     else:
         st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
+
 
 
 
