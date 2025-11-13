@@ -120,31 +120,69 @@ def get_official_enso_forecast():
     try:
         DATA_URL = "https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv"
         
-        # --- INICIO DE LA CORRECCIÓN ---
+        # --- INICIO DE LA CORRECCIÓN (Lector de texto manual) ---
         
-        # 1. Definimos los 8 nombres de columna que sabemos que existen en los datos
-        col_names = [
-            "MONTH", "YEAR", "NINO1+2_OBS", "NINO1+2_ANOM", 
-            "NINO3_ANOM", "NINO4_ANOM", "NINO3.4_ANOM", "NINO3.4_ANOM_FCST"
-        ]
+        # 1. Descargar el archivo como texto crudo
+        response = requests.get(DATA_URL)
+        response.raise_for_status() # Asegurarse de que la descarga fue exitosa
+        data_text = response.text
+
+        # 2. Procesar el texto línea por línea
+        lines = data_text.split('\n')
         
-        # 2. Saltamos 5 líneas (las 4 de basura + el encabezado defectuoso)
-        #    Le decimos header=None para que no intente leerlo.
-        #    Le pasamos nuestra lista de nombres.
-        df = pd.read_csv(
-            DATA_URL, 
-            sep=r'\s+', 
-            skiprows=5, 
-            header=None, 
-            names=col_names
-        )
+        data_rows = []
+        
+        # Encontrar la línea del encabezado (Header)
+        # Buscamos 'NINO3.4_ANOM_FCST'
+        header_line_index = -1
+        for i, line in enumerate(lines):
+            if "NINO3.4_ANOM_FCST" in line:
+                header_line_index = i
+                break
+        
+        if header_line_index == -1:
+            raise ValueError("No se pudo encontrar el encabezado 'NINO3.4_ANOM_FCST' en el archivo.")
+
+        # Encontrar la posición de las columnas que queremos
+        headers = lines[header_line_index].split()
+        month_idx = headers.index("MONTH")
+        year_idx = headers.index("YEAR")
+        forecast_idx = headers.index("NINO3.4_ANOM_FCST")
+
+        # 3. Iterar sobre las líneas de datos (después del encabezado)
+        for line in lines[header_line_index + 1:]:
+            items = line.split()
+            
+            # Si la línea está vacía o es un sub-encabezado, saltar
+            if len(items) < max(month_idx, year_idx, forecast_idx) + 1:
+                continue
+                
+            month = items[month_idx]
+            year_str = items[year_idx]
+            forecast_val = items[forecast_idx]
+            
+            # Solo nos interesan las filas que NO son 'OBS' (Observaciones)
+            if forecast_val != 'OBS':
+                try:
+                    # Convertir el año (puede ser '2025' o '2025-26')
+                    year_int = int(year_str.split('-')[0])
+                    data_rows.append({
+                        "MONTH": month,
+                        "YEAR": year_int,
+                        "NINO3.4_ANOM_FCST": float(forecast_val)
+                    })
+                except ValueError:
+                    # Ignorar líneas que no se puedan convertir (como el pie de página)
+                    continue
+
+        df_forecast = pd.DataFrame(data_rows)
+        
+        if df_forecast.empty:
+            raise ValueError("No se encontraron datos de pronóstico válidos en el archivo.")
+
         # --- FIN DE LA CORRECCIÓN ---
 
         # El resto de la función es idéntica y funcionará correctamente
-        df_forecast = df[['MONTH', 'YEAR', 'NINO3.4_ANOM_FCST']].copy()
-        
-        df_forecast = df_forecast[df_forecast['NINO3.4_ANOM_FCST'] != 'OBS'].dropna()
-        
         df_forecast['anomalia_oni'] = pd.to_numeric(df_forecast['NINO3.4_ANOM_FCST'])
         
         season_to_month_map = {
@@ -154,6 +192,8 @@ def get_official_enso_forecast():
         
         df_forecast['month'] = df_forecast['MONTH'].map(season_to_month_map)
         
+        # Manejar el caso 'DJF' que cruza el año
+        # (El año ya es 'year_int', por lo que podemos sumar)
         df_forecast['year_adj'] = df_forecast['YEAR'].where(df_forecast['MONTH'] != 'DJF', df_forecast['YEAR'] + 1)
         
         df_forecast['ds'] = pd.to_datetime(
@@ -182,7 +222,7 @@ def get_official_enso_forecast():
         # Esto capturará el error de tokenización y lo mostrará
         st.error(f"Error al descargar el pronóstico oficial del ENSO: {e}")
         return None, None
-
+        
 @st.cache_data(show_spinner=False)
 def get_decomposition_results(series, period=12, model='additive'):
     """Realiza la descomposición de la serie de tiempo."""
@@ -377,6 +417,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
