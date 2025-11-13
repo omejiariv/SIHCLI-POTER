@@ -4053,23 +4053,55 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         use_auto_arima = st.checkbox("Encontrar parámetros óptimos automáticamente (Auto-ARIMA)",
                                      value=False)
         
-        # --- NUEVO BLOQUE ENSO ---
-        use_enso_regressor_sarima = st.checkbox("Usar pronóstico ENSO como regresor (Recomendado)", key="sarima_enso_cb")
+        # --- NUEVO BLOQUE DE REGRESORES (MULTI-SELECT) ---
         regresores_sarima = None
+        available_regressors_sarima = list(st.session_state.get('forecasted_regressors_sarima', {}).keys())
         
-        if use_enso_regressor_sarima:
-            if 'enso_regressor_df_sarima' not in st.session_state:
-                st.warning("¡Error! Debe generar el 'Pronóstico ENSO' en la primera pestaña antes de poder usarlo.")
-                st.stop()
-            else:
-                regresores_sarima = st.session_state['enso_regressor_df_sarima']
-                st.success("Usando pronóstico ENSO como regresor.")
+        selected_regressors_sarima = st.multiselect(
+            "Usar pronósticos climáticos como regresores:",
+            options=available_regressors_sarima,
+            key="sarima_regressor_multiselect"
+        )
+        
+        if selected_regressors_sarima:
+            try:
+                # Combinar los DataFrames de regresores seleccionados
+                all_dfs = [st.session_state['forecasted_regressors_sarima'][name] for name in selected_regressors_sarima]
+                
+                # Empezar con el primer DF
+                regresores_sarima = all_dfs[0]
+                
+                # Unir los demás (si hay más de uno)
+                if len(all_dfs) > 1:
+                    for df in all_dfs[1:]:
+                        regresores_sarima = pd.merge(regresores_sarima, df, on=Config.DATE_COL, how='outer')
+                
+                # Interpolar por si los pronósticos no se solapan perfectamente
+                regresores_sarima = regresores_sarima.set_index(Config.DATE_COL).interpolate(method='linear', limit_direction='both').reset_index()
+                
+                st.success(f"Usando {', '.join(selected_regressors_sarima)} como regresor(es).")
+            except Exception as e:
+                st.error(f"Error al combinar regresores: {e}")
+                regresores_sarima = None
         # --- FIN NUEVO BLOQUE ---
 
         if (station_to_forecast or analysis_type_sarima == "Promedio Regional") and st.button("Generar Pronóstico SARIMA"):
             
+            # ... (El resto de la lógica de la pestaña SARIMA, desde "with st.spinner(...)"
+            #      hasta "st.exception(e)", permanece EXACTAMENTE IGUAL que antes.
+            #      Asegúrate de copiarla desde tu archivo funcional.) ...
+            
+            # --- PEGA EL RESTO DE TU PESTAÑA SARIMA AQUÍ ---
+            # (El código que te di en el paso anterior que empieza con:)
+            # with st.spinner(f"Preparando y completando datos (SARIMA) para {station_name_for_title}..."):
+            # ...
+            # ... (y termina con) ...
+            #     except Exception as e:
+            #         st.error(f"No se pudo generar el pronóstico SARIMA. Error: {e}")
+            #         st.exception(e)
+            
+            # --- (Este es el código que debe ir aquí) ---
             with st.spinner(f"Preparando y completando datos (SARIMA) para {station_name_for_title}..."):
-                
                 if analysis_type_sarima == "Estación Individual":
                     original_station_data_sarima = \
                         df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
@@ -4101,7 +4133,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         ts_hist, forecast_mean, forecast_ci, metrics, sarima_df_export = \
                             generate_sarima_forecast(ts_data_sarima, order, seasonal_order, forecast_horizon,
                                                      test_size,
-                                                     regressors=regresores_sarima # <-- PASAR REGRESOR
+                                                     regressors=regresores_sarima # <-- PASA LOS REGRESORES
                                                     )
                         
                         st.session_state['sarima_results'] = {
@@ -4184,23 +4216,41 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
             test_size_prophet = st.slider("Meses para evaluación:", 12, 36, 12, step=6,
                                            key="prophet_test_size")
         
-        # --- NUEVO BLOQUE ENSO ---
-        use_enso_regressor_prophet = st.checkbox("Usar pronóstico ENSO como regresor (Recomendado)", key="prophet_enso_cb")
+        # --- NUEVO BLOQUE DE REGRESORES (MULTI-SELECT) ---
         regresores_prophet = None
+        available_regressors_prophet = list(st.session_state.get('forecasted_regressors_prophet', {}).keys())
         
-        if use_enso_regressor_prophet:
-            if 'enso_regressor_df_prophet' not in st.session_state:
-                st.warning("¡Error! Debe generar el 'Pronóstico ENSO' en la primera pestaña antes de poder usarlo.")
-                st.stop()
-            else:
-                regresores_prophet = st.session_state['enso_regressor_df_prophet']
-                st.success("Usando pronóstico ENSO como regresor.")
+        selected_regressors_prophet = st.multiselect(
+            "Usar pronósticos climáticos como regresores:",
+            options=available_regressors_prophet,
+            key="prophet_regressor_multiselect"
+        )
+        
+        if selected_regressors_prophet:
+            try:
+                all_dfs = [st.session_state['forecasted_regressors_prophet'][name] for name in selected_regressors_prophet]
+                regresores_prophet = all_dfs[0]
+                
+                if len(all_dfs) > 1:
+                    for df in all_dfs[1:]:
+                        regresores_prophet = pd.merge(regresores_prophet, df, on='ds', how='outer')
+                
+                regresores_prophet = regresores_prophet.set_index('ds').interpolate(method='linear', limit_direction='both').reset_index()
+                
+                st.success(f"Usando {', '.join(selected_regressors_prophet)} como regresor(es).")
+            except Exception as e:
+                st.error(f"Error al combinar regresores: {e}")
+                regresores_prophet = None
         # --- FIN NUEVO BLOQUE ---
 
         if (station_to_forecast_prophet or analysis_type_prophet == "Promedio Regional") and st.button("Generar Pronóstico Prophet"):
             
+            # ... (El resto de la lógica de la pestaña Prophet, desde "with st.spinner(...)"
+            #      hasta "st.exception(e)", permanece EXACTAMENTE IGUAL que antes.
+            #      Asegúrate de copiarla desde tu archivo funcional.) ...
+
+            # --- (Este es el código que debe ir aquí) ---
             with st.spinner(f"Preparando y completando datos (Prophet) para {station_name_for_title}..."):
-                
                 if analysis_type_prophet == "Estación Individual":
                     original_station_data = \
                         df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
@@ -4228,7 +4278,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                             ts_data_prophet,
                             forecast_horizon_prophet, 
                             test_size_prophet, 
-                            regressors=regresores_prophet # <-- PASAR REGRESOR
+                            regressors=regresores_prophet # <-- PASA LOS REGRESORES
                         )
                     
                     st.session_state['prophet_results'] = {
@@ -4284,7 +4334,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 except Exception as e:
                     st.error(f"No se pudo generar el pronóstico con Prophet. Error: {e}")
                     st.exception(e)
-
+                    
     # -------------------------------------------------------------------------
     # --- PESTAÑA 9: SARIMA vs PROPHET (MODIFICADA) ---
     # -------------------------------------------------------------------------
@@ -5822,6 +5872,7 @@ def display_climate_scenarios_tab(**kwargs):
             modificando los rasters de precipitación y temperatura para visualizar el 
             desplazamiento geográfico de los ecosistemas.
             """)
+
 
 
 
