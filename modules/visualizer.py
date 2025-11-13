@@ -3683,83 +3683,89 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     pronostico_sarima_tab, pronostico_prophet_tab, compare_forecast_tab = st.tabs(tab_names)
 
     # -------------------------------------------------------------------------
-# --- PESTAÑA 1: PRONÓSTICO ENSO (RESTAURADA A PROPHET-SOBRE-HISTORIA) ---
+    # --- PESTAÑA 1: PRONÓSTICO CLIMÁTICO (NUEVA LÓGICA) ---
     # -------------------------------------------------------------------------
     with pronostico_enso_tab:
-        st.subheader("Pronóstico del Índice ENSO (ONI)")
-        st.info("Genere un pronóstico para el índice ENSO basado en la serie histórica. Este pronóstico se usará como regresor.")
+        st.subheader("Pronóstico de Índices Climáticos")
+        st.info("Genere un pronóstico para un índice climático (ONI, SOI, etc.). Estos pronósticos se guardarán y podrán ser usados como regresores.")
 
-        if df_enso is None or df_enso.empty:
-            st.warning("Datos de ENSO (requeridos para esta pestaña) no están disponibles.")
-        else:
-            # Preparar datos de ENSO para Prophet
-            df_enso_prophet = df_enso.rename(columns={Config.DATE_COL: 'ds', Config.ENSO_ONI_COL: 'y'})
-            df_enso_prophet = df_enso_prophet[['ds', 'y']].dropna()
+        if df_enso is None or df_long is None:
+            st.warning("Datos climáticos (requeridos para esta pestaña) no están disponibles.")
+            st.stop()
             
-            horizon_enso = st.slider("Meses a pronosticar (ENSO):", 12, 36, 12, key="enso_horizon_slider")
+        # --- NUEVO: Selección de Índice ---
+        # Mapeo de nombres amigables a columnas y DataFrames
+        index_map = {
+            "ONI (ENSO)": (Config.ENSO_ONI_COL, df_enso.rename(columns={Config.DATE_COL: 'ds', Config.ENSO_ONI_COL: 'y'})[['ds', 'y']].dropna()),
+            "SOI": (Config.SOI_COL, df_long.rename(columns={Config.DATE_COL: 'ds', Config.SOI_COL: 'y'})[['ds', 'y']].dropna()),
+            "IOD": (Config.IOD_COL, df_long.rename(columns={Config.DATE_COL: 'ds', Config.IOD_COL: 'y'})[['ds', 'y']].dropna()),
+        }
+        
+        index_choice_name = st.selectbox(
+            "Seleccione un índice para pronosticar:",
+            options=index_map.keys(),
+            key="index_choice_select"
+        )
+        
+        col_name_to_forecast, df_to_forecast = index_map[index_choice_name]
+        
+        horizon_index = st.slider("Meses a pronosticar (Índice):", 12, 36, 12, key="index_horizon_slider")
+        
+        # --- Función de Prophet cacheada ---
+        @st.cache_data
+        def train_and_forecast_index(data, horizon):
+            from prophet import Prophet
+            model = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False).fit(data)
+            future = model.make_future_dataframe(periods=horizon, freq='MS')
+            forecast = model.predict(future)
+            return model, forecast
+        
+        if st.button(f"Generar Pronóstico para {index_choice_name}"):
+            with st.spinner(f"Entrenando modelo para {index_choice_name}..."):
+                model, forecast = train_and_forecast_index(df_to_forecast, horizon_index)
+                
+                # --- NUEVA LÓGICA DE GUARDADO ---
+                # Inicializar los diccionarios en la sesión si no existen
+                if 'forecasted_regressors_prophet' not in st.session_state:
+                    st.session_state['forecasted_regressors_prophet'] = {}
+                if 'forecasted_regressors_sarima' not in st.session_state:
+                    st.session_state['forecasted_regressors_sarima'] = {}
+
+                # Guardar el pronóstico con el nombre de columna correcto
+                df_prophet_out = forecast[['ds', 'yhat']].rename(columns={'yhat': col_name_to_forecast})
+                df_sarima_out = forecast[['ds', 'yhat']].rename(columns={'ds': Config.DATE_COL, 'yhat': col_name_to_forecast})
+                
+                st.session_state['forecasted_regressors_prophet'][index_choice_name] = df_prophet_out
+                st.session_state['forecasted_regressors_sarima'][index_choice_name] = df_sarima_out
+                
+                # Guardar para el gráfico
+                st.session_state['last_forecasted_index_name'] = index_choice_name
+                st.session_state['last_forecasted_index_model'] = model
+                st.session_state['last_forecasted_index_data'] = forecast
+                
+                st.success(f"¡Pronóstico para {index_choice_name} generado y listo para usar!")
+        
+        # --- Lógica de visualización (muestra el último generado) ---
+        if 'last_forecasted_index_model' in st.session_state:
+            st.markdown("---")
+            st.markdown(f"##### Gráfico del Pronóstico: {st.session_state['last_forecasted_index_name']}")
             
-            # --- Función de Prophet cacheada para ENSO ---
-            @st.cache_data
-            def train_and_forecast_enso(data, horizon):
-                # Importaciones locales para la función cacheada
-                from prophet import Prophet
-                
-                model_enso = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False).fit(data)
-                future_enso = model_enso.make_future_dataframe(periods=horizon, freq='MS')
-                forecast_enso = model_enso.predict(future_enso)
-                return model_enso, forecast_enso
+            fig_index = plot_plotly(
+                st.session_state['last_forecasted_index_model'], 
+                st.session_state['last_forecasted_index_data']
+            )
+            st.plotly_chart(fig_index, use_container_width=True)
             
-            if st.button("Generar Pronóstico ENSO (con Prophet)"):
-                with st.spinner("Entrenando modelo ENSO (basado en la historia)..."):
-                    model_enso, forecast_enso = train_and_forecast_enso(df_enso_prophet, horizon_enso)
-                    
-                    # ¡GUARDARLOS EN LA SESIÓN!
-                    # Guardar con los nombres de columna que los modelos esperan
-                    st.session_state['enso_regressor_df_prophet'] = forecast_enso[['ds', 'yhat']].rename(columns={'yhat': Config.ENSO_ONI_COL})
-                    st.session_state['enso_regressor_df_sarima'] = forecast_enso[['ds', 'yhat']].rename(columns={'ds': Config.DATE_COL, 'yhat': Config.ENSO_ONI_COL})
-                    
-                    # Guardar el modelo y el pronóstico para el gráfico
-                    st.session_state['enso_model_fitted'] = model_enso
-                    st.session_state['enso_forecast_full'] = forecast_enso
-                    st.session_state['enso_forecast_horizon'] = horizon_enso
-                    st.success("¡Pronóstico ENSO (basado en historia) generado y listo para usar!")
-            
-            if 'enso_model_fitted' in st.session_state and 'enso_forecast_full' in st.session_state:
-                st.markdown("---")
-                st.markdown("##### Gráfico del Pronóstico ENSO (Prophet)")
+            with st.expander("Fuente de Datos y Metodología"):
+                st.markdown(f"""
+                **Fuente de Datos:**
+                Este pronóstico se genera usando el modelo **Prophet (de Meta)**, entrenado sobre la serie histórica del índice **{st.session_state['last_forecasted_index_name']}**.
                 
-                # Usar la importación de plot_plotly que ya deberías tener al inicio de visualizer.py
-                fig_enso = plot_plotly(st.session_state['enso_model_fitted'], st.session_state['enso_forecast_full'])
-                st.plotly_chart(fig_enso, use_container_width=True)
-                
-                st.markdown("##### Clasificación del Pronóstico Futuro")
-                
-                # Corrección para SettingWithCopyWarning
-                forecast_data = st.session_state['enso_forecast_full'].tail(st.session_state['enso_forecast_horizon']).copy()
-                
-                def classify_enso(yhat):
-                    if yhat >= 0.5: return "El Niño 🔴"
-                    if yhat <= -0.5: return "La Niña 🔵"
-                    return "Neutral ⚪"
-                
-                # Usamos 'yhat' porque es el nombre de columna en 'forecast_enso'
-                forecast_data['Clasificación'] = forecast_data['yhat'].apply(classify_enso)
-                st.dataframe(forecast_data[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}), use_container_width=True)
-                
-        with st.expander("Fuente de Datos y Metodología (ENSO)"):
-            st.markdown("""
-            **Fuente de Datos:**
-            Este pronóstico se basa en el **Pronóstico Consolidado Oficial de ENSO (IRI/CPC)**, publicado por el *International Research Institute for Climate and Society (IRI)* de la Universidad de Columbia y el *Climate Prediction Center (CPC)* de la NOAA.
-            
-            **Metodología:**
-            1.  La aplicación descarga el archivo de datos **JSON** oficial que alimenta los gráficos de pronóstico del IRI.
-            2.  Estos datos se publican como pronósticos estacionales (promedios de 3 meses).
-            3.  La aplicación convierte las fechas (ej. "Jul-Ago-Sep") a un formato mensual y realiza una **interpolación lineal** para rellenar los meses faltantes.
-            4.  El resultado es un pronóstico mensual (`MS`) que se utiliza como regresor externo en los modelos de precipitación.
-            
-            ---
-            *Datos proporcionados por The International Research Institute for Climate and Society, Columbia University Climate School. [Ver fuente](https://iri.columbia.edu/ENSO).*
-            """)
+                **Metodología:**
+                1.  La aplicación entrena un modelo Prophet con los datos históricos completos del índice seleccionado.
+                2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
+                3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
+                """)
 
     # -------------------------------------------------------------------------
     # --- PESTAÑA 2: ANÁLISIS LINEAL ---
@@ -5816,5 +5822,6 @@ def display_climate_scenarios_tab(**kwargs):
             modificando los rasters de precipitación y temperatura para visualizar el 
             desplazamiento geográfico de los ecosistemas.
             """)
+
 
 
