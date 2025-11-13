@@ -3746,16 +3746,20 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 forecast_data['Clasificación'] = forecast_data['yhat'].apply(classify_enso)
                 st.dataframe(forecast_data[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}), use_container_width=True)
                 
-                with st.expander("Fuente de Datos y Metodología (ENSO)"):
-                    st.markdown("""
-                    **Fuente de Datos:**
-                    Este pronóstico se genera usando el modelo **Prophet (de Meta)**, entrenado sobre la **serie histórica del Índice Oceánico El Niño (ONI)** (columna `anomalia_oni`) incluida en tus datos.
-                    
-                    **Metodología:**
-                    1.  La aplicación entrena un modelo Prophet con los datos históricos completos del ONI.
-                    2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
-                    3.  Este pronóstico (que tiende a revertir a la media "Neutral" a largo plazo) se guarda y se utiliza como regresor externo para los modelos de precipitación.
-                    """)
+        with st.expander("Fuente de Datos y Metodología (ENSO)"):
+            st.markdown("""
+            **Fuente de Datos:**
+            Este pronóstico se basa en el **Pronóstico Consolidado Oficial de ENSO (IRI/CPC)**, publicado por el *International Research Institute for Climate and Society (IRI)* de la Universidad de Columbia y el *Climate Prediction Center (CPC)* de la NOAA.
+            
+            **Metodología:**
+            1.  La aplicación descarga el archivo de datos **JSON** oficial que alimenta los gráficos de pronóstico del IRI.
+            2.  Estos datos se publican como pronósticos estacionales (promedios de 3 meses).
+            3.  La aplicación convierte las fechas (ej. "Jul-Ago-Sep") a un formato mensual y realiza una **interpolación lineal** para rellenar los meses faltantes.
+            4.  El resultado es un pronóstico mensual (`MS`) que se utiliza como regresor externo en los modelos de precipitación.
+            
+            ---
+            *Datos proporcionados por The International Research Institute for Climate and Society, Columbia University Climate School. [Ver fuente](https://iri.columbia.edu/ENSO).*
+            """)
 
     # -------------------------------------------------------------------------
     # --- PESTAÑA 2: ANÁLISIS LINEAL ---
@@ -5644,3 +5648,4 @@ def display_alerts_tab(**kwargs):
             
     else:
         st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
+
