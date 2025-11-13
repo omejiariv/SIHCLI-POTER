@@ -5649,3 +5649,167 @@ def display_alerts_tab(**kwargs):
     else:
         st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
 
+# --- PESTAÑA DE ESCENARIOS DE CAMBIO CLIMÁTICO ---
+# -------------------------------------------------------------------------
+def display_climate_scenarios_tab(**kwargs):
+    st.header("Modelado de Escenarios de Cambio Climático")
+    st.info("""
+    Esta herramienta le permite simular el impacto de cambios en la temperatura y la precipitación
+    sobre la hidrología y la frecuencia de sequías en la cuenca seleccionada.
+    """)
+
+    # --- 1. Cargar Dependencias ---
+    # Necesitamos una cuenca y sus datos base (calculados en Mapas Avanzados)
+    basin_gdf = st.session_state.get('unified_basin_gdf')
+    basin_name = st.session_state.get('selected_basins_title', 'N/A')
+    p_base = st.session_state.get('mean_precip') # Ppt media anual base
+    morph_results = st.session_state.get('morph_results', {})
+    alt_base = morph_results.get('alt_prom_m') # Altitud media base
+    
+    # Necesitamos los datos completos y los filtros de kwargs
+    df_long = kwargs.get('df_long')
+    gdf_filtered = kwargs.get('gdf_filtered')
+    gdf_subcuencas = kwargs.get('gdf_subcuencas')
+
+    if not all([basin_gdf is not None, p_base is not None, alt_base is not None, df_long is not None]):
+        st.warning(f"""
+        **Datos insuficientes para modelar escenarios.**
+        
+        Por favor, primero genere un análisis completo en la pestaña:
+        `Mapas Avanzados` -> `Superficies de Interpolación` -> `Por Cuenca Específica`
+        
+        Asegúrese de que el cálculo del **Balance Hídrico** esté activado.
+        """)
+        st.stop()
+
+    st.success(f"Analizando escenarios para la cuenca: **{basin_name}**")
+
+    # --- 2. Sliders de Escenario ---
+    st.subheader("Definir el Escenario Futuro")
+    col1, col2 = st.columns(2)
+    with col1:
+        delta_temp = st.slider(
+            "Cambio de Temperatura (ΔT)", 
+            min_value=0.0, max_value=6.0, value=2.0, step=0.1, 
+            help="Aumento de la temperatura media. Esto incrementará la Evapotranspiración (ETP)."
+        )
+        st.metric("Escenario ΔT", f"+{delta_temp:.1f} °C")
+    with col2:
+        delta_precip = st.slider(
+            "Cambio de Precipitación (ΔP)", 
+            min_value=-50, max_value=50, value=-15, step=1,
+            help="Cambio porcentual en la precipitación media anual."
+        )
+        st.metric("Escenario ΔP", f"{delta_precip:+d} %")
+
+    # --- 3. Botón de Cálculo ---
+    if st.button("Calcular Impacto del Escenario"):
+        with st.spinner("Modelando el impacto del escenario..."):
+            
+            # --- 4. ANÁLISIS DE BALANCE HÍDRICO ---
+            st.subheader("Impacto en el Balance Hídrico Anual")
+            
+            # 4a. Calcular Línea Base
+            balance_base = calculate_hydrological_balance(p_base, alt_base, basin_gdf, delta_temp_c=0.0)
+            q_base = balance_base.get('Q_mm', 0)
+            etp_base = balance_base.get('ET_media_anual_mm', 0)
+
+            # 4b. Calcular Escenario
+            p_escenario = p_base * (1 + delta_precip / 100.0)
+            balance_escenario = calculate_hydrological_balance(p_escenario, alt_base, basin_gdf, delta_temp_c=delta_temp)
+            q_escenario = balance_escenario.get('Q_mm', 0)
+            etp_escenario = balance_escenario.get('ET_media_anual_mm', 0)
+
+            # 4c. Mostrar Métricas de Impacto
+            c1, c2 = st.columns(2)
+            c1.metric(
+                "Escorrentía (Q) - Línea Base", 
+                f"{q_base:.0f} mm/año"
+            )
+            c2.metric(
+                f"Escorrentía (Q) - Escenario ({delta_temp}°C, {delta_precip}%)", 
+                f"{q_escenario:.0f} mm/año",
+                delta=f"{(q_escenario - q_base):.0f} mm/año"
+            )
+            
+            with st.expander("Ver desglose del Balance Hídrico"):
+                df_balance = pd.DataFrame({
+                    "Variable": ["Precipitación (P)", "Evapotranspiración (ETP)", "Escorrentía (Q = P - ETP)"],
+                    "Línea Base (mm/año)": [p_base, etp_base, q_base],
+                    "Escenario (mm/año)": [p_escenario, etp_escenario, q_escenario]
+                })
+                st.dataframe(df_balance.style.format('{:.1f}'), use_container_width=True)
+
+            # --- 5. ANÁLISIS DE SEQUÍA (SPI) ---
+            st.subheader("Impacto en la Frecuencia de Sequías (SPI)")
+            
+            try:
+                # 5a. Encontrar estaciones en la cuenca (lógica de la pestaña de cuencas)
+                stations_in_basin_gdf = gpd.sjoin(gdf_filtered, basin_gdf, how="inner", predicate="intersects")
+                station_names_in_basin = stations_in_basin_gdf[Config.STATION_NAME_COL].unique().tolist()
+
+                if not station_names_in_basin:
+                    st.warning("No se encontraron estaciones en la cuenca para el análisis SPI.")
+                else:
+                    # 5b. Crear serie regional (Base)
+                    df_regional_base = df_long[
+                        df_long[Config.STATION_NAME_COL].isin(station_names_in_basin)
+                    ].groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().dropna()
+                    
+                    # 5c. Crear serie regional (Escenario)
+                    df_regional_escenario = df_regional_base * (1 + delta_precip / 100.0)
+                    
+                    # 5d. Calcular SPI para ambas series
+                    spi_base = calculate_spi(df_regional_base, window=6).dropna()
+                    spi_escenario = calculate_spi(df_regional_escenario, window=6).dropna()
+
+                    # 5e. Mostrar histograma comparativo
+                    fig = go.Figure()
+                    fig.add_trace(go.Histogram(
+                        x=spi_base, name="Línea Base", 
+                        opacity=0.7, nbinsx=30, histnorm='percent'
+                    ))
+                    fig.add_trace(go.Histogram(
+                        x=spi_escenario, name="Escenario", 
+                        opacity=0.7, nbinsx=30, histnorm='percent'
+                    ))
+                    fig.update_layout(
+                        barmode='overlay', 
+                        title="Distribución Comparativa del SPI a 6 Meses",
+                        xaxis_title="Valor SPI", yaxis_title="Frecuencia (%)"
+                    )
+                    fig.add_vrect(x0=-2, x1=-1.5, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Sequía Severa")
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # 5f. Mostrar Métricas de Sequía
+                    base_drought_months = (spi_base < -1.5).sum()
+                    escenario_drought_months = (spi_escenario < -1.5).sum()
+                    total_months = len(spi_base)
+                    
+                    base_drought_perc = (base_drought_months / total_months) * 100
+                    escenario_drought_perc = (escenario_drought_months / total_months) * 100
+
+                    c1_spi, c2_spi = st.columns(2)
+                    c1_spi.metric(
+                        "% de Meses en Sequía Severa (Base)",
+                        f"{base_drought_perc:.1f}%"
+                    )
+                    c2_spi.metric(
+                        "% de Meses en Sequía Severa (Escenario)",
+                        f"{escenario_drought_perc:.1f}%",
+                        delta=f"{(escenario_drought_perc - base_drought_perc):.1f}%"
+                    )
+            
+            except Exception as e_spi:
+                st.error(f"No se pudo completar el análisis de sequía (SPI): {e_spi}")
+                st.exception(e_spi)
+
+            # --- 6. ZONAS DE VIDA (DIFERIDO) ---
+            st.markdown("---")
+            st.info("""
+            **Análisis de Zonas de Vida (Próximamente):**
+            
+            Una futura versión permitirá recalcular el mapa de Zonas de Vida (Holdridge)
+            modificando los rasters de precipitación y temperatura para visualizar el 
+            desplazamiento geográfico de los ecosistemas.
+            """)
