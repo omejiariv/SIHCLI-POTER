@@ -17,6 +17,7 @@ import openmeteo_requests
 import requests_cache
 import pandas as pd
 from retry_requests import retry
+import requests
 
 @st.cache_data(ttl=3600) # Cache por 1 hora
 def get_weather_forecast(latitude, longitude):
@@ -417,6 +418,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
