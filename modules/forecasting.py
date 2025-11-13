@@ -205,7 +205,22 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     # 1. Preparar datos de precipitación
     ts_data = ts_data_raw.rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
     ts_data = ts_data.drop_duplicates(subset=['ds'], keep='first')
+    
+    # --- INICIO DE LA CORRECCIÓN PARA 'ValueError' ---
+    # 'interpolate(method="time")' requiere un DatetimeIndex.
+    
+    # Asegurarse de que 'ds' sea un objeto datetime
+    ts_data['ds'] = pd.to_datetime(ts_data['ds'])
+    
+    # Establecer 'ds' como el índice
+    ts_data = ts_data.set_index('ds')
+    
+    # Interpolar 'y' (ahora sí funciona)
     ts_data['y'] = ts_data['y'].interpolate(method='time')
+    
+    # Devolver 'ds' a ser una columna (requerido por Prophet)
+    ts_data = ts_data.reset_index()
+    # --- FIN DE LA CORRECCIÓN ---
 
     if len(ts_data) < test_size + 24:
         raise ValueError(f"Se necesitan al menos {test_size + 24} meses de datos para Prophet.")
@@ -237,10 +252,8 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     # 5. Evaluar modelo
     test_dates = model.make_future_dataframe(periods=test_size, freq='MS').tail(test_size)
     if regressor_cols: # Si usamos regresores, añadirlos a las fechas de prueba
-        # Los datos ya están en 'ts_data' (gracias al merge anterior)
         test_regressors = ts_data[ts_data['ds'].isin(test_dates['ds'])][['ds'] + regressor_cols]
         test_dates = pd.merge(test_dates, test_regressors, on='ds', how='left')
-        # Interpolar por si acaso
         test_dates[regressor_cols] = test_dates[regressor_cols].interpolate(method='linear', limit_direction='both')
     
     y_pred_test = model.predict(test_dates)['yhat']
@@ -258,9 +271,7 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     future = full_model.make_future_dataframe(periods=horizon, freq='MS')
     
     if regressor_cols:
-        # Unir los valores futuros del regresor (que están en 'regressors')
         future = pd.merge(future, regressors, on='ds', how='left')
-        # Rellenar (interpolar) los valores del regresor en el futuro
         future[regressor_cols] = future[regressor_cols].interpolate(method='linear', limit_direction='both')
 
     # 8. Generar pronóstico final
@@ -289,6 +300,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
