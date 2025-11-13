@@ -4,7 +4,9 @@ import streamlit as st
 from modules.config import Config
 import pandas as pd
 import os
-import rasterio # Importación necesaria
+import rasterio
+import time
+import tempfile
 
 def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celdas):
     """
@@ -154,7 +156,7 @@ def create_sidebar(gdf_stations, df_long):
         # 
         # st.session_state.meses_nombres_multiselect = meses_nombres # <-- LÍNEA ELIMINADA
 
-    # --- Expander 3: Preprocesamiento y DEM (SIMPLIFICADO) ---
+    # --- Expander 3: Preprocesamiento y DEM (MODIFICADO) ---
     with st.sidebar.expander("3. Opciones de Preprocesamiento y DEM"):
         analysis_mode = st.radio("Modo de análisis", ("Usar datos originales", "Completar series (interpolación)"), key="analysis_mode")
         exclude_na = st.checkbox("Excluir datos nulos (NaN)", key='exclude_na')
@@ -162,20 +164,56 @@ def create_sidebar(gdf_stations, df_long):
         st.markdown("---")
         st.markdown("##### Modelo de Elevación Digital (DEM)")
 
-        # --- INICIO DEL CÓDIGO MODIFICADO ---
-        # Simplemente lee la ruta y el flag del session_state (que se definirán en app.py)
+        # --- INICIO BLOQUE AÑADIDO (LÓGICA DE CARGA) ---
+        uploaded_dem_file = st.file_uploader(
+            "Subir DEM personalizado (Opcional, .tif)", 
+            type=['tif', 'tiff'], 
+            key="dem_uploader"
+        )
+        
+        if uploaded_dem_file is not None:
+            if st.button("Procesar DEM Subido"):
+                with st.spinner("Procesando DEM..."):
+                    try:
+                        # Guardar en un archivo temporal para que rasterio lo lea
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".tif") as tmp:
+                            tmp.write(uploaded_dem_file.getvalue())
+                            tmp_path = tmp.name
+                        
+                        # Validar el archivo y su CRS
+                        with rasterio.open(tmp_path) as src:
+                            is_geographic = bool(src.crs.is_geographic)
+                        
+                        # Guardar en session_state
+                        st.session_state['dem_file_path'] = tmp_path
+                        st.session_state['dem_crs_is_geographic'] = is_geographic
+                        st.session_state['dem_file_path_validated'] = True
+                        st.session_state['dem_source_name'] = uploaded_dem_file.name
+                        
+                        st.success(f"DEM '{uploaded_dem_file.name}' cargado.")
+                        time.sleep(1) # Pausa para que el usuario vea
+                        st.rerun() # Reiniciar para que todo el app use el nuevo DEM
+
+                    except Exception as e:
+                        st.error(f"Error al procesar DEM: {e}")
+                        st.session_state['dem_file_path'] = None
+                        st.session_state['dem_file_path_validated'] = False
+        
+        st.markdown("---")
+        # --- FIN BLOQUE AÑADIDO ---
+
+        # --- Lógica para MOSTRAR el DEM en uso (base o subido) ---
         dem_path_from_state = st.session_state.get('dem_file_path', None)
-        dem_is_geo_from_state = st.session_state.get('dem_crs_is_geographic', True) # Asume True si no está
+        dem_is_geo_from_state = st.session_state.get('dem_crs_is_geographic', True)
 
         if dem_path_from_state:
-            dem_filename = os.path.basename(dem_path_from_state)
-            st.info(f"Usando DEM base: {dem_filename}")
+            # Usar el nombre guardado en la sesión (ya sea el base o el subido)
+            dem_filename = st.session_state.get('dem_source_name', os.path.basename(dem_path_from_state))
+            st.info(f"Usando DEM: {dem_filename}")
             if dem_is_geo_from_state:
-                st.warning("El DEM base está en grados geográficos. El cálculo de áreas será impreciso.")
+                 st.warning("El DEM está en grados geográficos. El cálculo de áreas será impreciso.")
         else:
-            # Muestra un error más genérico si la ruta no se encontró al inicio en app.py
-            st.error("DEM base no encontrado al iniciar la app. Funciones DEM no calcularán áreas.")
-        # --- FIN DEL CÓDIGO MODIFICADO ---
+            st.error("DEM no encontrado. Sube un DEM o reinicia la app para usar el DEM base.")
         # --- Fin Lógica DEM ---
 
     # Retornar los valores FINALES
@@ -193,4 +231,5 @@ def create_sidebar(gdf_stations, df_long):
         "selected_municipios": selected_municipios,
         "selected_altitudes": selected_altitudes
     }
+
 
