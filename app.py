@@ -87,23 +87,29 @@ def main():
     Config.initialize_session_state()
     st.set_page_config(layout="wide", page_title=Config.APP_TITLE)
     
+    # --- INICIO BLOQUE MODIFICADO ---
     # Validación segura del DEM
     try:
+        # Priorizar DEM en session_state (que pudo ser subido por el usuario en sidebar.py).
+        # Si ya está validado (por el sidebar), no hacer nada.
         if not st.session_state.get('dem_file_path_validated', False):
+            # Si no hay DEM validado en la sesión, BUSCAR EL DEM BASE
             if os.path.exists(_DEM_PATH_APP):
                 try:
                     import rasterio
                     with rasterio.open(_DEM_PATH_APP) as src:
                         if src.crs:
                             st.session_state['dem_crs_is_geographic'] = bool(src.crs.is_geographic)
-                            st.session_state['dem_file_path'] = _DEM_PATH_APP
-                            st.session_state['dem_file_path_validated'] = True
-                            st.info(f"DEM encontrado: {_DEM_PATH_APP} (CRS geográfico: {st.session_state['dem_crs_is_geographic']})")
+                        st.session_state['dem_file_path'] = _DEM_PATH_APP
+                        st.session_state['dem_file_path_validated'] = True
+                        st.session_state['dem_source_name'] = os.path.basename(_DEM_PATH_APP) # Guardar nombre base
+                        st.info(f"DEM base encontrado: {st.session_state['dem_source_name']}")
                 except Exception as e_dem:
-                    st.warning(f"No se pudo validar DEM {_DEM_PATH_APP}: {e_dem}")
+                    st.warning(f"No se pudo validar DEM base {_DEM_PATH_APP}: {e_dem}")
                     st.session_state['dem_file_path_validated'] = False
     except RuntimeError:
         pass
+    # --- FIN BLOQUE MODIFICADO ---
         
     st.markdown("""<style>div.block-container{padding-top:1rem;} [data-testid="stMetricValue"] {font-size: 1.8rem;} [data-testid="stMetricLabel"] {font-size: 1rem; padding-bottom:5px; }</style>""", unsafe_allow_html=True)
 
@@ -626,5 +632,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
