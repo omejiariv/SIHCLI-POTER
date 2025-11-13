@@ -3746,7 +3746,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 st.success(f"¡Pronóstico para {index_choice_name} generado y listo para usar!")
         
         # --- Lógica de visualización (muestra el último generado) ---
-        if 'last_forecasted_index_model' in st.session_state:
+        if st.session_state.get('last_forecasted_index_model') is not None:
             st.markdown("---")
             st.markdown(f"##### Gráfico del Pronóstico: {st.session_state['last_forecasted_index_name']}")
             
@@ -5872,6 +5872,7 @@ def display_climate_scenarios_tab(**kwargs):
             modificando los rasters de precipitación y temperatura para visualizar el 
             desplazamiento geográfico de los ecosistemas.
             """)
+
 
 
 
