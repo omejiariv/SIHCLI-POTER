@@ -206,19 +206,11 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     ts_data = ts_data_raw.rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
     ts_data = ts_data.drop_duplicates(subset=['ds'], keep='first')
     
-    # --- CORRECCIÓN PARA 'ValueError: time-weighted interpolation' ---
-    # Asegurarse de que 'ds' sea un objeto datetime
+    # Corrección para 'ValueError: time-weighted interpolation'
     ts_data['ds'] = pd.to_datetime(ts_data['ds'])
-    
-    # Establecer 'ds' como el índice
     ts_data = ts_data.set_index('ds')
-    
-    # Interpolar 'y' (ahora sí funciona)
     ts_data['y'] = ts_data['y'].interpolate(method='time')
-    
-    # Devolver 'ds' a ser una columna (requerido por Prophet)
     ts_data = ts_data.reset_index()
-    # --- FIN DE LA CORRECCIÓN ---
 
     if len(ts_data) < test_size + 24:
         raise ValueError(f"Se necesitan al menos {test_size + 24} meses de datos para Prophet.")
@@ -229,20 +221,28 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     # 3. Preparar regresores (si existen)
     regressor_cols = []
     if regressors is not None and not regressors.empty:
-        # Unir el pronóstico ENSO (regressors) con los datos de precipitación (ts_data)
+        
+        # --- INICIO DE LA CORRECCIÓN PARA 'KeyError: anomalia_oni' ---
+        
+        # 1. Obtener la lista de nombres de regresores (ej: ['anomalia_oni'])
+        regressor_names = [col for col in regressors.columns if col != 'ds']
+        
+        # 2. Eliminar esas columnas de ts_data (los datos históricos)
+        #    para evitar un conflicto de merge (col_x, col_y)
+        cols_to_drop_from_ts = [col for col in regressor_names if col in ts_data.columns]
+        if cols_to_drop_from_ts:
+            ts_data = ts_data.drop(columns=cols_to_drop_from_ts)
+        
+        # 3. Ahora el merge es limpio. 'ts_data' solo tendrá una columna 'anomalia_oni' (la del pronóstico).
         ts_data = pd.merge(ts_data, regressors, on='ds', how='left')
         
-        for col in regressors.columns:
-            if col == 'ds':
-                continue # 'ds' es la columna de fecha, no un regresor
-            
-            # Interpolar el regresor (ej. 'anomalia_oni') en la serie temporal completa
-            # Esta línea (antes la 242) ahora funciona porque el merge SÍ añadió la columna
+        # 4. Iterar sobre los nombres de regresores (ej: 'anomalia_oni')
+        for col in regressor_names:
+            # Interpolar el regresor (que ahora es el pronosticado)
             ts_data[col] = ts_data[col].interpolate(method='linear', limit_direction='both')
-            
-            # Añadir el regresor al modelo
             model.add_regressor(col)
-            regressor_cols.append(col) # Guardar el nombre para usarlo en el modelo final
+            regressor_cols.append(col)
+        # --- FIN DE LA CORRECCIÓN ---
 
     # 4. Dividir datos y entrenar modelo de evaluación
     train, test = ts_data.iloc[:-test_size], ts_data.iloc[-test_size:]
@@ -250,7 +250,7 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
 
     # 5. Evaluar modelo
     test_dates = model.make_future_dataframe(periods=test_size, freq='MS').tail(test_size)
-    if regressor_cols: # Si usamos regresores, añadirlos a las fechas de prueba
+    if regressor_cols: 
         test_regressors = ts_data[ts_data['ds'].isin(test_dates['ds'])][['ds'] + regressor_cols]
         test_dates = pd.merge(test_dates, test_regressors, on='ds', how='left')
         test_dates[regressor_cols] = test_dates[regressor_cols].interpolate(method='linear', limit_direction='both')
@@ -270,9 +270,7 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     future = full_model.make_future_dataframe(periods=horizon, freq='MS')
     
     if regressor_cols:
-        # Unir los valores futuros del regresor (que están en 'regressors')
         future = pd.merge(future, regressors, on='ds', how='left')
-        # Rellenar (interpolar) los valores del regresor en el futuro
         future[regressor_cols] = future[regressor_cols].interpolate(method='linear', limit_direction='both')
 
     # 8. Generar pronóstico final
@@ -301,6 +299,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
