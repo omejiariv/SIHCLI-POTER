@@ -21,7 +21,8 @@ from modules.visualizer import (
     display_additional_climate_maps_tab, 
     display_satellite_imagery_tab,
     display_land_cover_analysis_tab,
-    display_life_zones_tab
+    display_life_zones_tab,
+    display_climate_scenarios_tab
 )
 # [CORRECCIÓN PENDIENTE] Asegúrate de que 'modules/sidebar.py' contenga una función 'def create_sidebar(...):'
 # Si el error 'ImportError' persiste, es porque el archivo sidebar.py no tiene esa función.
@@ -127,6 +128,7 @@ def main():
         "Variables Climáticas", "Imágenes Satelitales",
         "Análisis Cobertura Suelo",
         "Zonas de Vida",
+        "Escenarios Climáticos",
         "Análisis de Anomalías", "Análisis de Extremos", "Estadísticas",
         "Correlación", "Análisis ENSO", "Tendencias y Pronósticos",
         "Pronóstico Semanal",
@@ -366,28 +368,30 @@ def main():
     with tabs[8]: 
         display_life_zones_tab(**display_args)
     with tabs[9]:
-        display_anomalies_tab(**display_args)
+        display_climate_scenarios_tab(**display_args)
     with tabs[10]:
-        display_drought_analysis_tab(**display_args)
+        display_anomalies_tab(**display_args)
     with tabs[11]:
-        display_stats_tab(**display_args)
+        display_drought_analysis_tab(**display_args)
     with tabs[12]:
-        display_correlation_tab(**display_args)
+        display_stats_tab(**display_args)
     with tabs[13]:
+        display_correlation_tab(**display_args)
+    with tabs[14]:
         # [CORRECCIÓN] Pasa la variable local df_enso
         # Ya no se necesita 'df_enso=' porque está dentro de display_args
         display_enso_tab(**display_args)
-    with tabs[14]:
+    with tabs[15]:
         # [CORRECCIÓN] Pasa la variable local df_long
         display_trends_and_forecast_tab(df_full_monthly=df_long, **display_args)
         
-    with tabs[15]:
+    with tabs[16]:
         display_weekly_forecast_tab(
         stations_for_analysis=stations_for_analysis,
         gdf_filtered=gdf_filtered
     )
     
-    with tabs[16]: 
+    with tabs[17]: 
         st.header("Análisis Agregado por Cuenca Hidrográfica")
         # [CORRECCIÓN] Usa la variable local gdf_subcuencas
         if gdf_subcuencas is not None and not gdf_subcuencas.empty:
@@ -469,7 +473,7 @@ def main():
         else:
             st.warning("Los datos de las subcuencas no están cargados o el archivo está vacío.")
             
-    with tabs[17]:
+    with tabs[18]:
         st.header("Comparación de Periodos de Tiempo")
         analysis_level = st.radio(
             "Seleccione el nivel de análisis para la comparación:",
@@ -557,10 +561,10 @@ def main():
                     st.write(f"**Periodo 2 ({periodo2[0]}-{periodo2[1]})**")
                     st.dataframe(df_periodo2[Config.PRECIPITATION_COL].describe().round(2))
     
-    with tabs[18]:
+    with tabs[19]:
         display_station_table_tab(**display_args)
     
-    with tabs[19]:
+    with tabs[20]:
         st.header("Generación de Reporte PDF")
        
         # Opciones para el reporte
@@ -634,6 +638,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
