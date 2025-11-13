@@ -123,7 +123,7 @@ def get_official_enso_forecast():
     try:
         DATA_URL = "https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv"
         
-        # --- INICIO DE LA CORRECCIÓN (Lector de texto V3) ---
+        # --- INICIO DE LA CORRECCIÓN (Lector de texto V5) ---
         
         # 1. Descargar el archivo como texto crudo
         response = requests.get(DATA_URL)
@@ -134,14 +134,14 @@ def get_official_enso_forecast():
         
         # 2. Encontrar la línea del encabezado (Header)
         header_line_index = -1
-        # Buscar la línea que contenga "MONTH" Y "YEAR" (más robusto)
+        # Buscar la línea que contenga "YEAR" Y "NINO3.4_ANOM_FCST"
         for i, line in enumerate(lines):
-            if "MONTH" in line and "YEAR" in line:
+            if "YEAR" in line and "NINO3.4_ANOM_FCST" in line:
                 header_line_index = i
                 break
         
         if header_line_index == -1:
-            raise ValueError("No se pudo encontrar la línea de encabezado (con 'MONTH' y 'YEAR') en el archivo.")
+            raise ValueError("No se pudo encontrar la línea de encabezado (con 'YEAR' y 'NINO3.4_ANOM_FCST') en el archivo.")
 
         # 3. Encontrar la posición de las columnas que queremos
         headers = lines[header_line_index].split()
@@ -156,9 +156,21 @@ def get_official_enso_forecast():
         if forecast_header_name is None:
             raise ValueError("No se pudo encontrar la columna de pronóstico 'NINO3.4_ANOM_FCST' en el encabezado.")
 
-        month_idx = headers.index("MONTH")
-        year_idx = headers.index("YEAR")
-        forecast_idx = headers.index(forecast_header_name) # <-- Usar el nombre encontrado
+        # Buscar el nombre de la columna MON(TH)
+        month_header_name = None
+        if "MONTH" in headers:
+            month_header_name = "MONTH"
+        elif "MON" in headers:
+            month_header_name = "MON"
+        else:
+            raise ValueError("No se pudo encontrar la columna 'MON' o 'MONTH' en el encabezado.")
+        
+        year_header_name = "YEAR" # Esta parece estable
+
+        # Get the *indices*
+        month_idx = headers.index(month_header_name)
+        year_idx = headers.index(year_header_name)
+        forecast_idx = headers.index(forecast_header_name)
 
         # 4. Iterar sobre las líneas de datos (después del encabezado)
         for line in lines[header_line_index + 1:]:
@@ -427,6 +439,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
