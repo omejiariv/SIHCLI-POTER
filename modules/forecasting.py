@@ -113,8 +113,8 @@ def get_official_enso_forecast():
     """
     Descarga y procesa el pronóstico consolidado de ENSO (IRI/CPC).
     
-    Este pronóstico es estacional (ej. 'JFM', 'FMA'). La función lo interpola
-    a una frecuencia mensual ('MS') para que sea compatible con los modelos.
+    Esta función se "disfraza" de navegador (User-Agent) para evitar
+    bloqueos de HTML y parsea el archivo de texto manualmente.
     
     Retorna:
         - df_prophet: DataFrame listo para Prophet (cols 'ds', 'anomalia_oni')
@@ -123,30 +123,40 @@ def get_official_enso_forecast():
     try:
         DATA_URL = "https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv"
         
-        # --- INICIO DE LA CORRECCIÓN (Lector de texto V5) ---
+        # --- INICIO DE LA CORRECCIÓN (User-Agent Header) ---
         
-        # 1. Descargar el archivo como texto crudo
-        response = requests.get(DATA_URL)
-        response.raise_for_status()
+        # 1. Definir una cabecera de navegador estándar
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
+        }
+        
+        # 2. Descargar el archivo de texto crudo usando la cabecera
+        response = requests.get(DATA_URL, headers=headers)
+        response.raise_for_status() # Lanza un error si la descarga falla
         data_text = response.text
+        
+        # --- FIN DE LA CORRECCIÓN (User-Agent Header) ---
+
+        # --- Lógica de Parseo V5 (la que teníamos antes) ---
         lines = data_text.split('\n')
         data_rows = []
         
-        # 2. Encontrar la línea del encabezado (Header)
+        # 3. Encontrar la línea del encabezado
         header_line_index = -1
         # Buscar la línea que contenga "YEAR" Y "NINO3.4_ANOM_FCST"
         for i, line in enumerate(lines):
-            if "YEAR" in line and "NINO3.4_ANOM_FCST" in line:
+            # Usar .upper() para ser resistente a mayúsculas/minúsculas
+            line_upper = line.upper()
+            if "YEAR" in line_upper and "NINO3.4_ANOM_FCST" in line_upper:
                 header_line_index = i
                 break
         
         if header_line_index == -1:
-            raise ValueError("No se pudo encontrar la línea de encabezado (con 'YEAR' y 'NINO3.4_ANOM_FCST') en el archivo.")
+            raise ValueError("No se pudo encontrar la línea de encabezado (con 'YEAR' y 'NINO3.4_ANOM_FCST') en el archivo de texto. El formato puede haber cambiado.")
 
-        # 3. Encontrar la posición de las columnas que queremos
+        # 4. Encontrar la posición de las columnas
         headers = lines[header_line_index].split()
         
-        # Buscar el nombre de la columna que *contiene* NINO3.4_ANOM_FCST
         forecast_header_name = None
         for h in headers:
             if "NINO3.4_ANOM_FCST" in h:
@@ -156,7 +166,6 @@ def get_official_enso_forecast():
         if forecast_header_name is None:
             raise ValueError("No se pudo encontrar la columna de pronóstico 'NINO3.4_ANOM_FCST' en el encabezado.")
 
-        # Buscar el nombre de la columna MON(TH)
         month_header_name = None
         if "MONTH" in headers:
             month_header_name = "MONTH"
@@ -165,18 +174,14 @@ def get_official_enso_forecast():
         else:
             raise ValueError("No se pudo encontrar la columna 'MON' o 'MONTH' en el encabezado.")
         
-        year_header_name = "YEAR" # Esta parece estable
-
-        # Get the *indices*
         month_idx = headers.index(month_header_name)
-        year_idx = headers.index(year_header_name)
+        year_idx = headers.index("YEAR")
         forecast_idx = headers.index(forecast_header_name)
 
-        # 4. Iterar sobre las líneas de datos (después del encabezado)
+        # 5. Iterar sobre las líneas de datos
         for line in lines[header_line_index + 1:]:
             items = line.split()
             
-            # Si la línea está vacía o es muy corta, saltar
             if len(items) < max(month_idx, year_idx, forecast_idx) + 1:
                 continue
                 
@@ -184,7 +189,6 @@ def get_official_enso_forecast():
             year_str = items[year_idx]
             forecast_val = items[forecast_idx]
             
-            # Solo nos interesan las filas que NO son 'OBS'
             if forecast_val != 'OBS':
                 try:
                     year_int = int(year_str.split('-')[0])
@@ -194,14 +198,14 @@ def get_official_enso_forecast():
                         "NINO3.4_ANOM_FCST": float(forecast_val)
                     })
                 except ValueError:
-                    continue # Ignorar líneas que no se puedan convertir
+                    continue
 
         df_forecast = pd.DataFrame(data_rows)
         
         if df_forecast.empty:
             raise ValueError("No se encontraron datos de pronóstico válidos en el archivo.")
-
-        # --- FIN DE LA CORRECCIÓN ---
+        
+        # --- FIN DE LA LÓGICA DE PARSEO ---
 
         # El resto de la función es idéntica
         df_forecast['anomalia_oni'] = pd.to_numeric(df_forecast['NINO3.4_ANOM_FCST'])
@@ -215,7 +219,6 @@ def get_official_enso_forecast():
         
         df_forecast['year_adj'] = df_forecast['YEAR'].where(df_forecast['MONTH'] != 'DJF', df_forecast['YEAR'] + 1)
         
-        # Asegurarse de que 'year_adj' y 'month' no tengan nulos
         df_forecast.dropna(subset=['year_adj', 'month'], inplace=True)
         
         df_forecast['ds'] = pd.to_datetime(
@@ -439,6 +442,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
