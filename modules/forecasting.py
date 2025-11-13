@@ -108,22 +108,18 @@ def get_weather_forecast(latitude, longitude):
         st.error(f"Ocurrió un error inesperado al obtener el pronóstico: {e}")
         return None
 
-@st.cache_data(ttl=86400) # Cachear por 1 día
+@st.cache_data(ttl=60) # Cachear solo por 1 minuto para depuración
 def get_official_enso_forecast():
     """
-    Descarga y procesa el pronóstico consolidado de ENSO (IRI/CPC).
-    
-    Esta función se "disfraza" de navegador (User-Agent) para evitar
-    bloqueos de HTML y parsea el archivo de texto manualmente.
-    
-    Retorna:
-        - df_prophet: DataFrame listo para Prophet (cols 'ds', 'anomalia_oni')
-        - df_sarima: DataFrame listo para SARIMA (cols 'fecha_mes_año', 'anomalia_oni')
+    VERSIÓN DE DEPURACIÓN (V2):
+    Esta función usa el User-Agent para descargar el archivo de texto crudo del IRI
+    y lo imprime en la pantalla para que podamos analizar su estructura.
     """
     try:
         DATA_URL = "https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv"
         
-        # --- INICIO DE LA CORRECCIÓN (User-Agent Header) ---
+        st.warning("MODO DE DEPURACIÓN ACTIVO (V2)")
+        st.info(f"Descargando archivo crudo desde: {DATA_URL}")
         
         # 1. Definir una cabecera de navegador estándar
         headers = {
@@ -134,118 +130,21 @@ def get_official_enso_forecast():
         response = requests.get(DATA_URL, headers=headers)
         response.raise_for_status() # Lanza un error si la descarga falla
         data_text = response.text
-        
-        # --- FIN DE LA CORRECCIÓN (User-Agent Header) ---
-
-        # --- Lógica de Parseo V5 (la que teníamos antes) ---
         lines = data_text.split('\n')
-        data_rows = []
         
-        # 3. Encontrar la línea del encabezado
-        header_line_index = -1
-        # Buscar la línea que contenga "YEAR" Y "NINO3.4_ANOM_FCST"
-        for i, line in enumerate(lines):
-            # Usar .upper() para ser resistente a mayúsculas/minúsculas
-            line_upper = line.upper()
-            if "YEAR" in line_upper and "NINO3.4_ANOM_FCST" in line_upper:
-                header_line_index = i
-                break
-        
-        if header_line_index == -1:
-            raise ValueError("No se pudo encontrar la línea de encabezado (con 'YEAR' y 'NINO3.4_ANOM_FCST') en el archivo de texto. El formato puede haber cambiado.")
+        # 3. Imprimir las primeras 25 líneas para análisis
+        st.subheader("Análisis del Archivo Crudo (Primeras 25 líneas)")
+        # Usamos st.text() para ver los espacios en blanco y la estructura
+        st.text("".join(lines[:25]))
 
-        # 4. Encontrar la posición de las columnas
-        headers = lines[header_line_index].split()
-        
-        forecast_header_name = None
-        for h in headers:
-            if "NINO3.4_ANOM_FCST" in h:
-                forecast_header_name = h
-                break
-        
-        if forecast_header_name is None:
-            raise ValueError("No se pudo encontrar la columna de pronóstico 'NINO3.4_ANOM_FCST' en el encabezado.")
-
-        month_header_name = None
-        if "MONTH" in headers:
-            month_header_name = "MONTH"
-        elif "MON" in headers:
-            month_header_name = "MON"
-        else:
-            raise ValueError("No se pudo encontrar la columna 'MON' o 'MONTH' en el encabezado.")
-        
-        month_idx = headers.index(month_header_name)
-        year_idx = headers.index("YEAR")
-        forecast_idx = headers.index(forecast_header_name)
-
-        # 5. Iterar sobre las líneas de datos
-        for line in lines[header_line_index + 1:]:
-            items = line.split()
-            
-            if len(items) < max(month_idx, year_idx, forecast_idx) + 1:
-                continue
-                
-            month = items[month_idx]
-            year_str = items[year_idx]
-            forecast_val = items[forecast_idx]
-            
-            if forecast_val != 'OBS':
-                try:
-                    year_int = int(year_str.split('-')[0])
-                    data_rows.append({
-                        "MONTH": month,
-                        "YEAR": year_int,
-                        "NINO3.4_ANOM_FCST": float(forecast_val)
-                    })
-                except ValueError:
-                    continue
-
-        df_forecast = pd.DataFrame(data_rows)
-        
-        if df_forecast.empty:
-            raise ValueError("No se encontraron datos de pronóstico válidos en el archivo.")
-        
-        # --- FIN DE LA LÓGICA DE PARSEO ---
-
-        # El resto de la función es idéntica
-        df_forecast['anomalia_oni'] = pd.to_numeric(df_forecast['NINO3.4_ANOM_FCST'])
-        
-        season_to_month_map = {
-            'JFM': 2, 'FMA': 3, 'MAM': 4, 'AMJ': 5, 'MJJ': 6, 'JJA': 7,
-            'JAS': 8, 'ASO': 9, 'SON': 10, 'OND': 11, 'NDJ': 12, 'DJF': 1
-        }
-        
-        df_forecast['month'] = df_forecast['MONTH'].map(season_to_month_map)
-        
-        df_forecast['year_adj'] = df_forecast['YEAR'].where(df_forecast['MONTH'] != 'DJF', df_forecast['YEAR'] + 1)
-        
-        df_forecast.dropna(subset=['year_adj', 'month'], inplace=True)
-        
-        df_forecast['ds'] = pd.to_datetime(
-            df_forecast['year_adj'].astype(int).astype(str) + '-' + df_forecast['month'].astype(int).astype(str) + '-01'
-        )
-        
-        df_clean = df_forecast[['ds', 'anomalia_oni']].sort_values(by='ds').drop_duplicates()
-        
-        df_clean = df_clean.set_index('ds')
-        date_range = pd.date_range(start=df_clean.index.min(), end=df_clean.index.max(), freq='MS')
-        
-        df_monthly = df_clean.reindex(date_range)
-        df_monthly['anomalia_oni'] = df_monthly['anomalia_oni'].interpolate(method='linear')
-        
-        df_monthly = df_monthly.reset_index().rename(columns={'index': 'ds'})
-
-        df_prophet_out = df_monthly.rename(columns={'anomalia_oni': Config.ENSO_ONI_COL})
-        
-        df_sarima_out = df_monthly.rename(
-            columns={'ds': Config.DATE_COL, 'anomalia_oni': Config.ENSO_ONI_COL}
-        )
-        
-        return df_prophet_out, df_sarima_out
+        # 4. Retornar None para que el resto de la app se detenga de forma segura
+        st.error("Depuración finalizada. Copie el texto de arriba y envíelo a Gemini.")
+        return None, None
         
     except Exception as e:
         # Esto capturará el error y lo mostrará en Streamlit
-        st.error(f"Error al descargar el pronóstico oficial del ENSO: {e}")
+        st.error(f"Error durante la descarga del archivo de depuración: {e}")
+        st.exception(e) # Imprimir el traceback completo
         return None, None
         
 @st.cache_data(show_spinner=False)
@@ -442,6 +341,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
