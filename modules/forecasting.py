@@ -108,44 +108,16 @@ def get_weather_forecast(latitude, longitude):
         st.error(f"Ocurrió un error inesperado al obtener el pronóstico: {e}")
         return None
 
-@st.cache_data(ttl=60) # Cachear solo por 1 minuto para depuración
+@st.cache_data(ttl=86400) # Cachear por 1 día
 def get_official_enso_forecast():
     """
-    VERSIÓN DE DEPURACIÓN (V2):
-    Esta función usa el User-Agent para descargar el archivo de texto crudo del IRI
-    y lo imprime en la pantalla para que podamos analizar su estructura.
+    [FUNCIÓN DESACTIVADA]
+    El scrapeo del archivo TSV de IRI/CPC es demasiado inestable.
+    Esta función ahora retorna None y la lógica se ha movido
+    de nuevo a visualizer.py (Pronóstico Prophet de la historia).
     """
-    try:
-        DATA_URL = "https://iri.columbia.edu/climate/forecast/enso/ensostat.tsv"
-        
-        st.warning("MODO DE DEPURACIÓN ACTIVO (V2)")
-        st.info(f"Descargando archivo crudo desde: {DATA_URL}")
-        
-        # 1. Definir una cabecera de navegador estándar
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
-        }
-        
-        # 2. Descargar el archivo de texto crudo usando la cabecera
-        response = requests.get(DATA_URL, headers=headers)
-        response.raise_for_status() # Lanza un error si la descarga falla
-        data_text = response.text
-        lines = data_text.split('\n')
-        
-        # 3. Imprimir las primeras 25 líneas para análisis
-        st.subheader("Análisis del Archivo Crudo (Primeras 25 líneas)")
-        # Usamos st.text() para ver los espacios en blanco y la estructura
-        st.text("".join(lines[:25]))
-
-        # 4. Retornar None para que el resto de la app se detenga de forma segura
-        st.error("Depuración finalizada. Copie el texto de arriba y envíelo a Gemini.")
-        return None, None
-        
-    except Exception as e:
-        # Esto capturará el error y lo mostrará en Streamlit
-        st.error(f"Error durante la descarga del archivo de depuración: {e}")
-        st.exception(e) # Imprimir el traceback completo
-        return None, None
+    st.error("La descarga de datos oficiales de IRI se ha desactivado por inestabilidad de la fuente.")
+    return None, None
         
 @st.cache_data(show_spinner=False)
 def get_decomposition_results(series, period=12, model='additive'):
@@ -341,6 +313,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
