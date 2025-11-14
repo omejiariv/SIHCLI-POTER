@@ -374,8 +374,8 @@ def main():
         "selected_altitudes": sidebar_filters["selected_altitudes"]
     }
     
-    #--- Renderizado de Pestañas ---
-    # Pestaña 0: Bienvenida
+#--- Renderizado de Pestañas (CORREGIDO Y COMPLETO) ---
+    
     with tabs[0]:  # Bienvenida
         display_welcome_tab()
     
@@ -451,7 +451,6 @@ def main():
                          basins_in_selected_regions = basins_in_selected_regions[
                              basins_in_selected_regions[Config.REGION_COL].isin(regions_from_sidebar)
                          ]
-                    # ... (resto de la lógica de sjoin) ...
                     if not basins_in_selected_regions.empty and 'gdf_filtered' in sidebar_filters and not sidebar_filters['gdf_filtered'].empty:
                          if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(gdf_stations.crs, allow_override=True)
                          if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(gdf_stations.crs, allow_override=True)
@@ -501,7 +500,6 @@ def main():
     
     with tabs[19]: # Comparación de Periodos
         st.header("Comparación de Periodos de Tiempo")
-        # ... (TODA tu lógica para 'Comparación de Periodos' va aquí) ...
         analysis_level = st.radio(
             "Seleccione el nivel de análisis para la comparación:",
             ("Promedio Regional (Todas las estaciones seleccionadas)", "Por Cuenca Específica"),
@@ -543,7 +541,6 @@ def main():
         if df_to_compare.empty:
             st.warning("Seleccione una opción con estaciones válidas para poder realizar la comparación.", icon="ℹ️")
         else:
-            # ... (resto de la lógica de comparación de periodos) ...
             years_with_data = sorted(df_to_compare[Config.YEAR_COL].dropna().unique())
             min_year, max_year = int(years_with_data[0]), int(years_with_data[-1])
             col1, col2 = st.columns(2)
@@ -578,7 +575,6 @@ def main():
     
     with tabs[21]: # Generar Reporte
         st.header("Generación de Reporte PDF")
-        # ... (TODA tu lógica para 'Generar Reporte' va aquí) ...
         st.subheader("Seleccionar Secciones para Incluir en el Reporte:")
         report_sections_options = [
             "Resumen General", "Tabla de Estaciones", "Mapa de Distribución Espacial",
@@ -631,6 +627,7 @@ def main():
                         
 if __name__ == "__main__":
     main()
+
 
 
 
