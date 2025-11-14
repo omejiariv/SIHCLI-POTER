@@ -3649,7 +3649,7 @@ def display_enso_tab(df_enso, df_monthly_filtered, gdf_filtered, stations_for_an
 def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                                     df_anual_melted, df_monthly_filtered, analysis_mode, selected_regions,
                                     selected_municipios, selected_altitudes, **kwargs):
-    st.header("Análisis de Tendencias y Pronósticos") # <-- Título principal
+    st.header("Análisis de Tendencias y Pronósticos de Precipitación") # <-- Título cambiado
 
     gdf_stations = kwargs.get('gdf_stations')
     year_range_val = st.session_state.get('year_range', (2000, 2020))
@@ -3684,10 +3684,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     # -------------------------------------------------------------------------
     with tendencia_individual_tab:
         st.subheader("Tendencia de Precipitación Anual (Regresión Lineal)")
-        # ... (Pega aquí tu código de 'tendencia_individual_tab'
-        #      desde tu 'visualizer.py' original) ...
-        # (El código que te di en el paso anterior, desde st.subheader(...) 
-        #  hasta st.warning("No hay suficientes datos..."))
         analysis_type = st.radio("Tipo de Análisis de Tendencia:", ["Promedio de la selección", "Estación individual"], horizontal=True, key="linear_trend_type")
         df_to_analyze = None
         if analysis_type == "Promedio de la selección":
@@ -3716,7 +3712,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     # -------------------------------------------------------------------------
     with mann_kendall_tab:
         st.subheader("Tendencia de Precipitación Anual (Prueba de Mann-Kendall y Pendiente de Sen)")
-        # ... (Pega aquí tu código de 'mann_kendall_tab') ...
         with st.expander("¿Qué es la prueba de Mann-Kendall?"):
             st.markdown("""
             - **Prueba de Mann-Kendall**: Detecta si existe una tendencia (creciente o decreciente) en el tiempo.
@@ -3759,7 +3754,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     # -------------------------------------------------------------------------
     with tendencia_tabla_tab:
         st.subheader("Tabla Comparativa de Tendencias de Precipitación Anual")
-        # ... (Pega aquí tu código de 'tendencia_tabla_tab') ...
         st.info("Presione el botón para calcular los valores para todas las estaciones seleccionadas.")
         if st.button("Calcular Tendencias para Todas las Estaciones Seleccionadas"):
             with st.spinner("Calculando tendencias..."):
@@ -3792,7 +3786,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     # -------------------------------------------------------------------------
     with descomposicion_tab: 
         st.subheader("Descomposición de Series de Tiempo Mensual")
-        # ... (Pega aquí tu código de 'descomposicion_tab') ...
         station_to_decompose = st.selectbox("Seleccione una estación para la descomposición:", options=stations_for_analysis, key="decompose_station_select")
         if station_to_decompose:
             df_station_decomp = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] == station_to_decompose].copy()
@@ -3831,7 +3824,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     # -------------------------------------------------------------------------
     with autocorrelacion_tab: 
         st.subheader("Análisis de Autocorrelación (ACF) y Autocorrelación Parcial (PACF)")
-        # ... (Pega aquí tu código de 'autocorrelacion_tab') ...
         station_to_analyze_acf = st.selectbox("Seleccione una estación:", options=stations_for_analysis, key="acf_station_select")
         max_lag = st.slider("Número máximo de rezagos (meses):", min_value=12, max_value=60, value=24, step=12, key="acf_max_lag_slider")
         if station_to_analyze_acf:
@@ -3859,36 +3851,56 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     # --- PESTAÑA: PRONÓSTICO SARIMA ---
     # -------------------------------------------------------------------------
     with pronostico_sarima_tab:
-        st.subheader("Pronóstico (Modelo SARIMA)")
-        # ... (Pega aquí tu código de 'pronostico_sarima_tab' 
-        #      con la lógica de regresores multiselect) ...
-        analysis_type_sarima = st.radio("Seleccionar tipo de pronóstico SARIMA:", ("Estación Individual", "Promedio Regional"), key="sarima_analysis_type", horizontal=True)
+        st.subheader("Pronóstico de Precipitación (Modelo SARIMA)")
+        
+        analysis_type_sarima = st.radio(
+            "Seleccionar tipo de pronóstico SARIMA:",
+            ("Estación Individual", "Promedio Regional"),
+            key="sarima_analysis_type", horizontal=True
+        )
+        
         station_to_forecast = None
         station_name_for_title = ""
+        
         if analysis_type_sarima == "Estación Individual":
-            station_to_forecast = st.selectbox("Seleccione una estación:", options=stations_for_analysis, key="sarima_station_select")
+            station_to_forecast = st.selectbox("Seleccione una estación:",
+                                                 options=stations_for_analysis, key="sarima_station_select")
             station_name_for_title = station_to_forecast
         else:
             st.info(f"Se generará un pronóstico para la serie regional (promedio de {len(stations_for_analysis)} estaciones).")
             station_name_for_title = "Serie Regional"
+
         c1, c2 = st.columns(2)
         with c1:
-            forecast_horizon = st.slider("Meses a pronosticar:", 12, 36, 12, step=12, key="sarima_horizon")
+            forecast_horizon = st.slider("Meses a pronosticar:", 12, 36, 12, step=12,
+                                         key="sarima_horizon")
         with c2:
-            test_size = st.slider("Meses para evaluación:", 12, 36, 12, step=6, key="sarima_test_size")
-        use_auto_arima = st.checkbox("Encontrar parámetros óptimos automáticamente (Auto-ARIMA)", value=False)
+            test_size = st.slider("Meses para evaluación:", 12, 36, 12, step=6,
+                                  key="sarima_test_size")
+        
+        use_auto_arima = st.checkbox("Encontrar parámetros óptimos automáticamente (Auto-ARIMA)",
+                                     value=False)
         
         regresores_sarima = None
         available_regressors_sarima = list(st.session_state.get('forecasted_regressors_sarima', {}).keys())
-        selected_regressors_sarima = st.multiselect("Usar pronósticos climáticos como regresores:", options=available_regressors_sarima, key="sarima_regressor_multiselect")
+        
+        selected_regressors_sarima = st.multiselect(
+            "Usar pronósticos climáticos como regresores:",
+            options=available_regressors_sarima,
+            key="sarima_regressor_multiselect"
+        )
+        
         if selected_regressors_sarima:
             try:
                 all_dfs = [st.session_state['forecasted_regressors_sarima'][name] for name in selected_regressors_sarima]
                 regresores_sarima = all_dfs[0]
+                
                 if len(all_dfs) > 1:
                     for df in all_dfs[1:]:
                         regresores_sarima = pd.merge(regresores_sarima, df, on=Config.DATE_COL, how='outer')
+                
                 regresores_sarima = regresores_sarima.set_index(Config.DATE_COL).interpolate(method='linear', limit_direction='both').reset_index()
+                
                 st.success(f"Usando {', '.join(selected_regressors_sarima)} como regresor(es).")
             except Exception as e:
                 st.error(f"Error al combinar regresores: {e}")
@@ -3897,16 +3909,22 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         if (station_to_forecast or analysis_type_sarima == "Promedio Regional") and st.button("Generar Pronóstico SARIMA"):
             with st.spinner(f"Preparando y completando datos (SARIMA) para {station_name_for_title}..."):
                 if analysis_type_sarima == "Estación Individual":
-                    original_station_data_sarima = df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] == station_to_forecast].copy()
+                    original_station_data_sarima = \
+                        df_full_monthly[df_full_monthly[Config.STATION_NAME_COL] ==
+                                            station_to_forecast].copy()
                 else: 
-                    regional_data_full = df_full_monthly[df_full_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)].copy()
+                    regional_data_full = df_full_monthly[
+                        df_full_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)
+                    ].copy()
                     regional_data_avg = regional_data_full.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                     regional_data_avg[Config.STATION_NAME_COL] = "Serie Regional"
                     original_station_data_sarima = regional_data_avg
+
                 from modules.data_processor import complete_series
                 ts_data_sarima = complete_series(original_station_data_sarima)
+            
             if len(ts_data_sarima.dropna(subset=[Config.PRECIPITATION_COL])) < test_size + 36:
-                st.warning("No hay suficientes datos para un pronóstico confiable (se necesitan al menos 3 años más que el período de evaluación).")
+                st.warning("No hay suficientes datos para un pronóstico confiable.")
             else:
                 try:
                     from modules.forecasting import auto_arima_search, generate_sarima_forecast
@@ -3916,13 +3934,21 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                         st.success(f"Modelo óptimo encontrado: orden={order}, orden estacional={seasonal_order}")
                     else:
                         order, seasonal_order = (1, 1, 1), (1, 1, 1, 12)
+                    
                     with st.spinner("Entrenando y evaluando modelo SARIMA..."):
                         ts_hist, forecast_mean, forecast_ci, metrics, sarima_df_export = \
                             generate_sarima_forecast(ts_data_sarima, order, seasonal_order, forecast_horizon,
                                                      test_size,
                                                      regressors=regresores_sarima
                                                     )
-                        st.session_state['sarima_results'] = {'forecast': sarima_df_export, 'metrics': metrics, 'history': ts_hist, 'name': station_name_for_title}
+                        
+                        st.session_state['sarima_results'] = {
+                            'forecast': sarima_df_export, 
+                            'metrics': metrics, 
+                            'history': ts_hist,
+                            'name': station_name_for_title
+                        }
+                    
                     st.markdown("##### Resultados del Pronóstico")
                     st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
                     fig_pronostico = go.Figure()
@@ -3933,11 +3959,13 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     fig_pronostico.add_trace(go.Scatter(x=test_data_plot.index, y=test_data_plot, mode='markers', marker=dict(color='black', size=5), name='Datos Reales (Prueba)'))
                     fig_pronostico.update_layout(title=f"Pronóstico SARIMA para {station_name_for_title}", xaxis_title="Fecha", yaxis_title="Precipitación (mm)", height=600, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                     st.plotly_chart(fig_pronostico, use_container_width=True)
+                    
                     st.markdown("##### Evaluación del Modelo")
                     st.info(f"El modelo se evaluó usando los últimos **{test_size} meses** de datos históricos como conjunto de prueba.")
                     m1, m2 = st.columns(2)
                     m1.metric("RMSE (Error Cuadrático Medio)", f"{metrics['RMSE']:.2f}")
                     m2.metric("MAE (Error Absoluto Medio)", f"{metrics['MAE']:.2f}")
+                
                 except Exception as e:
                     st.error(f"No se pudo generar el pronóstico SARIMA. Error: {e}")
                     st.exception(e)
@@ -3946,9 +3974,8 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     # --- PESTAÑA: PRONÓSTICO PROPHET ---
     # -------------------------------------------------------------------------
     with pronostico_prophet_tab:
-        st.subheader("Pronóstico (Modelo Prophet)")
-        # ... (Pega aquí tu código de 'pronostico_prophet_tab' 
-        #      con la lógica de regresores multiselect) ...
+        st.subheader("Pronóstico de Precipitación (Modelo Prophet)")
+        
         analysis_type_prophet = st.radio("Seleccionar tipo de pronóstico Prophet:", ("Estación Individual", "Promedio Regional"), key="prophet_analysis_type", horizontal=True)
         station_to_forecast_prophet = None
         station_name_for_title = ""
@@ -3958,6 +3985,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         else:
             st.info(f"Se generará un pronóstico para la serie regional (promedio de {len(stations_for_analysis)} estaciones).")
             station_name_for_title = "Serie Regional"
+        
         c1, c2 = st.columns(2)
         with c1:
             forecast_horizon_prophet = st.slider("Meses a pronosticar:", 12, 36, 12, step=12, key="prophet_horizon")
@@ -3989,8 +4017,10 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     regional_data_avg = regional_data_full.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                     regional_data_avg[Config.STATION_NAME_COL] = "Serie Regional"
                     original_station_data = regional_data_avg
+                
                 from modules.data_processor import complete_series
                 ts_data_prophet = complete_series(original_station_data)
+            
             if len(ts_data_prophet.dropna(subset=[Config.PRECIPITATION_COL])) < test_size_prophet + 24:
                 st.warning(f"Incluso después de completar, no hay suficientes datos para un pronóstico confiable.")
             else:
@@ -4030,7 +4060,6 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
     # -------------------------------------------------------------------------
     with compare_forecast_tab:
         st.subheader("Comparación de Pronósticos: SARIMA vs Prophet")
-        # ... (Pega aquí tu código de 'compare_forecast_tab') ...
         sarima_results = st.session_state.get('sarima_results')
         prophet_results = st.session_state.get('prophet_results')
         
@@ -5546,8 +5575,7 @@ def display_climate_scenarios_tab(**kwargs):
 # --- PESTAÑA NUEVA: PRONÓSTICO CLIMÁTICO (ONI, SOI, IOD) ---
 # -------------------------------------------------------------------------
 def display_climate_forecast_tab(**kwargs):
-    st.header("Análisis de Tendencias y Pronósticos") # Mantenemos el H1
-    st.subheader("Pronóstico de Índices Climáticos")
+    st.header("Pronóstico de Índices Climáticos")
     st.info("Genere un pronóstico para un índice climático (ONI, SOI, etc.). Estos pronósticos se guardarán y podrán ser usados como regresores.")
 
     # --- Cargar datos de kwargs ---
@@ -5609,11 +5637,16 @@ def display_climate_forecast_tab(**kwargs):
         st.markdown("---")
         st.markdown(f"##### Gráfico del Pronóstico: {st.session_state['last_forecasted_index_name']}")
         
-        fig_index = plot_plotly(
-            st.session_state['last_forecasted_index_model'], 
-            st.session_state['last_forecasted_index_data']
-        )
-        st.plotly_chart(fig_index, use_container_width=True)
+        # Asegurarnos de que plot_plotly esté importado al inicio de visualizer.py
+        try:
+            from prophet.plot import plot_plotly
+            fig_index = plot_plotly(
+                st.session_state['last_forecasted_index_model'], 
+                st.session_state['last_forecasted_index_data']
+            )
+            st.plotly_chart(fig_index, use_container_width=True)
+        except ImportError:
+            st.error("Librería 'prophet' no instalada correctamente para graficar.")
         
         with st.expander("Fuente de Datos y Metodología"):
             st.markdown(f"""
@@ -5625,8 +5658,3 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
-
-
-
-
-
