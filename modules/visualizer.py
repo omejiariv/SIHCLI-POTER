@@ -5589,8 +5589,8 @@ def display_climate_forecast_tab(**kwargs):
     # --- Selección de Índice ---
     index_map = {
         "ONI (ENSO)": (Config.ENSO_ONI_COL, df_enso.rename(columns={Config.DATE_COL: 'ds', Config.ENSO_ONI_COL: 'y'})[['ds', 'y']].dropna()),
-        "SOI": (Config.SOI_COL, df_long.rename(columns={Config.DATE_COL: 'ds', Config.SOI_COL: 'y'})[['ds', 'y']].dropna()),
-        "IOD": (Config.IOD_COL, df_long.rename(columns={Config.DATE_COL: 'ds', Config.IOD_COL: 'y'})[['ds', 'y']].dropna()),
+        "SOI": (Config.SOI_COL, df_long.rename(columns={Config.DATE_COL: 'ds', Config.SOI_COL: 'y'})[['ds', 'y']].dropna().drop_duplicates(subset=['ds'])),
+        "IOD": (Config.IOD_COL, df_long.rename(columns={Config.DATE_COL: 'ds', Config.IOD_COL: 'y'})[['ds', 'y']].dropna().drop_duplicates(subset=['ds'])),
     }
     
     index_choice_name = st.selectbox(
@@ -5637,24 +5637,74 @@ def display_climate_forecast_tab(**kwargs):
         st.markdown("---")
         st.markdown(f"##### Gráfico del Pronóstico: {st.session_state['last_forecasted_index_name']}")
         
-        # Asegurarnos de que plot_plotly esté importado al inicio de visualizer.py
         try:
-            from prophet.plot import plot_plotly
-            fig_index = plot_plotly(
-                st.session_state['last_forecasted_index_model'], 
-                st.session_state['last_forecasted_index_data']
+            # NO USAR plot_plotly, CREAR GRÁFICO MANUAL
+            model = st.session_state['last_forecasted_index_model']
+            forecast_data = st.session_state['last_forecasted_index_data']
+            index_name = st.session_state['last_forecasted_index_name']
+            
+            fig_index = go.Figure()
+
+            # 1. Añadir banda de confianza (Intervalo de Incertidumbre)
+            # Seleccionamos solo el pronóstico futuro
+            horizon = len(forecast_data) - len(model.history)
+            forecast_plot_data = forecast_data.iloc[-horizon:]
+            
+            fig_index.add_trace(go.Scatter(
+                x=forecast_plot_data['ds'],
+                y=forecast_plot_data['yhat_upper'],
+                mode='lines', line=dict(width=0),
+                name='Incertidumbre (Alta)', legendgroup='forecast'
+            ))
+            fig_index.add_trace(go.Scatter(
+                x=forecast_plot_data['ds'],
+                y=forecast_plot_data['yhat_lower'],
+                mode='lines', line=dict(width=0),
+                fill='tonexty', fillcolor='rgba(0,176,246,0.2)',
+                name='Incertidumbre (Baja)', legendgroup='forecast'
+            ))
+            
+            # 2. Añadir la línea del pronóstico (yhat)
+            fig_index.add_trace(go.Scatter(
+                x=forecast_plot_data['ds'],
+                y=forecast_plot_data['yhat'],
+                mode='lines', line=dict(color='rgba(0,176,246,1)', width=3),
+                name=f'Pronóstico ({index_name})', legendgroup='forecast'
+            ))
+            
+            # 3. Añadir datos históricos (SOLO ÚLTIMOS 20 AÑOS)
+            history_data = model.history
+            history_plot_data = history_data.iloc[-(12*20):] # Últimos 20 años
+            
+            fig_index.add_trace(go.Scatter(
+                x=history_plot_data['ds'],
+                y=history_plot_data['y'],
+                mode='markers',
+                marker=dict(color='black', size=4),
+                name='Histórico (Últimos 20 años)'
+            ))
+
+            fig_index.update_layout(
+                title=f"Pronóstico {index_name} (Basado en Historia)",
+                xaxis_title="Fecha (ds)", yaxis_title=f"Valor Índice ({index_name})", height=600,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             st.plotly_chart(fig_index, use_container_width=True)
+
         except ImportError:
             st.error("Librería 'prophet' no instalada correctamente para graficar.")
+        except Exception as e_plot:
+            st.error(f"Error al generar el gráfico de pronóstico: {e_plot}")
+            st.exception(e_plot) # Imprimir traceback completo
         
+        # --- (El 'with st.expander' permanece igual) ---
         with st.expander("Fuente de Datos y Metodología"):
             st.markdown(f"""
             **Fuente de Datos:**
             Este pronóstico se genera usando el modelo **Prophet (de Meta)**, entrenado sobre la serie histórica del índice **{st.session_state['last_forecasted_index_name']}**.
             
             **Metodología:**
-            1.  La aplicación entrena un modelo Prophet con los datos históricos completos del índice seleccionado.
+            1.  La aplicación entrena un modelo Prophet con los datos históricos completos del índice seleccionado (ONI, SOI, o IOD).
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
