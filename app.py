@@ -437,222 +437,223 @@ def main():
             gdf_filtered=gdf_filtered
         )
     
-    # --- PESTAÑAS DE ANÁLISIS RESTANTES ---
+# --- PESTAÑAS DE ANÁLISIS RESTANTES ---
 
     with tabs[18]: # Análisis por Cuenca
-        [cite_start]st.header("Análisis Agregado por Cuenca Hidrográfica") [cite: 223]
-        [cite_start]if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty: [cite: 223]
-            [cite_start]BASIN_NAME_COLUMN = 'SUBC_LBL' [cite: 224]
-            [cite_start]if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns: [cite: 224]
-                [cite_start]basin_names = [] [cite: 224]
-                [cite_start]regions_from_sidebar = sidebar_filters.get("selected_regions", []) [cite: 225]
-                [cite_start]basins_in_selected_regions = st.session_state.gdf_subcuencas.copy() [cite: 226]
+        st.header("Análisis Agregado por Cuenca Hidrográfica")
+        if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
+            BASIN_NAME_COLUMN = 'SUBC_LBL'
+            if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns:
+                basin_names = []
+                regions_from_sidebar = sidebar_filters.get("selected_regions", [])
+                basins_in_selected_regions = st.session_state.gdf_subcuencas.copy()
 
-                [cite_start]if regions_from_sidebar: [cite: 226]
-                    [cite_start]if Config.REGION_COL in basins_in_selected_regions.columns: [cite: 226]
+                if regions_from_sidebar:
+                    if Config.REGION_COL in basins_in_selected_regions.columns:
                          basins_in_selected_regions = basins_in_selected_regions[
                              basins_in_selected_regions[Config.REGION_COL].isin(regions_from_sidebar)
-                         [cite_start]] [cite: 227]
-                         [cite_start]if basins_in_selected_regions.empty: [cite: 227]
-                             [cite_start]st.info("Ninguna subcuenca encontrada en las regiones seleccionadas.") [cite: 228]
+                         ]
+                         if basins_in_selected_regions.empty:
+                             st.info("Ninguna subcuenca encontrada en las regiones seleccionadas.")
                     else:
-                         [cite_start]st.warning(f"El archivo de subcuencas no tiene la columna '{Config.REGION_COL}'. No se puede filtrar por región.") [cite: 228, 229]
+                         st.warning(f"El archivo de subcuencas no tiene la columna '{Config.REGION_COL}'. No se puede filtrar por región.")
                 
-                [cite_start]if not basins_in_selected_regions.empty and 'gdf_filtered' in sidebar_filters and not sidebar_filters['gdf_filtered'].empty: [cite: 230]
-                     [cite_start]if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(st.session_state.gdf_stations.crs, allow_override=True) [cite: 230]
-                     [cite_start]if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(st.session_state.gdf_stations.crs, allow_override=True) [cite: 231]
-                     [cite_start]target_crs_sjoin = "EPSG:4326" [cite: 232]
+                if not basins_in_selected_regions.empty and 'gdf_filtered' in sidebar_filters and not sidebar_filters['gdf_filtered'].empty:
+                     if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(st.session_state.gdf_stations.crs, allow_override=True)
+                     if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(st.session_state.gdf_stations.crs, allow_override=True)
+                     target_crs_sjoin = "EPSG:4326"
                      try:
-                          [cite_start]basins_for_sjoin = basins_in_selected_regions.to_crs(target_crs_sjoin) [cite: 232]
-                          [cite_start]stations_for_sjoin = sidebar_filters['gdf_filtered'].to_crs(target_crs_sjoin) [cite: 233]
+                          basins_for_sjoin = basins_in_selected_regions.to_crs(target_crs_sjoin)
+                          stations_for_sjoin = sidebar_filters['gdf_filtered'].to_crs(target_crs_sjoin)
                           relevant_basins_gdf = gpd.sjoin(
                               basins_for_sjoin, stations_for_sjoin,
                               how="inner", predicate="intersects"
-                          [cite_start]) [cite: 233, 234]
-                          [cite_start]if not relevant_basins_gdf.empty: [cite: 235]
-                              [cite_start]basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique()) [cite: 236]
+                          )
+                          if not relevant_basins_gdf.empty:
+                              basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique())
                      except Exception as e_sjoin:
-                          [cite_start]st.error(f"Error durante la unión espacial (sjoin): {e_sjoin}") [cite: 236]
-                          [cite_start]basin_names = [] [cite: 237]
+                          st.error(f"Error durante la unión espacial (sjoin): {e_sjoin}")
+                          basin_names = []
                 
                 if not basin_names:
-                    [cite_start]st.info("Ninguna cuenca (en las regiones/filtros seleccionados) contiene estaciones que coincidan con todos los filtros actuales.") [cite: 238]
+                    st.info("Ninguna cuenca (en las regiones/filtros seleccionados) contiene estaciones que coincidan con todos los filtros actuales.")
                 else:
                      selected_basin = st.selectbox(
                         "Seleccione una cuenca para analizar:",
                         options=basin_names,
                         key="basin_selector" 
-                     [cite_start]) [cite: 239, 240]
-                     [cite_start]if selected_basin: [cite: 240]
+                     )
+                     if selected_basin:
                         stats_df, stations_in_selected_basin, error_msg = calculate_basin_stats(
-                            [cite_start]sidebar_filters['gdf_filtered'], [cite: 241]
-                            [cite_start]st.session_state.gdf_subcuencas, [cite: 241]
-                            [cite_start]df_monthly_filtered, [cite: 242]
+                            sidebar_filters['gdf_filtered'],
+                            st.session_state.gdf_subcuencas,
+                            df_monthly_filtered,
                             selected_basin,
                             BASIN_NAME_COLUMN
-                        [cite_start]) [cite: 241, 242]
+                        )
 
-                        [cite_start]if error_msg: st.warning(error_msg) [cite: 243]
-                        [cite_start]if stations_in_selected_basin: [cite: 244]
-                            [cite_start]st.subheader(f"Resultados para la cuenca: {selected_basin}") [cite: 244]
-                            [cite_start]st.metric("Número de Estaciones Filtradas en la Cuenca", len(stations_in_selected_basin)) [cite: 244]
-                            [cite_start]with st.expander("Ver estaciones incluidas"): [cite: 245]
-                                [cite_start]st.write(", ".join(stations_in_selected_basin)) [cite: 245]
-                            [cite_start]if stats_df is not None and not stats_df.empty: [cite: 246]
-                                [cite_start]st.markdown("---") [cite: 246]
-                                [cite_start]st.write("**Estadísticas de Precipitación Mensual (Agregada para estaciones filtradas en la cuenca)**") [cite: 246]
-                                [cite_start]st.dataframe(stats_df, use_container_width=True) [cite: 247]
+                        if error_msg: st.warning(error_msg)
+                        if stations_in_selected_basin:
+                            st.subheader(f"Resultados para la cuenca: {selected_basin}")
+                            st.metric("Número de Estaciones Filtradas en la Cuenca", len(stations_in_selected_basin))
+                            with st.expander("Ver estaciones incluidas"):
+                                st.write(", ".join(stations_in_selected_basin))
+                            if stats_df is not None and not stats_df.empty:
+                                st.markdown("---")
+                                st.write("**Estadísticas de Precipitación Mensual (Agregada para estaciones filtradas en la cuenca)**")
+                                st.dataframe(stats_df, use_container_width=True)
                             else:
-                                [cite_start]st.info("Aunque se encontraron estaciones filtradas en la cuenca, no hay datos de precipitación válidos para el período/meses seleccionados.") [cite: 248]
+                                st.info("Aunque se encontraron estaciones filtradas en la cuenca, no hay datos de precipitación válidos para el período/meses seleccionados.")
             else:
-                [cite_start]st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.") [cite: 249]
+                st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.")
         else:
-           [cite_start]st.warning("Los datos de las subcuencas no están cargados o el archivo está vacío.") [cite: 250]
+           st.warning("Los datos de las subcuencas no están cargados o el archivo está vacío.")
     
     with tabs[19]: # Comparación de Periodos
-        [cite_start]st.header("Comparación de Periodos de Tiempo") [cite: 250]
+        st.header("Comparación de Periodos de Tiempo")
         analysis_level = st.radio(
             "Seleccione el nivel de análisis para la comparación:",
             ("Promedio Regional (Todas las estaciones seleccionadas)", "Por Cuenca Específica"),
             key="compare_level_radio"
-        [cite_start]) [cite: 250, 251]
-        [cite_start]df_to_compare = pd.DataFrame() [cite: 251]
+        )
+        df_to_compare = pd.DataFrame()
 
-        [cite_start]if analysis_level == "Por Cuenca Específica": [cite: 251]
-            [cite_start]st.markdown("---") [cite: 251]
-            [cite_start]if st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty: [cite: 251]
-                [cite_start]BASIN_NAME_COLUMN = 'SUBC_LBL' [cite: 251]
-                [cite_start]if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns: [cite: 252]
-                    [cite_start]relevant_basins_gdf = gpd.sjoin(st.session_state.gdf_subcuencas, gdf_filtered, how="inner", predicate="intersects") [cite: 252]
-                    [cite_start]if not relevant_basins_gdf.empty: [cite: 252]
-                        [cite_start]basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique()) [cite: 252]
+        if analysis_level == "Por Cuenca Específica":
+            st.markdown("---")
+            if st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
+                BASIN_NAME_COLUMN = 'SUBC_LBL'
+                if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns:
+                    relevant_basins_gdf = gpd.sjoin(st.session_state.gdf_subcuencas, gdf_filtered, how="inner", predicate="intersects")
+                    if not relevant_basins_gdf.empty:
+                        basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique())
                     else:
-                         [cite_start]basin_names = [] [cite: 253]
-                    [cite_start]if not basin_names: [cite: 253]
-                        [cite_start]st.warning("Ninguna cuenca contiene estaciones que coincidan con los filtros actuales.", icon="⚠️") [cite: 253]
+                         basin_names = []
+                    if not basin_names:
+                        st.warning("Ninguna cuenca contiene estaciones que coincidan con los filtros actuales.", icon="⚠️")
                     else:
                          selected_basin = st.selectbox(
                             "Seleccione la cuenca a comparar:",
                             options=basin_names,
                             key="compare_basin_selector"
-                        [cite_start]) [cite: 254, 255]
-                         [cite_start]target_basin_geom = st.session_state.gdf_subcuencas[st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN] == selected_basin] [cite: 255]
-                         [cite_start]stations_in_basin = gpd.sjoin(gdf_filtered, target_basin_geom, how="inner", predicate="within") [cite: 255]
-                         [cite_start]station_names_in_basin = stations_in_basin[Config.STATION_NAME_COL].unique().tolist() [cite: 256]
-                         [cite_start]df_to_compare = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL].isin(station_names_in_basin)] [cite: 256]
-                         [cite_start]st.info(f"Análisis para **{len(station_names_in_basin)}** estaciones encontradas en la cuenca **{selected_basin}**.", icon="ℹ️") [cite: 256]
+                        )
+                         target_basin_geom = st.session_state.gdf_subcuencas[st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN] == selected_basin]
+                         stations_in_basin = gpd.sjoin(gdf_filtered, target_basin_geom, how="inner", predicate="within")
+                         station_names_in_basin = stations_in_basin[Config.STATION_NAME_COL].unique().tolist()
+                         df_to_compare = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL].isin(station_names_in_basin)]
+                         st.info(f"Análisis para **{len(station_names_in_basin)}** estaciones encontradas en la cuenca **{selected_basin}**.", icon="ℹ️")
                 else:
-                     [cite_start]st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.") [cite: 257]
+                     st.error(f"Error Crítico: No se encontró la columna de nombres '{BASIN_NAME_COLUMN}' en el archivo de subcuencas.")
             else:
-                [cite_start]st.warning("Los datos de las subcuencas no están cargados.", icon="⚠️") [cite: 257]
+                st.warning("Los datos de las subcuencas no están cargados.", icon="⚠️")
         else: # Promedio Regional
-            [cite_start]df_to_compare = df_monthly_filtered [cite: 257]
+            df_to_compare = df_monthly_filtered
         
-        [cite_start]st.markdown("---") [cite: 258]
-        [cite_start]if df_to_compare.empty: [cite: 258]
-            [cite_start]st.warning("Seleccione una opción con estaciones válidas para poder realizar la comparación.", icon="ℹ️") [cite: 258]
+        st.markdown("---")
+        if df_to_compare.empty:
+            st.warning("Seleccione una opción con estaciones válidas para poder realizar la comparación.", icon="ℹ️")
         else:
-            [cite_start]years_with_data = sorted(df_to_compare[Config.YEAR_COL].dropna().unique()) [cite: 258]
-            [cite_start]min_year, max_year = int(years_with_data[0]), int(years_with_data[-1]) [cite: 258]
-            [cite_start]col1, col2 = st.columns(2) [cite: 258]
-            [cite_start]with col1: [cite: 259]
-                [cite_start]st.markdown("#### Periodo 1") [cite: 259]
+            years_with_data = sorted(df_to_compare[Config.YEAR_COL].dropna().unique())
+            min_year, max_year = int(years_with_data[0]), int(years_with_data[-1])
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Periodo 1")
                 periodo1 = st.slider(
                     "Seleccione el rango de años para el Periodo 1",
                     min_year, max_year,
                     (min_year, min_year + 10 if min_year + 10 < max_year else max_year),
                     key="periodo1_slider_comp"
-                [cite_start]) [cite: 259, 260]
-            [cite_start]with col2: [cite: 260]
-                [cite_start]st.markdown("#### Periodo 2") [cite: 260]
+                )
+            with col2:
+                st.markdown("#### Periodo 2")
                 periodo2 = st.slider(
                     "Seleccione el rango de años para el Periodo 2",
                     min_year, max_year,
                     (max_year - 10 if max_year - 10 > min_year else min_year, max_year),
                     key="periodo2_slider_comp"
-                [cite_start]) [cite: 261, 262]
-            [cite_start]df_periodo1 = df_to_compare[(df_to_compare[Config.DATE_COL].dt.year >= periodo1[0]) & (df_to_compare[Config.DATE_COL].dt.year <= periodo1[1])] [cite: 262]
-            [cite_start]df_periodo2 = df_to_compare[(df_to_compare[Config.DATE_COL].dt.year >= periodo2[0]) & (df_to_compare[Config.DATE_COL].dt.year <= periodo2[1])] [cite: 262]
-            [cite_start]st.markdown("---") [cite: 262]
-            [cite_start]st.subheader("Resultados Comparativos") [cite: 262]
-            [cite_start]if df_periodo1.empty or df_periodo2.empty: [cite: 262]
-                [cite_start]st.warning("Uno o ambos periodos seleccionados no contienen datos. Por favor, ajuste los rangos.") [cite: 263, 264]
+                )
+            df_periodo1 = df_to_compare[(df_to_compare[Config.DATE_COL].dt.year >= periodo1[0]) & (df_to_compare[Config.DATE_COL].dt.year <= periodo1[1])]
+            df_periodo2 = df_to_compare[(df_to_compare[Config.DATE_COL].dt.year >= periodo2[0]) & (df_to_compare[Config.DATE_COL].dt.year <= periodo2[1])]
+            st.markdown("---")
+            st.subheader("Resultados Comparativos")
+            if df_periodo1.empty or df_periodo2.empty:
+                st.warning("Uno o ambos periodos seleccionados no contienen datos. Por favor, ajuste los rangos.")
             else:
-                [cite_start]stats1_mean = df_periodo1[Config.PRECIPITATION_COL].mean() [cite: 264]
-                [cite_start]stats2_mean = df_periodo2[Config.PRECIPITATION_COL].mean() [cite: 264]
-                [cite_start]delta = ((stats2_mean - stats1_mean) / stats1_mean) * 100 if stats1_mean != 0 else 0 [cite: 264]
+                stats1_mean = df_periodo1[Config.PRECIPITATION_COL].mean()
+                stats2_mean = df_periodo2[Config.PRECIPITATION_COL].mean()
+                delta = ((stats2_mean - stats1_mean) / stats1_mean) * 100 if stats1_mean != 0 else 0
                 st.metric(
                     label=f"Precipitación Media Mensual ({periodo1[0]}-{periodo1[1]} vs. {periodo2[0]}-{periodo2[1]})",
                     value=f"{stats2_mean:.1f} mm",
                     delta=f"{delta:.2f}% (respecto a {stats1_mean:.1f} mm del Periodo 1)"
-                [cite_start]) [cite: 265]
-                [cite_start]st.markdown("##### Desglose Estadístico Completo") [cite: 266]
-                [cite_start]col1_stats, col2_stats = st.columns(2) [cite: 266]
-                [cite_start]with col1_stats: [cite: 266]
-                    [cite_start]st.write(f"**Periodo 1 ({periodo1[0]}-{periodo1[1]})**") [cite: 266]
-                    [cite_start]st.dataframe(df_periodo1[Config.PRECIPITATION_COL].describe().round(2)) [cite: 266]
-                [cite_start]with col2_stats: [cite: 267]
-                    [cite_start]st.write(f"**Periodo 2 ({periodo2[0]}-{periodo2[1]})**") [cite: 267]
-                    [cite_start]st.dataframe(df_periodo2[Config.PRECIPITATION_COL].describe().round(2)) [cite: 267]
+                )
+                st.markdown("##### Desglose Estadístico Completo")
+                col1_stats, col2_stats = st.columns(2)
+                with col1_stats:
+                    st.write(f"**Periodo 1 ({periodo1[0]}-{periodo1[1]})**")
+                    st.dataframe(df_periodo1[Config.PRECIPITATION_COL].describe().round(2))
+                with col2_stats:
+                    st.write(f"**Periodo 2 ({periodo2[0]}-{periodo2[1]})**")
+                    st.dataframe(df_periodo2[Config.PRECIPITATION_COL].describe().round(2))
     
     with tabs[20]: # Tabla de Estaciones
-        [cite_start]display_station_table_tab(**display_args) [cite: 267]
+        display_station_table_tab(**display_args)
     
     with tabs[21]: # Generar Reporte
-        [cite_start]st.header("Generación de Reporte PDF") [cite: 267]
-        [cite_start]st.subheader("Seleccionar Secciones para Incluir en el Reporte:") [cite: 268]
+        st.header("Generación de Reporte PDF")
+        st.subheader("Seleccionar Secciones para Incluir en el Reporte:")
         report_sections_options = [
             "Resumen General", "Tabla de Estaciones", "Mapa de Distribución Espacial",
             "Análisis de Precipitación Mensual y Anual", "Análisis de Anomalías",
-            [cite_start]"Análisis de Extremos Hidrológicos (Percentiles)", [cite: 269]
+            "Análisis de Extremos Hidrológicos (Percentiles)",
             "Análisis de Índices de Sequía (SPI/SPEI)",
             "Análisis de Frecuencia de Extremos", "Análisis de Correlación", "Análisis ENSO",
             "Análisis de Tendencias y Pronósticos", "Comparación de Periodos"
-        [cite_start]] [cite: 268, 269, 270]
-        [cite_start]select_all_checkbox = st.checkbox("Seleccionar todas las secciones", value=st.session_state.select_all_report_sections_checkbox, key="select_all_report_sections_checkbox") [cite: 270]
-        [cite_start]if select_all_checkbox: [cite: 270]
-            [cite_start]st.session_state.selected_report_sections_multiselect = report_sections_options [cite: 270]
+        ]
+        select_all_checkbox = st.checkbox("Seleccionar todas las secciones", value=st.session_state.select_all_report_sections_checkbox, key="select_all_report_sections_checkbox")
+        if select_all_checkbox:
+            st.session_state.selected_report_sections_multiselect = report_sections_options
         selected_report_sections = st.multiselect(
-            [cite_start]"Secciones disponibles:", [cite: 271]
-            [cite_start]options=report_sections_options, [cite: 271]
-            [cite_start]default=st.session_state.selected_report_sections_multiselect, [cite: 271]
-            [cite_start]key="selected_report_sections_multiselect" [cite: 271]
+            "Secciones disponibles:",
+            options=report_sections_options,
+            default=st.session_state.selected_report_sections_multiselect,
+            key="selected_report_sections_multiselect"
         )
-        [cite_start]st.markdown("---") [cite: 271]
-        [cite_start]st.subheader("Configuración Adicional") [cite: 271]
-        [cite_start]report_title = st.text_input("Título del Reporte", value="Reporte de Análisis Climatológico", key="report_title_input") [cite: 271]
-        [cite_start]author_name = st.text_input("Nombre del Autor", value="Generado por SIHCLI", key="author_name_input") [cite: 271]
-        [cite_start]if st.button("Generar Reporte PDF", key="generate_pdf_button"): [cite: 272]
-            [cite_start]if not selected_report_sections: [cite: 272]
-                [cite_start]st.warning("Por favor, seleccione al menos una sección para incluir en el reporte.") [cite: 272]
+        st.markdown("---")
+        st.subheader("Configuración Adicional")
+        report_title = st.text_input("Título del Reporte", value="Reporte de Análisis Climatológico", key="report_title_input")
+        author_name = st.text_input("Nombre del Autor", value="Generado por SIHCLI", key="author_name_input")
+        if st.button("Generar Reporte PDF", key="generate_pdf_button"):
+            if not selected_report_sections:
+                st.warning("Por favor, seleccione al menos una sección para incluir en el reporte.")
             else:
-                [cite_start]with st.spinner("Generando reporte PDF... Esto puede tardar unos minutos."): [cite: 272]
+                with st.spinner("Generando reporte PDF... Esto puede tardar unos minutos."):
                     try:
                         report_pdf_bytes = generate_pdf_report(
-                            [cite_start]selected_report_sections=selected_report_sections, [cite: 276]
-                            [cite_start]report_title=report_title, [cite: 276]
-                            [cite_start]author_name=author_name, [cite: 276]
-                            [cite_start]gdf_filtered=gdf_filtered, [cite: 277]
-                            [cite_start]df_long=st.session_state.df_long, [cite: 277]
-                            [cite_start]df_anual_melted=df_anual_melted, [cite: 277]
-                            [cite_start]df_monthly_filtered=df_monthly_filtered, [cite: 277]
-                            [cite_start]stations_for_analysis=stations_for_analysis, [cite: 278]
-                            [cite_start]df_enso=st.session_state.df_enso [cite: 280]
-                        [cite_start]) [cite: 276, 281]
-                        [cite_start]st.success("Reporte PDF generado exitosamente!") [cite: 281]
+                            selected_report_sections=selected_report_sections,
+                            report_title=report_title,
+                            author_name=author_name,
+                            gdf_filtered=gdf_filtered,
+                            df_long=st.session_state.df_long,
+                            df_anual_melted=df_anual_melted,
+                            df_monthly_filtered=df_monthly_filtered,
+                            stations_for_analysis=stations_for_analysis,
+                            df_enso=st.session_state.df_enso
+                        )
+                        st.success("Reporte PDF generado exitosamente!")
                         st.download_button(
-                            [cite_start]label="Descargar Reporte PDF", [cite: 282]
-                            [cite_start]data=report_pdf_bytes, [cite: 282]
-                            [cite_start]file_name=f"{report_title.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf", [cite: 282]
-                            [cite_start]mime="application/pdf", [cite: 282]
-                            [cite_start]key="download_pdf_button" [cite: 283]
+                            label="Descargar Reporte PDF",
+                            data=report_pdf_bytes,
+                            file_name=f"{report_title.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf",
+                            mime="application/pdf",
+                            key="download_pdf_button"
                         )
                     except Exception as e:
-                        [cite_start]st.error(f"Error al generar el reporte PDF: {e}") [cite: 283]
-                        [cite_start]st.exception(e) [cite: 284]
+                        st.error(f"Error al generar el reporte PDF: {e}")
+                        st.exception(e)
                         
 if __name__ == "__main__":
     main()
+
 
 
 
