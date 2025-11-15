@@ -419,7 +419,7 @@ def main():
         display_correlation_tab(**display_args)
     
     with tabs[14]: # Análisis ENSO
-        display_enso_tab(df_enso=st.session_state.df_enso, **display_args) # Pasamos df_enso aquí
+        display_enso_tab(**display_args)
     
     # --- PESTAÑAS DE PRONÓSTICO CORREGIDAS ---
     
@@ -653,6 +653,7 @@ def main():
                         
 if __name__ == "__main__":
     main()
+
 
 
 
