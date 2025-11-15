@@ -3649,7 +3649,7 @@ def display_enso_tab(df_enso, df_monthly_filtered, gdf_filtered, stations_for_an
 def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                                     df_anual_melted, df_monthly_filtered, analysis_mode, selected_regions,
                                     selected_municipios, selected_altitudes, **kwargs):
-    st.header("Análisis de Tendencias y Pronósticos de Precipitación") # <-- Título cambiado
+    st.header("Análisis de Tendencias y Pronósticos de Precipitación") 
 
     gdf_stations = kwargs.get('gdf_stations')
     year_range_val = st.session_state.get('year_range', (2000, 2020))
@@ -3951,12 +3951,15 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     
                     st.markdown("##### Resultados del Pronóstico")
                     st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
+                    
                     fig_pronostico = go.Figure()
+
                     fig_pronostico.add_trace(go.Scatter(x=forecast_ci.index, y=forecast_ci.iloc[:, 0], mode='lines', line=dict(width=0), name='Incertidumbre (Baja)', legendgroup='forecast'))
                     fig_pronostico.add_trace(go.Scatter(x=forecast_ci.index, y=forecast_ci.iloc[:, 1], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)', name='Intervalo de Confianza', legendgroup='forecast'))
                     fig_pronostico.add_trace(go.Scatter(x=forecast_mean.index, y=forecast_mean, mode='lines', line=dict(color='red', dash='dash', width=3), name='Pronóstico SARIMA', legendgroup='forecast'))
                     test_data_plot = ts_hist.iloc[-test_size:]
                     fig_pronostico.add_trace(go.Scatter(x=test_data_plot.index, y=test_data_plot, mode='markers', marker=dict(color='black', size=5), name='Datos Reales (Prueba)'))
+
                     fig_pronostico.update_layout(title=f"Pronóstico SARIMA para {station_name_for_title}", xaxis_title="Fecha", yaxis_title="Precipitación (mm)", height=600, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                     st.plotly_chart(fig_pronostico, use_container_width=True)
                     
@@ -4072,30 +4075,40 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
             st.info("Por favor, ejecute ambos pronósticos para el mismo objetivo (ambos para 'Serie Regional' o ambos para la misma estación).")
         else:
             fig_compare = go.Figure()
+            
             if sarima_results.get('history') is not None:
                 hist_data = sarima_results['history']
                 hist_data_plot = hist_data.iloc[- (12 * 20):] 
                 fig_compare.add_trace(go.Scatter(x=hist_data_plot.index, y=hist_data_plot, mode='lines', name='Histórico (Últimos 20 años)', line=dict(color='gray')))
+
             if sarima_results.get('forecast') is not None:
                 sarima_fc = sarima_results['forecast']
                 fig_compare.add_trace(go.Scatter(x=sarima_fc['ds'], y=sarima_fc['yhat'], mode='lines', name='Pronóstico SARIMA', line=dict(color='red', dash='dash')))
+
             if prophet_results.get('forecast') is not None:
                 prophet_fc = prophet_results['forecast']
                 fig_compare.add_trace(go.Scatter(x=prophet_fc['ds'], y=prophet_fc['yhat'], mode='lines', name='Pronóstico Prophet', line=dict(color='blue', dash='dash')))
+
             fig_compare.update_layout(title=f"Pronóstico Comparativo para {sarima_results.get('name')}", xaxis_title="Fecha", yaxis_title="Precipitación (mm)", height=500, legend=dict(x=0.01, y=0.99))
             st.plotly_chart(fig_compare, use_container_width=True)
+
             st.markdown("#### Comparación de Precisión (sobre el conjunto de prueba)")
             sarima_metrics = sarima_results.get('metrics')
             prophet_metrics = prophet_results.get('metrics')
+            
             if sarima_metrics and prophet_metrics:
-                m_data = {'Métrica': ['RMSE', 'MAE'], 'SARIMA': [sarima_metrics['RMSE'], sarima_metrics['MAE']], 'Prophet': [prophet_metrics['RMSE'], prophet_metrics['MAE']]}
+                m_data = {'Métrica': ['RMSE', 'MAE'], 
+                          'SARIMA': [sarima_metrics['RMSE'], sarima_metrics['MAE']], 
+                          'Prophet': [prophet_metrics['RMSE'], prophet_metrics['MAE']]}
                 metrics_df = pd.DataFrame(m_data)
                 st.dataframe(metrics_df.style.format({'SARIMA': '{:.2f}', 'Prophet': '{:.2f}'}))
+                
                 rmse_winner = 'SARIMA' if sarima_metrics['RMSE'] < prophet_metrics['RMSE'] else 'Prophet'
                 mae_winner = 'SARIMA' if sarima_metrics['MAE'] < prophet_metrics['MAE'] else 'Prophet'
+                
                 st.success(f"**Ganador (menor error):** **{rmse_winner}** basado en RMSE y **{mae_winner}** basado en MAE.")
             else:
-                st.info("No se encontraron métricas de evaluación para la comparación.")
+                 st.info("No se encontraron métricas de evaluación para la comparación.")
                 
 def display_downloads_tab(df_anual_melted, df_monthly_filtered, stations_for_analysis,
                              analysis_mode):
@@ -5638,7 +5651,9 @@ def display_climate_forecast_tab(**kwargs):
         st.markdown(f"##### Gráfico del Pronóstico: {st.session_state['last_forecasted_index_name']}")
         
         try:
-            # NO USAR plot_plotly, CREAR GRÁFICO MANUAL
+            from prophet.plot import plot_plotly
+            
+            # --- CORRECCIÓN DE GRÁFICO (Ligero) ---
             model = st.session_state['last_forecasted_index_model']
             forecast_data = st.session_state['last_forecasted_index_data']
             index_name = st.session_state['last_forecasted_index_name']
@@ -5646,29 +5661,23 @@ def display_climate_forecast_tab(**kwargs):
             fig_index = go.Figure()
 
             # 1. Añadir banda de confianza (Intervalo de Incertidumbre)
-            # Seleccionamos solo el pronóstico futuro
             horizon = len(forecast_data) - len(model.history)
             forecast_plot_data = forecast_data.iloc[-horizon:]
             
             fig_index.add_trace(go.Scatter(
-                x=forecast_plot_data['ds'],
-                y=forecast_plot_data['yhat_upper'],
-                mode='lines', line=dict(width=0),
+                x=forecast_plot_data['ds'], y=forecast_plot_data['yhat_upper'], mode='lines', line=dict(width=0),
                 name='Incertidumbre (Alta)', legendgroup='forecast'
             ))
             fig_index.add_trace(go.Scatter(
-                x=forecast_plot_data['ds'],
-                y=forecast_plot_data['yhat_lower'],
-                mode='lines', line=dict(width=0),
+                x=forecast_plot_data['ds'], y=forecast_plot_data['yhat_lower'], mode='lines', line=dict(width=0),
                 fill='tonexty', fillcolor='rgba(0,176,246,0.2)',
                 name='Incertidumbre (Baja)', legendgroup='forecast'
             ))
             
             # 2. Añadir la línea del pronóstico (yhat)
             fig_index.add_trace(go.Scatter(
-                x=forecast_plot_data['ds'],
-                y=forecast_plot_data['yhat'],
-                mode='lines', line=dict(color='rgba(0,176,246,1)', width=3),
+                x=forecast_plot_data['ds'], y=forecast_plot_data['yhat'], mode='lines', 
+                line=dict(color='rgba(0,176,246,1)', width=3),
                 name=f'Pronóstico ({index_name})', legendgroup='forecast'
             ))
             
@@ -5677,9 +5686,7 @@ def display_climate_forecast_tab(**kwargs):
             history_plot_data = history_data.iloc[-(12*20):] # Últimos 20 años
             
             fig_index.add_trace(go.Scatter(
-                x=history_plot_data['ds'],
-                y=history_plot_data['y'],
-                mode='markers',
+                x=history_plot_data['ds'], y=history_plot_data['y'], mode='markers',
                 marker=dict(color='black', size=4),
                 name='Histórico (Últimos 20 años)'
             ))
@@ -5690,14 +5697,14 @@ def display_climate_forecast_tab(**kwargs):
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             st.plotly_chart(fig_index, use_container_width=True)
+            # --- FIN CORRECCIÓN DE GRÁFICO ---
 
         except ImportError:
             st.error("Librería 'prophet' no instalada correctamente para graficar.")
         except Exception as e_plot:
             st.error(f"Error al generar el gráfico de pronóstico: {e_plot}")
-            st.exception(e_plot) # Imprimir traceback completo
+            st.exception(e_plot)
         
-        # --- (El 'with st.expander' permanece igual) ---
         with st.expander("Fuente de Datos y Metodología"):
             st.markdown(f"""
             **Fuente de Datos:**
