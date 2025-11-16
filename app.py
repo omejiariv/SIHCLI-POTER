@@ -263,6 +263,16 @@ def main():
         st.session_state.data_loaded = False
         st.stop()
 
+    # --- INICIO DE BLOQUE AÑADIDO ---
+    # Guardar las variables locales clave en session_state
+    # para que las pestañas heredadas (Análisis por Cuenca, etc.) puedan encontrarlas.
+    st.session_state.gdf_stations = gdf_stations
+    st.session_state.df_long = df_long
+    st.session_state.df_enso = df_enso
+    st.session_state.gdf_municipios = gdf_municipios
+    st.session_state.gdf_subcuencas = gdf_subcuencas
+    # --- FIN DE BLOQUE AÑADIDO ---
+
     #--- SECCIÓN DE CONTROL DEL SIDEBAR (DATOS YA CARGADOS) ---
     st.sidebar.success("Datos cargados.")
     if st.sidebar.button("Limpiar Caché y Reiniciar"):
@@ -654,6 +664,7 @@ def main():
                         
 if __name__ == "__main__":
     main()
+
 
 
 
