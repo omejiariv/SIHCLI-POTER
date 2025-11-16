@@ -5299,7 +5299,47 @@ def display_alerts_tab(**kwargs):
                 st.info("**Condiciones Secas:** No se esperan lluvias significativas en los próximos 7 días.")
             
             with st.expander("Ver pronóstico semanal detallado"):
-                st.dataframe(weekly_forecast)
+                # --- INICIO DE BLOQUE CORREGIDO ---
+                df_display_alert = weekly_forecast.copy()
+                
+                # 1. Convertir la columna 'date' a datetime (por si acaso)
+                df_display_alert['date'] = pd.to_datetime(df_display_alert['date'])
+                
+                # 2. Crear la columna de Fecha formateada
+                df_display_alert['Fecha'] = df_display_alert['date'].dt.strftime('%A, %d %b')
+                
+                # 3. Seleccionar y renombrar las columnas (basado en tu lógica de 'display_weekly_forecast_tab')
+                column_rename_map = {
+                    'Fecha': 'Fecha',
+                    'temperature_2m_max': 'T. Máx (°C)',
+                    'temperature_2m_min': 'T. Mín (°C)',
+                    'precipitation_sum': 'Ppt. (mm)',
+                    'relative_humidity_2m_mean': 'HR Media (%)',
+                    'surface_pressure_mean': 'Presión (hPa)',
+                    'et0_fao_evapotranspiration': 'ET₀ (mm)',
+                    'shortwave_radiation_sum': 'Radiación SW (MJ/m²)',
+                    'wind_speed_10m_max': 'Viento Máx (km/h)'
+                }
+                
+                # Seleccionar solo las columnas que realmente existen
+                cols_to_display = [col for col in column_rename_map if col in df_display_alert.columns or col == 'Fecha']
+                df_for_table = df_display_alert[cols_to_display].rename(columns=column_rename_map)
+                
+                # 4. Definir el diccionario de formato
+                format_dict = {
+                     'T. Máx (°C)': '{:.1f}', 'T. Mín (°C)': '{:.1f}', 'Ppt. (mm)': '{:.1f}',
+                     'HR Media (%)': '{:.0f}', 'Presión (hPa)': '{:.1f}', 'ET₀ (mm)': '{:.2f}',
+                     'Radiación SW (MJ/m²)': '{:.1f}', 'Viento Máx (km/h)': '{:.1f}'
+                }
+                valid_format_dict = {k: v for k, v in format_dict.items() if k in df_for_table.columns}
+        
+                # 5. Mostrar el DataFrame formateado y con 'Fecha' como índice
+                st.dataframe(
+                    df_for_table.set_index('Fecha').style.format(valid_format_dict),
+                    use_container_width=True
+                )
+                # --- FIN DE BLOQUE CORREGIDO ---
+
         else:
             st.warning("No se ha generado un pronóstico. Vaya a la pestaña 'Pronóstico Semanal' para generarlo.")
 
@@ -5715,4 +5755,5 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
