@@ -5632,7 +5632,7 @@ def display_climate_scenarios_tab(**kwargs):
                 st.error(f"No se pudo completar el análisis de sequía (SPI): {e_spi}")
                 st.exception(e_spi)
             # --- FIN DE BLOQUE CORREGIDO ---
-
+            
             # --- 6. ZONAS DE VIDA (DIFERIDO) ---
             st.markdown("---")
             st.info("""
@@ -5773,6 +5773,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
