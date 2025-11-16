@@ -5569,6 +5569,7 @@ def display_climate_scenarios_tab(**kwargs):
             # --- 5. ANÁLISIS DE SEQUÍA (SPI) ---
             st.subheader("Impacto en la Frecuencia de Sequías (SPI)")
             
+            # --- INICIO DE BLOQUE CORREGIDO ---
             try:
                 # 5a. Encontrar estaciones en la cuenca (lógica de la pestaña de cuencas)
                 stations_in_basin_gdf = gpd.sjoin(gdf_filtered, basin_gdf, how="inner", predicate="intersects")
@@ -5626,9 +5627,11 @@ def display_climate_scenarios_tab(**kwargs):
                         delta=f"{(escenario_drought_perc - base_drought_perc):.1f}%"
                     )
             
+            # ESTE 'except' AHORA ESTÁ ALINEADO CON EL 'try'
             except Exception as e_spi:
                 st.error(f"No se pudo completar el análisis de sequía (SPI): {e_spi}")
                 st.exception(e_spi)
+            # --- FIN DE BLOQUE CORREGIDO ---
 
             # --- 6. ZONAS DE VIDA (DIFERIDO) ---
             st.markdown("---")
@@ -5770,6 +5773,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
