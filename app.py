@@ -430,7 +430,7 @@ def main():
         
     with tabs[16]: # Tendencias y Pronósticos (FUNCIÓN ORIGINAL)
         # Pasa el df_long original como df_full_monthly
-        display_trends_and_forecast_tab(**display_args)
+        display_trends_and_forecast_tab(df_full_monthly=df_long, **display_args)
         
     with tabs[17]: # Pronóstico Semanal
         display_weekly_forecast_tab(
@@ -654,6 +654,7 @@ def main():
                         
 if __name__ == "__main__":
     main()
+
 
 
 
