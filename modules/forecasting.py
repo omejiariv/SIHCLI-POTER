@@ -235,46 +235,63 @@ def evaluate_forecast(y_true, y_pred):
 @st.cache_data
 def generate_sarima_forecast(ts_data_raw, order, seasonal_order, horizon, test_size=12, regressors=None):
     """Entrena, evalúa y genera un pronóstico con SARIMAX, incluyendo regresores opcionales."""
-    ts_data = ts_data_raw[[Config.DATE_COL, Config.PRECIPITATION_COL]].copy()
-    ts_data = ts_data.drop_duplicates(subset=[Config.DATE_COL], keep='first')
-    ts_data = ts_data.set_index(Config.DATE_COL).sort_index()
-    ts = ts_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time').dropna()
+    
+    # --- Lógica de Regresores Corregida ---
+    exog, exog_train, exog_test, exog_future = None, None, None, None
+    regressor_cols = [] # Nombres de las columnas regresoras (ej. 'anomalia_oni', 'soi')
 
+    # 1. Preparar datos de precipitación (ts)
+    ts_data_precip = ts_data_raw[[Config.DATE_COL, Config.PRECIPITATION_COL]].copy()
+    ts_data_precip = ts_data_precip.drop_duplicates(subset=[Config.DATE_COL], keep='first')
+    ts_data_precip = ts_data_precip.set_index(Config.DATE_COL).sort_index()
+    ts = ts_data_precip[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time').dropna()
+
+    # 2. Preparar regresores (si existen)
+    if regressors is not None and not regressors.empty:
+        # Obtener los nombres de las columnas regresoras (ej. 'anomalia_oni', 'soi')
+        regressor_cols = [col for col in regressors.columns if col != Config.DATE_COL]
+        
+        # 'regressors' ya tiene el formato correcto de fecha
+        exog_full = regressors.set_index(Config.DATE_COL).sort_index()
+        
+        # Alinear el índice de los regresores con el de la precipitación
+        # Esto alinea los datos históricos y rellena los huecos
+        exog = exog_full.reindex(ts.index)
+        exog = exog.interpolate(method='linear', limit_direction='both')
+        
+        # Preparar regresores futuros (para el pronóstico)
+        # 'exog_full' contiene el pronóstico. Lo reindexamos al rango de fechas futuro.
+        future_index = pd.date_range(start=ts.index[-1] + pd.DateOffset(months=1), periods=horizon, freq='MS')
+        exog_future = exog_full.reindex(future_index)
+        exog_future = exog_future.interpolate(method='linear', limit_direction='both')
+        
     if len(ts) < test_size + 24:
         raise ValueError(f"Se necesitan al menos {test_size + 24} meses de datos para el pronóstico y la evaluación.")
 
-    exog, exog_train, exog_test, exog_future = None, None, None, None
-    if regressors is not None and not regressors.empty:
-        exog = regressors.set_index(Config.DATE_COL)
-        exog = exog.reindex(ts.index).interpolate()
-
+    # 3. Dividir datos para entrenamiento y prueba
     train, test = ts[:-test_size], ts[-test_size:]
     if exog is not None:
         exog_train, exog_test = exog.iloc[:-test_size], exog.iloc[-test_size:]
 
+    # 4. Entrenar y Evaluar
     model = SARIMAX(train, order=order, seasonal_order=seasonal_order, exog=exog_train, enforce_stationarity=False, enforce_invertibility=False)
     results = model.fit(disp=False)
     pred_test = results.get_forecast(steps=test_size, exog=exog_test)
     y_pred_test = pred_test.predicted_mean
     metrics = evaluate_forecast(test, y_pred_test)
 
-    if exog is not None:
-        last_regressor_values = exog.iloc[-1:].values
-        future_index = pd.date_range(start=ts.index[-1] + pd.DateOffset(months=1), periods=horizon, freq='MS')
-        exog_future = pd.DataFrame(np.tile(last_regressor_values, (horizon, 1)), index=future_index, columns=exog.columns)
-
+    # 5. Entrenar modelo completo y Pronosticar
     full_model = SARIMAX(ts, order=order, seasonal_order=seasonal_order, exog=exog, enforce_stationarity=False, enforce_invertibility=False)
     full_results = full_model.fit(disp=False)
-    forecast = full_results.get_forecast(steps=horizon, exog=exog_future)
+    forecast = full_results.get_forecast(steps=horizon, exog=exog_future) # Usar exog_future
 
     forecast_mean = forecast.predicted_mean
     forecast_ci = forecast.conf_int()
     
-    # La variable 'sarima_df_export' ahora siempre se define
     sarima_df_export = forecast_mean.reset_index().rename(columns={'index': 'ds', 'predicted_mean': 'yhat'})
 
     return ts, forecast_mean, forecast_ci, metrics, sarima_df_export
-# --- FIN DE LA CORRECCIÓN ---
+# --- FIN DE LA FUNCIÓN SARIMA ---
 
 @st.cache_data
 def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=None):
@@ -300,18 +317,17 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     regressor_cols = []
     if regressors is not None and not regressors.empty:
         
-        # --- INICIO DE LA CORRECCIÓN PARA 'KeyError: anomalia_oni' ---
+        # --- CORRECCIÓN PARA 'KeyError: anomalia_oni' ---
         
-        # 1. Obtener la lista de nombres de regresores (ej: ['anomalia_oni'])
+        # 1. Obtener la lista de nombres de regresores (ej: ['anomalia_oni', 'soi'])
         regressor_names = [col for col in regressors.columns if col != 'ds']
         
         # 2. Eliminar esas columnas de ts_data (los datos históricos)
-        #    para evitar un conflicto de merge (col_x, col_y)
         cols_to_drop_from_ts = [col for col in regressor_names if col in ts_data.columns]
         if cols_to_drop_from_ts:
             ts_data = ts_data.drop(columns=cols_to_drop_from_ts)
         
-        # 3. Ahora el merge es limpio. 'ts_data' solo tendrá una columna 'anomalia_oni' (la del pronóstico).
+        # 3. Ahora el merge es limpio.
         ts_data = pd.merge(ts_data, regressors, on='ds', how='left')
         
         # 4. Iterar sobre los nombres de regresores (ej: 'anomalia_oni')
@@ -348,12 +364,15 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12, regressors=Non
     future = full_model.make_future_dataframe(periods=horizon, freq='MS')
     
     if regressor_cols:
+        # Unir los valores futuros del regresor (que están en 'regressors')
         future = pd.merge(future, regressors, on='ds', how='left')
+        # Rellenar (interpolar) los valores del regresor en el futuro
         future[regressor_cols] = future[regressor_cols].interpolate(method='linear', limit_direction='both')
 
     # 8. Generar pronóstico final
     forecast = full_model.predict(future)
     return full_model, forecast, metrics
+# --- FIN DE LA FUNCIÓN PROPHET ---
     
 @st.cache_data(show_spinner=False)
 def auto_arima_search(ts_data, test_size):
@@ -377,6 +396,7 @@ def auto_arima_search(ts_data, test_size):
                                suppress_warnings=True,
                                stepwise=True)
     return auto_model.order, auto_model.seasonal_order
+
 
 
 
