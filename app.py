@@ -638,18 +638,61 @@ def main():
                 st.warning("Por favor, seleccione al menos una sección para incluir en el reporte.")
             else:
                 with st.spinner("Generando reporte PDF... Esto puede tardar unos minutos."):
+                    
+                    # [INICIO DE BLOQUE CORREGIDO]
                     try:
+                        # --- 1. Preparar los datos faltantes ---
+                        
+                        # 'summary_data' (datos del resumen de filtros)
+                        summary_data = {
+                            "total_stations_count": len(gdf_stations), # Variable local
+                            "selected_stations_count": len(stations_for_analysis),
+                            "year_range": year_range,
+                            "selected_months_count": len(meses_numeros),
+                            "analysis_mode": analysis_mode,
+                            "selected_regions": sidebar_filters["selected_regions"],
+                            "selected_municipios": sidebar_filters["selected_municipios"],
+                            "selected_altitudes": sidebar_filters["selected_altitudes"]
+                        }
+
+                        # 'df_anomalies' (calculadas con la función de analysis.py)
+                        # (calculate_monthly_anomalies ya está importada en app.py)
+                        df_anomalies = calculate_monthly_anomalies(df_monthly_filtered, df_long) 
+
+                        # --- 2. Llamar a la función con los argumentos correctos ---
                         report_pdf_bytes = generate_pdf_report(
-                            selected_report_sections=selected_report_sections,
+                            # Argumento con nombre corregido:
+                            sections_to_include=selected_report_sections,
+
+                            # Argumentos nuevos que faltaban:
+                            summary_data=summary_data,
+                            df_anomalies=df_anomalies,
+
+                            # Argumentos que ya tenías (usando variables locales):
                             report_title=report_title,
                             author_name=author_name,
                             gdf_filtered=gdf_filtered,
-                            df_long=st.session_state.df_long,
+                            df_long=df_long,                 # Usar variable local, no st.session_state
                             df_anual_melted=df_anual_melted,
                             df_monthly_filtered=df_monthly_filtered,
                             stations_for_analysis=stations_for_analysis,
-                            df_enso=st.session_state.df_enso
+                            df_enso=df_enso                   # Usar variable local, no st.session_state
                         )
+                        # --- Fin de la llamada a la función ---
+
+                        st.success("Reporte PDF generado exitosamente!")
+                        st.download_button(
+                            label="Descargar Reporte PDF",
+                            data=report_pdf_bytes,
+                            file_name=f"{report_title.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf",
+                            mime="application/pdf",
+                            key="download_pdf_button"
+                        )
+                    except Exception as e:
+                        st.error(f"Error al generar el reporte PDF: {e}")
+                        st.exception(e)
+                    # [FIN DE BLOQUE CORREGIDO]
+                        
                         st.success("Reporte PDF generado exitosamente!")
                         st.download_button(
                             label="Descargar Reporte PDF",
@@ -664,19 +707,3 @@ def main():
                         
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
