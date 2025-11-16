@@ -5274,7 +5274,7 @@ def display_alerts_tab(**kwargs):
     # Cargar todos los datos necesarios desde la sesión y kwargs
     sarima_results = st.session_state.get('sarima_results')
     prophet_results = st.session_state.get('prophet_results')
-    enso_forecast_full = st.session_state.get('enso_forecast_full')
+    enso_forecast_full = st.session_state.get('last_forecasted_index_data')
     weekly_forecast = st.session_state.get('forecast_df')
     df_long = kwargs.get('df_long') # Necesitamos el df_long original
     
@@ -5330,7 +5330,7 @@ def display_alerts_tab(**kwargs):
             else:
                  st.error("El pronóstico ENSO en memoria está desactualizado.")
         else:
-            st.warning("No se ha generado un pronóstico. Vaya a 'Tendencias y Pronósticos > Pronóstico ENSO' para generarlo.")
+            st.warning("No se ha generado un pronóstico. Vaya a 'Pronóstico Climático' para generarlo.")
 
     st.markdown("---")
 
@@ -5715,3 +5715,4 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
