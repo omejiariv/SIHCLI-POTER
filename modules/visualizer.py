@@ -4364,41 +4364,41 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
                 forecast_df_new = get_weather_forecast(lat, lon) 
 
                 if forecast_df_new is not None and not forecast_df_new.empty:
-                    st.session_state['forecast_df'] = forecast_df_new # Guarda el DF en sesión
+                    st.session_state['forecast_df'] = forecast_df_new # Guarda el DF crudo
                     st.session_state['forecast_station_name'] = selected_station
-        
-        # --- INICIO BLOQUE AÑADIDO (Guardar tabla formateada) ---
-        df_display_weekly = forecast_df_new.copy()
-        
-        try:
-            start_date = pd.to_datetime(df_display_weekly['date'].iloc[0])
-            df_display_weekly['date_corrected'] = pd.date_range(start=start_date, periods=len(df_display_weekly))
-        except:
-            df_display_weekly['date_corrected'] = df_display_weekly.index
-
-        df_display_weekly['Fecha'] = df_display_weekly['date_corrected'].dt.strftime('%A, %d %b')
-        
-        column_rename_map = {
-            'Fecha': 'Fecha',
-            'temperature_2m_max': 'T. Máx (°C)',
-            'temperature_2m_min': 'T. Mín (°C)',
-            'precipitation_sum': 'Ppt. (mm)',
-            'relative_humidity_2m_mean': 'HR Media (%)',
-            'surface_pressure_mean': 'Presión (hPa)',
-            'et0_fao_evapotranspiration': 'ET₀ (mm)',
-            'shortwave_radiation_sum': 'Radiación SW (MJ/m²)',
-            'wind_speed_10m_max': 'Viento Máx (km/h)'
-        }
-        
-        cols_to_display = ['Fecha'] + [col for col in column_rename_map if col in df_display_weekly.columns and col != 'Fecha']
-        df_for_table = df_display_weekly[cols_to_display].rename(columns=column_rename_map)
-        
-        # Guardar la tabla formateada en la sesión
-        st.session_state['forecast_df_formatted'] = df_for_table
-        # --- FIN BLOQUE AÑADIDO ---
-
                     
-                    st.success("Pronóstico obtenido con éxito.")
+                    # --- INICIO BLOQUE AÑADIDO (Guardar tabla formateada) ---
+                    # (Esto tiene la misma indentación que las líneas de st.session_state)
+                    df_display_weekly = forecast_df_new.copy()
+                    
+                    try:
+                        start_date = pd.to_datetime(df_display_weekly['date'].iloc[0])
+                        df_display_weekly['date_corrected'] = pd.date_range(start=start_date, periods=len(df_display_weekly))
+                    except:
+                        df_display_weekly['date_corrected'] = df_display_weekly.index
+
+                    df_display_weekly['Fecha'] = df_display_weekly['date_corrected'].dt.strftime('%A, %d %b')
+                    
+                    column_rename_map = {
+                        'Fecha': 'Fecha',
+                        'temperature_2m_max': 'T. Máx (°C)',
+                        'temperature_2m_min': 'T. Mín (°C)',
+                        'precipitation_sum': 'Ppt. (mm)',
+                        'relative_humidity_2m_mean': 'HR Media (%)',
+                        'surface_pressure_mean': 'Presión (hPa)',
+                        'et0_fao_evapotranspiration': 'ET₀ (mm)',
+                        'shortwave_radiation_sum': 'Radiación SW (MJ/m²)',
+                        'wind_speed_10m_max': 'Viento Máx (km/h)'
+                    }
+                    
+                    cols_to_display = ['Fecha'] + [col for col in column_rename_map if col in df_display_weekly.columns and col != 'Fecha']
+                    df_for_table = df_display_weekly[cols_to_display].rename(columns=column_rename_map)
+                    
+                    # Guardar la tabla formateada en la sesión
+                    st.session_state['forecast_df_formatted'] = df_for_table
+                    # --- FIN BLOQUE AÑADIDO ---
+
+                    st.success("Pronóstico obtenido con éxito.") # <-- Indentación corregida
                 else:
                     # El error ya se muestra dentro de get_weather_forecast
                     st.session_state['forecast_df'] = None # Limpia si falla
@@ -4415,35 +4415,27 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         st.subheader(f"Pronóstico para los próximos 7 días en: {station_name}")
 
         # --- Tabla con Nuevas Variables ---
-        display_df = forecast_df.copy()
-        
-        # Generamos un rango de fechas limpio por si acaso
-        try:
-             start_date = pd.to_datetime(display_df['date'].iloc[0])
-             display_df['date_corrected'] = pd.date_range(start=start_date, periods=len(display_df))
-        except: # Si falla la conversión, usa el índice como último recurso
-             display_df['date_corrected'] = display_df.index
+        # (Esta lógica ahora lee la tabla formateada que guardamos)
+        df_for_table = st.session_state.get('forecast_df_formatted')
 
-        # Formatear columnas para la tabla
-        display_df['Fecha'] = display_df['date_corrected'].dt.strftime('%A, %d %b') # Formato más corto
-        
-        # Diccionario para renombrar y seleccionar columnas
-        column_rename_map = {
-            'Fecha': 'Fecha',
-            'temperature_2m_max': 'T. Máx (°C)',
-            'temperature_2m_min': 'T. Mín (°C)',
-            'precipitation_sum': 'Ppt. (mm)',
-            'relative_humidity_2m_mean': 'HR Media (%)',
-            'surface_pressure_mean': 'Presión (hPa)',
-            'et0_fao_evapotranspiration': 'ET₀ (mm)',
-            'shortwave_radiation_sum': 'Radiación SW (MJ/m²)',
-            'wind_speed_10m_max': 'Viento Máx (km/h)' # Asumiendo km/h, verificar unidad API
-        }
-        
-        # Seleccionar y renombrar solo las columnas que existen en el DataFrame
-        cols_to_display = ['Fecha'] + [col for col in column_rename_map if col in display_df.columns and col != 'Fecha']
-        df_for_table = display_df[cols_to_display].copy()
-        df_for_table.rename(columns=column_rename_map, inplace=True)
+        # Fallback por si la tabla formateada no se generó
+        if df_for_table is None or df_for_table.empty:
+            st.warning("Generando tabla de pronóstico (fallback)...")
+            display_df = forecast_df.copy()
+            try:
+                 start_date = pd.to_datetime(display_df['date'].iloc[0])
+                 display_df['date_corrected'] = pd.date_range(start=start_date, periods=len(display_df))
+            except: 
+                 display_df['date_corrected'] = display_df.index
+            display_df['Fecha'] = display_df['date_corrected'].dt.strftime('%A, %d %b')
+            column_rename_map = {
+                'Fecha': 'Fecha', 'temperature_2m_max': 'T. Máx (°C)', 'temperature_2m_min': 'T. Mín (°C)',
+                'precipitation_sum': 'Ppt. (mm)', 'relative_humidity_2m_mean': 'HR Media (%)',
+                'surface_pressure_mean': 'Presión (hPa)', 'et0_fao_evapotranspiration': 'ET₀ (mm)',
+                'shortwave_radiation_sum': 'Radiación SW (MJ/m²)', 'wind_speed_10m_max': 'Viento Máx (km/h)'
+            }
+            cols_to_display = ['Fecha'] + [col for col in column_rename_map if col in display_df.columns and col != 'Fecha']
+            df_for_table = display_df[cols_to_display].rename(columns=column_rename_map)
 
         # Diccionario de formato para la tabla
         format_dict = {
@@ -4463,6 +4455,15 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         # --- Gráfico Principal (Temperatura y Precipitación) ---
         st.markdown("---")
         st.subheader("Gráfico de Temperatura y Precipitación")
+        
+        # Usar el 'display_df' (que tiene 'date_corrected') de la lógica de fallback
+        display_df = forecast_df.copy()
+        try:
+             start_date = pd.to_datetime(display_df['date'].iloc[0])
+             display_df['date_corrected'] = pd.date_range(start=start_date, periods=len(display_df))
+        except:
+             display_df['date_corrected'] = display_df.index
+        
         fig_temp_ppt = make_subplots(specs=[[{"secondary_y": True}]])
 
         # Temperaturas (eje Y primario)
@@ -4486,7 +4487,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
             ), secondary_y=True)
 
         fig_temp_ppt.update_layout(
-            #title_text=f"Pronóstico de Temperatura y Precipitación", # Título redundante
             xaxis_title="Fecha",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
@@ -4508,7 +4508,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         st.markdown("---")
         st.subheader("Gráficos Adicionales")
         
-        # Crear columnas para poner gráficos lado a lado
         col_g1, col_g2 = st.columns(2)
 
         with col_g1:
@@ -4517,12 +4516,12 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
             if 'relative_humidity_2m_mean' in display_df.columns:
                  fig_hr_et.add_trace(go.Scatter(
                       x=display_df['date_corrected'], y=display_df['relative_humidity_2m_mean'],
-                      name='HR Media (%)', mode='lines+markers', line=dict(color='green')
+                       name='HR Media (%)', mode='lines+markers', line=dict(color='green')
                  ), secondary_y=False)
             if 'et0_fao_evapotranspiration' in display_df.columns:
                   fig_hr_et.add_trace(go.Scatter(
                       x=display_df['date_corrected'], y=display_df['et0_fao_evapotranspiration'],
-                      name='ET₀ (mm)', mode='lines+markers', line=dict(color='orange', dash='dot')
+                       name='ET₀ (mm)', mode='lines+markers', line=dict(color='orange', dash='dot')
                  ), secondary_y=True)
             fig_hr_et.update_layout(title="Humedad Relativa y ET₀", xaxis_title="Fecha")
             fig_hr_et.update_yaxes(title_text="Humedad Relativa (%)", secondary_y=False)
@@ -5771,6 +5770,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
