@@ -4363,9 +4363,9 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
                 # Llama a la función MODIFICADA de forecasting.py
                 forecast_df_new = get_weather_forecast(lat, lon) 
 
-    if forecast_df_new is not None and not forecast_df_new.empty:
-        st.session_state['forecast_df'] = forecast_df_new # Guarda el DF crudo
-        st.session_state['forecast_station_name'] = selected_station
+                if forecast_df_new is not None and not forecast_df_new.empty:
+                    st.session_state['forecast_df'] = forecast_df_new # Guarda el DF en sesión
+                    st.session_state['forecast_station_name'] = selected_station
         
         # --- INICIO BLOQUE AÑADIDO (Guardar tabla formateada) ---
         df_display_weekly = forecast_df_new.copy()
@@ -5771,6 +5771,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
