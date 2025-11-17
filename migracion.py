@@ -215,7 +215,7 @@ def migrar_datos():
         
         gdf_subcuencas = gpd.read_file("data/SubcuencasAinfluencia.geojson")
         gdf_predios = gpd.read_file("data/PrediosEjecutados.geojson")
-        gdf_municipios = gpd.read_file("data/mapaCVENSO.zip", layer="MunicipiosAntioquia")
+        gdf_municipios = gpd.read_file("data/mapaCVENSO.zip")
         
         def preparar_geometria(gdf, tipo, col_nombre):
             gdf['tipo_geometria'] = tipo
