@@ -115,27 +115,30 @@ def migrar_datos():
         Base.metadata.create_all(bind=engine)
         print("Tablas creadas/verificadas.")
 
-        # --- A. Migrar Estaciones ---
+        # --- A. Migrar Estaciones (CORREGIDO) ---
         print("\nIniciando migración de 'estaciones'...")
         df_estaciones_raw = pd.read_csv("data/mapaCVENSO.csv", sep=";", encoding='latin1')
         df_estaciones_raw.columns = [col.strip().lower() for col in df_estaciones_raw.columns]
         
-        # Cargar ET_MMY desde el archivo de precipitación (como en tu data_processor)
-        df_precip_raw = pd.read_csv("data/DatosPptnmes_ENSO.csv", sep=";", encoding='latin1')
-        df_precip_raw.columns = [col.strip().lower() for col in df_precip_raw.columns]
+        # --- INICIO DE LA CORRECCIÓN ---
+        # La lógica en data_processor.txt  muestra que 'et_mmy' 
+        # ya está en 'mapaCVENSO.csv' (df_estaciones_raw).
         
-        df_et_mmy = df_precip_raw[['id_estacio', 'et_mmy']].drop_duplicates(subset=['id_estacio'])
-        df_et_mmy['et_mmy'] = standardize_numeric_column(df_et_mmy['et_mmy'])
-        df_et_mmy['id_estacio'] = df_et_mmy['id_estacio'].astype(str).str.strip()
-        
-        # Limpiar y preparar estaciones
+        # Limpiar y preparar estaciones (df_estaciones_raw es la única fuente)
         df_estaciones = df_estaciones_raw.copy()
         df_estaciones['id_estacio'] = df_estaciones['id_estacio'].astype(str).str.strip()
         df_estaciones['latitud_wgs84'] = standardize_numeric_column(df_estaciones['latitud_wgs84'])
         df_estaciones['longitud_wgs84'] = standardize_numeric_column(df_estaciones['longitud_wgs84'])
         df_estaciones['alt_est'] = standardize_numeric_column(df_estaciones['alt_est'])
         
-        df_estaciones = df_estaciones.merge(df_et_mmy, on='id_estacio', how='left')
+        # Estandarizar 'et_mmy' si existe (como en data_processor.txt )
+        if 'et_mmy' in df_estaciones.columns:
+            df_estaciones['et_mmy'] = standardize_numeric_column(df_estaciones['et_mmy'])
+        else:
+            df_estaciones['et_mmy'] = np.nan # Crear la columna si no existe
+        
+        # Ya no se necesita el MERGE con df_et_mmy
+        # --- FIN DE LA CORRECCIÓN ---
         
         gdf_estaciones = gpd.GeoDataFrame(
             df_estaciones,
@@ -156,6 +159,12 @@ def migrar_datos():
         
         # Seleccionar solo las columnas de la tabla
         columnas_tabla_estacion = [c.name for c in Estacion.__table__.columns]
+        
+        # Asegurarse de que todas las columnas de la tabla existan en el DF
+        for col in columnas_tabla_estacion:
+            if col not in gdf_estaciones_sql.columns:
+                gdf_estaciones_sql[col] = np.nan # Añadir columnas faltantes como NaN
+                
         gdf_estaciones_sql = gdf_estaciones_sql[columnas_tabla_estacion]
         
         print(f"Cargando {len(gdf_estaciones_sql)} estaciones a la base de datos...")
@@ -165,9 +174,11 @@ def migrar_datos():
 
         # --- B. Migrar Índices Climáticos ---
         print("\nIniciando migración de 'indices_climaticos'...")
-        # Usamos el mismo df_precip_raw que ya cargamos
+        # AHORA SÍ cargamos y limpiamos df_precip_raw para los índices
+        df_precip_raw = pd.read_csv("data/DatosPptnmes_ENSO.csv", sep=";", encoding='latin1')
+        df_precip_raw.columns = [col.strip().lower() for col in df_precip_raw.columns]
+        
         df_indices = df_precip_raw[['fecha_mes_año', 'anomalia_oni', 'soi', 'iod']].drop_duplicates()
-        df_indices['fecha_mes_año'] = parse_spanish_dates(df_indices['fecha_mes_año'])
         
         # Limpiar y estandarizar
         df_indices['anomalia_oni'] = standardize_numeric_column(df_indices['anomalia_oni'])
