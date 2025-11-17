@@ -5472,7 +5472,7 @@ with st.expander("Ver pronóstico semanal detallado"):
     else:
         st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
 
-# --- PESTAÑA DE ESCENARIOS DE CAMBIO CLIMÁTICO ---
+# --- PESTAÑA DE ESCENARIOS DE CAMBIO CLIMÁTICO (CORREGIDA) ---
 # -------------------------------------------------------------------------
 def display_climate_scenarios_tab(**kwargs):
     st.header("Modelado de Escenarios de Cambio Climático")
@@ -5482,14 +5482,14 @@ def display_climate_scenarios_tab(**kwargs):
     """)
 
     # --- 1. Cargar Dependencias ---
-    # Necesitamos una cuenca y sus datos base (calculados en Mapas Avanzados)
     basin_gdf = st.session_state.get('unified_basin_gdf')
     basin_name = st.session_state.get('selected_basins_title', 'N/A')
     p_base = st.session_state.get('mean_precip') # Ppt media anual base
-    morph_results = st.session_state.get('morph_results') or {}
+    
+    # CORRECCIÓN DE ATTRIBUTEERROR:
+    morph_results = st.session_state.get('morph_results') or {} 
     alt_base = morph_results.get('alt_prom_m') # Altitud media base
     
-    # Necesitamos los datos completos y los filtros de kwargs
     df_long = kwargs.get('df_long')
     gdf_filtered = kwargs.get('gdf_filtered')
     gdf_subcuencas = kwargs.get('gdf_subcuencas')
@@ -5532,18 +5532,15 @@ def display_climate_scenarios_tab(**kwargs):
             # --- 4. ANÁLISIS DE BALANCE HÍDRICO ---
             st.subheader("Impacto en el Balance Hídrico Anual")
             
-            # 4a. Calcular Línea Base
             balance_base = calculate_hydrological_balance(p_base, alt_base, basin_gdf, delta_temp_c=0.0)
             q_base = balance_base.get('Q_mm', 0)
             etp_base = balance_base.get('ET_media_anual_mm', 0)
 
-            # 4b. Calcular Escenario
             p_escenario = p_base * (1 + delta_precip / 100.0)
             balance_escenario = calculate_hydrological_balance(p_escenario, alt_base, basin_gdf, delta_temp_c=delta_temp)
             q_escenario = balance_escenario.get('Q_mm', 0)
             etp_escenario = balance_escenario.get('ET_media_anual_mm', 0)
 
-            # 4c. Mostrar Métricas de Impacto
             c1, c2 = st.columns(2)
             c1.metric(
                 "Escorrentía (Q) - Línea Base", 
@@ -5561,6 +5558,7 @@ def display_climate_scenarios_tab(**kwargs):
                     "Línea Base (mm/año)": [p_base, etp_base, q_base],
                     "Escenario (mm/año)": [p_escenario, etp_escenario, q_escenario]
                 })
+                # CORRECCIÓN: Aplicar formato solo a columnas numéricas
                 st.dataframe(df_balance.style.format({
                     'Línea Base (mm/año)': '{:.1f}',
                     'Escenario (mm/año)': '{:.1f}'
@@ -5569,9 +5567,9 @@ def display_climate_scenarios_tab(**kwargs):
             # --- 5. ANÁLISIS DE SEQUÍA (SPI) ---
             st.subheader("Impacto en la Frecuencia de Sequías (SPI)")
             
-            # --- INICIO DE BLOQUE CORREGIDO ---
+            # --- INICIO DE BLOQUE CON INDENTACIÓN CORREGIDA ---
             try:
-                # 5a. Encontrar estaciones en la cuenca (lógica de la pestaña de cuencas)
+                # 5a. Encontrar estaciones en la cuenca
                 stations_in_basin_gdf = gpd.sjoin(gdf_filtered, basin_gdf, how="inner", predicate="intersects")
                 station_names_in_basin = stations_in_basin_gdf[Config.STATION_NAME_COL].unique().tolist()
 
@@ -5627,12 +5625,12 @@ def display_climate_scenarios_tab(**kwargs):
                         delta=f"{(escenario_drought_perc - base_drought_perc):.1f}%"
                     )
             
-            # ESTE 'except' AHORA ESTÁ ALINEADO CON EL 'try'
+            # Este 'except' AHORA ESTÁ ALINEADO CON EL 'try'
             except Exception as e_spi:
                 st.error(f"No se pudo completar el análisis de sequía (SPI): {e_spi}")
                 st.exception(e_spi)
             # --- FIN DE BLOQUE CORREGIDO ---
-            
+
             # --- 6. ZONAS DE VIDA (DIFERIDO) ---
             st.markdown("---")
             st.info("""
@@ -5773,6 +5771,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
