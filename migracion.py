@@ -27,7 +27,7 @@ print("Iniciando el script de migración...")
 # --------------------------------------------------------
 # EDITA ESTA LÍNEA con tus credenciales de PostgreSQL
 # Formato: "postgresql://[USUARIO]:[CONTRASEÑA]@[HOST]:[PUERTO]/[NOMBRE_DB]"
-DATABASE_URL = "postgresql://postgres:123456@localhost:5432/sihcli-poter_db"
+DATABASE_URL = "SIHCLI-POTER123*@db.ldunpssoxvifemoyeuac.supabase.co:5432/postgres"
 # --------------------------------------------------------
 
 try:
