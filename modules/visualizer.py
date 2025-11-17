@@ -5166,32 +5166,32 @@ def display_climate_scenarios_tab(**kwargs):
                     'Escenario (mm/año)': '{:.1f}'
                 }), use_container_width=True)
 
-            # --- 5. ANÁLISIS DE SEQUÍA (SPI) ---
+# --- 5. ANÁLISIS DE SEQUÍA (SPI) ---
             st.subheader("Impacto en la Frecuencia de Sequías (SPI)")
             
-            # --- INICIO DE BLOQUE CON INDENTACIÓN CORREGIDA (SyntaxError) ---
-            try: [cite: 3112]
-                # 5a. Encontrar estaciones en la cuenca
+            # --- INICIO DE BLOQUE CORREGIDO ---
+            try:
+                # 5a. Encontrar estaciones en la cuenca (lógica de la pestaña de cuencas)
                 stations_in_basin_gdf = gpd.sjoin(gdf_filtered, basin_gdf, how="inner", predicate="intersects")
                 station_names_in_basin = stations_in_basin_gdf[Config.STATION_NAME_COL].unique().tolist()
 
                 if not station_names_in_basin:
                     st.warning("No se encontraron estaciones en la cuenca para el análisis SPI.")
-                else: [cite: 3113]
+                else:
                     # 5b. Crear serie regional (Base)
                     df_regional_base = df_long[
                         df_long[Config.STATION_NAME_COL].isin(station_names_in_basin)
-                    ].groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().dropna() [cite: 3114]
+                    ].groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().dropna()
                     
                     # 5c. Crear serie regional (Escenario)
-                    df_regional_escenario = df_regional_base * (1 + delta_precip / 100.0) [cite: 3115]
+                    df_regional_escenario = df_regional_base * (1 + delta_precip / 100.0)
                     
                     # 5d. Calcular SPI para ambas series
-                    spi_base = calculate_spi(df_regional_base, window=6).dropna() [cite: 3116]
+                    spi_base = calculate_spi(df_regional_base, window=6).dropna()
                     spi_escenario = calculate_spi(df_regional_escenario, window=6).dropna()
 
                     # 5e. Mostrar histograma comparativo
-                    fig = go.Figure() [cite: 3117]
+                    fig = go.Figure()
                     fig.add_trace(go.Histogram(
                         x=spi_base, name="Línea Base", 
                         opacity=0.7, nbinsx=30, histnorm='percent'
@@ -5205,11 +5205,11 @@ def display_climate_scenarios_tab(**kwargs):
                         title="Distribución Comparativa del SPI a 6 Meses",
                         xaxis_title="Valor SPI", yaxis_title="Frecuencia (%)"
                     )
-                    fig.add_vrect(x0=-2, x1=-1.5, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Sequía Severa") [cite: 3118]
+                    fig.add_vrect(x0=-2, x1=-1.5, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Sequía Severa")
                     st.plotly_chart(fig, use_container_width=True)
 
                     # 5f. Mostrar Métricas de Sequía
-                    base_drought_months = (spi_base < -1.5).sum() [cite: 3119]
+                    base_drought_months = (spi_base < -1.5).sum()
                     escenario_drought_months = (spi_escenario < -1.5).sum()
                     total_months = len(spi_base)
                     
@@ -5227,10 +5227,10 @@ def display_climate_scenarios_tab(**kwargs):
                         delta=f"{(escenario_drought_perc - base_drought_perc):.1f}%"
                     )
             
-            # Este 'except' AHORA ESTÁ ALINEADO CON EL 'try'
+            # ESTE 'except' AHORA ESTÁ ALINEADO CON EL 'try'
             except Exception as e_spi:
-                st.error(f"No se pudo completar el análisis de sequía (SPI): {e_spi}") [cite: 3119]
-                st.exception(e_spi) [cite: 3119]
+                st.error(f"No se pudo completar el análisis de sequía (SPI): {e_spi}")
+                st.exception(e_spi)
             # --- FIN DE BLOQUE CORREGIDO ---
 
             # --- 6. ZONAS DE VIDA (DIFERIDO) ---
@@ -5369,4 +5369,5 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
