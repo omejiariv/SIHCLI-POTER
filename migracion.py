@@ -115,60 +115,75 @@ def migrar_datos():
         Base.metadata.create_all(bind=engine)
         print("Tablas creadas/verificadas.")
 
-        # --- A. Migrar Estaciones (CORREGIDO) ---
+        # --- A. Migrar Estaciones (CORREGIDO V2 - Búsqueda Dinámica de Columnas) ---
         print("\nIniciando migración de 'estaciones'...")
         df_estaciones_raw = pd.read_csv("data/mapaCVENSO.csv", sep=";", encoding='latin1')
         df_estaciones_raw.columns = [col.strip().lower() for col in df_estaciones_raw.columns]
         
-        # --- INICIO DE LA CORRECCIÓN ---
-        # La lógica en data_processor.txt  muestra que 'et_mmy' 
-        # ya está en 'mapaCVENSO.csv' (df_estaciones_raw).
+        # --- INICIO DE LA CORRECCIÓN (Dynamic Column Finding) ---
         
-        # Limpiar y preparar estaciones (df_estaciones_raw es la única fuente)
+        # 1. Encontrar dinámicamente los Nombres Reales de las columnas
+        #    (Lógica tomada de data_processor.py)
+        lon_col_real = next((col for col in df_estaciones_raw.columns if 'longitud' in col or 'lon' in col), None)
+        lat_col_real = next((col for col in df_estaciones_raw.columns if 'latitud' in col or 'lat' in col), None)
+        id_col_real = next((col for col in df_estaciones_raw.columns if 'id_estacio' in col), 'id_estacio')
+        alt_col_real = next((col for col in df_estaciones_raw.columns if 'alt_est' in col), 'alt_est')
+        et_col_real = next((col for col in df_estaciones_raw.columns if 'et_mmy' in col), 'et_mmy')
+        
+        # 2. Validar que se encontraron las columnas clave
+        if not all([lon_col_real, lat_col_real]):
+            print(f"ERROR: No se encontraron columnas de Latitud o Longitud en 'mapaCVENSO.csv'.")
+            print(f"Columnas encontradas: {df_estaciones_raw.columns.tolist()}")
+            raise KeyError("Columnas geoespaciales clave no encontradas.")
+
+        # 3. Preparar el DataFrame usando los Nombres Reales
         df_estaciones = df_estaciones_raw.copy()
-        df_estaciones['id_estacio'] = df_estaciones['id_estacio'].astype(str).str.strip()
-        df_estaciones['latitud_wgs84'] = standardize_numeric_column(df_estaciones['latitud_wgs84'])
-        df_estaciones['longitud_wgs84'] = standardize_numeric_column(df_estaciones['longitud_wgs84'])
-        df_estaciones['alt_est'] = standardize_numeric_column(df_estaciones['alt_est'])
+        df_estaciones[id_col_real] = df_estaciones[id_col_real].astype(str).str.strip()
+        df_estaciones[lat_col_real] = standardize_numeric_column(df_estaciones[lat_col_real])
+        df_estaciones[lon_col_real] = standardize_numeric_column(df_estaciones[lon_col_real])
         
-        # Estandarizar 'et_mmy' si existe (como en data_processor.txt )
-        if 'et_mmy' in df_estaciones.columns:
-            df_estaciones['et_mmy'] = standardize_numeric_column(df_estaciones['et_mmy'])
+        if alt_col_real in df_estaciones.columns:
+            df_estaciones[alt_col_real] = standardize_numeric_column(df_estaciones[alt_col_real])
+        if et_col_real in df_estaciones.columns:
+            df_estaciones[et_col_real] = standardize_numeric_column(df_estaciones[et_col_real])
         else:
-            df_estaciones['et_mmy'] = np.nan # Crear la columna si no existe
+            df_estaciones[et_col_real] = np.nan # Crear columna si no existe
         
-        # Ya no se necesita el MERGE con df_et_mmy
-        # --- FIN DE LA CORRECCIÓN ---
-        
+        # 4. Crear el GeoDataFrame
         gdf_estaciones = gpd.GeoDataFrame(
             df_estaciones,
-            geometry=gpd.points_from_xy(df_estaciones['longitud_wgs84'], df_estaciones['latitud_wgs84']),
+            geometry=gpd.points_from_xy(df_estaciones[lon_col_real], df_estaciones[lat_col_real]), # Usar nombres reales
             crs="EPSG:4326"
         )
         
-        # Convertir a formato SQL
-        gdf_estaciones_sql = gdf_estaciones.rename(columns={
-            'id_estacio': 'id_estacion',
+        # 5. Renombrar a los Nombres Estándar de la BD (los que están en la clase Estacion)
+        rename_map = {
+            id_col_real: 'id_estacion',
             'nom_est': 'nom_est',
-            'alt_est': 'alt_est',
+            alt_col_real: 'alt_est',
             'municipio': 'municipio',
             'depto_region': 'depto_region',
             'geometry': 'geom',
-            'et_mmy': 'et_mmy'
-        })
+            et_col_real: 'et_mmy'
+        }
         
+        # Mantener solo las columnas que existen en el DF antes de renombrar
+        columnas_para_renombrar = {k: v for k, v in rename_map.items() if k in gdf_estaciones.columns}
+        gdf_estaciones_sql = gdf_estaciones.rename(columns=columnas_para_renombrar)
+        
+        # --- FIN DE LA CORRECCIÓN ---
+
         # Seleccionar solo las columnas de la tabla
         columnas_tabla_estacion = [c.name for c in Estacion.__table__.columns]
         
         # Asegurarse de que todas las columnas de la tabla existan en el DF
         for col in columnas_tabla_estacion:
             if col not in gdf_estaciones_sql.columns:
-                gdf_estaciones_sql[col] = np.nan # Añadir columnas faltantes como NaN
+                gdf_estaciones_sql[col] = np.nan
                 
         gdf_estaciones_sql = gdf_estaciones_sql[columnas_tabla_estacion]
         
         print(f"Cargando {len(gdf_estaciones_sql)} estaciones a la base de datos...")
-        # Usar 'to_postgis' (que es como 'to_sql' pero para geopandas)
         gdf_estaciones_sql.to_postgis('estaciones', engine, if_exists='replace', index=False)
         print("Migración de 'estaciones' completada.")
 
