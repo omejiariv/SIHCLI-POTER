@@ -104,6 +104,40 @@ def standardize_numeric_column(series):
     return pd.to_numeric(series_clean, errors='coerce')
 
 # --- PASO 4: SCRIPT PRINCIPAL DE MIGRACIÓN ---
+# --- PASO 3b: FUNCIÓN HELPER PARA GEOMETRÍAS ---
+def preparar_geometria(gdf, tipo, col_nombre):
+    """
+    Toma un GeoDataFrame, lo estandariza y extrae las columnas
+    necesarias para la tabla 'geometrias'.
+    """
+    # Renombrar la columna de nombre especificada y la de geometría
+    gdf = gdf.rename(columns={col_nombre: 'nombre', 'geometry': 'geom'})
+    
+    # Asignar el tipo
+    gdf['tipo_geometria'] = tipo
+    
+    # Guardar todas las otras propiedades en la columna JSONB
+    prop_cols = [col for col in gdf.columns if col not in ['geom', 'nombre', 'tipo_geometria']]
+    
+    # Manejar el error si no hay columnas de propiedades
+    if prop_cols:
+        gdf['metadatos'] = gdf[prop_cols].to_dict('records')
+    else:
+        gdf['metadatos'] = None
+
+    # Asegurarse de que todas las columnas existan
+    columnas_requeridas = ['nombre', 'tipo_geometria', 'geom', 'metadatos']
+    for col in columnas_requeridas:
+        if col not in gdf.columns:
+            # Caso especial para 'metadatos' si no había propiedades
+            if col == 'metadatos':
+                gdf['metadatos'] = None
+            else:
+                # Esto no debería pasar si la lógica es correcta
+                raise KeyError(f"Error interno: la columna '{col}' faltaba al preparar la geometría.")
+                
+    return gdf[columnas_requeridas]
+# --- FIN FUNCIÓN HELPER ---
 
 def migrar_datos():
     try:
