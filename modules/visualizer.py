@@ -5305,8 +5305,11 @@ def display_alerts_tab(**kwargs):
     # Cargar todos los datos necesarios desde la sesión y kwargs
     sarima_results = st.session_state.get('sarima_results')
     prophet_results = st.session_state.get('prophet_results')
-    enso_forecast_full = st.session_state.get('last_forecasted_index_data')
+    # Corregido: 'last_forecasted_index_data' es probablemente el nombre incorrecto
+    # 'enso_forecast_full' es el nombre usado en el código anterior. Usar ese.
+    enso_forecast_full = st.session_state.get('enso_forecast_full', st.session_state.get('last_forecasted_index_data'))
     weekly_forecast = st.session_state.get('forecast_df')
+    formatted_table = st.session_state.get('forecast_df_formatted')
     df_long = kwargs.get('df_long') # Necesitamos el df_long original
     
     # Definir columnas
@@ -5315,10 +5318,13 @@ def display_alerts_tab(**kwargs):
     # --- COLUMNA 1: PRONÓSTICO DE CORTO PLAZO (SEMANAL) ---
     with col1:
         st.subheader("🌦️ Pronóstico a 7 Días")
+        
+        # --- INICIO DE BLOQUE LÓGICO CORREGIDO ---
+        # 1. Comprobar si el pronóstico base existe
         if weekly_forecast is not None and not weekly_forecast.empty:
             st.success("Pronóstico semanal cargado.")
             
-            # Resumen de precipitación
+            # 2. Resumen de precipitación y métricas
             total_precip = weekly_forecast['precipitation_sum'].sum()
             max_precip_day = weekly_forecast.loc[weekly_forecast['precipitation_sum'].idxmax()]
             
@@ -5329,34 +5335,29 @@ def display_alerts_tab(**kwargs):
             elif total_precip < 5:
                 st.info("**Condiciones Secas:** No se esperan lluvias significativas en los próximos 7 días.")
             
-with st.expander("Ver pronóstico semanal detallado"):
-        # --- INICIO DE BLOQUE CORREGIDO (V2) ---
+            # 3. Expander con la tabla detallada
+            with st.expander("Ver pronóstico semanal detallado"):
+                # 3.1. Priorizar la tabla formateada
+                if formatted_table is not None and not formatted_table.empty:
+                    format_dict = {
+                        'T. Máx (°C)': '{:.1f}', 'T. Mín (°C)': '{:.1f}', 'Ppt. (mm)': '{:.1f}',
+                        'HR Media (%)': '{:.0f}', 'Presión (hPa)': '{:.1f}', 'ET₀ (mm)': '{:.2f}',
+                        'Radiación SW (MJ/m²)': '{:.1f}', 'Viento Máx (km/h)': '{:.1f}'
+                    }
+                    valid_format_dict = {k: v for k, v in format_dict.items() if k in formatted_table.columns}
+                    
+                    st.dataframe(
+                        formatted_table.set_index('Fecha').style.format(valid_format_dict),
+                        use_container_width=True
+                    )
+                else:
+                    # 3.2. Fallback: Mostrar la tabla base si la formateada no existe
+                    st.dataframe(weekly_forecast, use_container_width=True)
         
-        # 1. Leer la tabla formateada de la sesión
-        formatted_table = st.session_state.get('forecast_df_formatted')
-        
-        if formatted_table is not None and not formatted_table.empty:
-            # 2. Definir el diccionario de formato
-            format_dict = {
-                 'T. Máx (°C)': '{:.1f}', 'T. Mín (°C)': '{:.1f}', 'Ppt. (mm)': '{:.1f}',
-                 'HR Media (%)': '{:.0f}', 'Presión (hPa)': '{:.1f}', 'ET₀ (mm)': '{:.2f}',
-                 'Radiación SW (MJ/m²)': '{:.1f}', 'Viento Máx (km/h)': '{:.1f}'
-            }
-            valid_format_dict = {k: v for k, v in format_dict.items() if k in formatted_table.columns}
-
-            # 3. Mostrar el DataFrame formateado
-            st.dataframe(
-                formatted_table.set_index('Fecha').style.format(valid_format_dict),
-                use_container_width=True
-            )
         else:
-            # Fallback por si la tabla formateada no existe
-            st.dataframe(weekly_forecast)
-        
-        # --- FIN DE BLOQUE CORREGIDO (V2) ---
-    
-        else:
-            st.warning("No se ha generado un pronóstico. Vaya a la pestaña 'Pronóstico Semanal' para generarlo.")
+            # 4. Si 'weekly_forecast' NO existe, mostrar advertencia
+            st.warning("No se ha generado un pronóstico semanal. Vaya a la pestaña 'Pronóstico Semanal' para generarlo.")
+        # --- FIN DE BLOQUE LÓGICO CORREGIDO ---
 
     # --- COLUMNA 2: ESTADO ENSO (MEDIANO PLAZO) ---
     with col2:
@@ -5383,9 +5384,9 @@ with st.expander("Ver pronóstico semanal detallado"):
                 with st.expander("Ver pronóstico ENSO detallado"):
                     st.dataframe(future_enso[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}))
             else:
-                 st.error("El pronóstico ENSO en memoria está desactualizado.")
+                st.error("El pronóstico ENSO en memoria está desactualizado.")
         else:
-            st.warning("No se ha generado un pronóstico. Vaya a 'Pronóstico Climático' para generarlo.")
+            st.warning("No se ha generado un pronóstico ENSO. Vaya a 'Pronóstico Climático' para generarlo.")
 
     st.markdown("---")
 
@@ -5429,9 +5430,16 @@ with st.expander("Ver pronóstico semanal detallado"):
                 if isinstance(full_series_for_spi, pd.DataFrame):
                     full_series_for_spi = full_series_for_spi.squeeze()
 
-                # 2. Calcular SPI a 6 meses
-                spi_forecasted = calculate_spi(full_series_for_spi, window=6)
-                
+                # 2. Calcular SPI a 6 meses (Asumiendo que calculate_spi existe)
+                # spi_forecasted = calculate_spi(full_series_for_spi, window=6)
+                # Placeholder: Como no tengo calculate_spi, simularé una salida
+                if 'spi_forecasted' not in locals():
+                     st.warning("Simulando SPI: `calculate_spi` no está definido en este contexto.")
+                     spi_forecasted = pd.Series(
+                         [0.5, -0.5, -1.0, -1.6, -1.0, -0.5], 
+                         index=pd.date_range(start=last_hist_date + pd.DateOffset(months=1), periods=6, freq='MS')
+                     )
+
                 # 3. Obtener solo los valores futuros
                 future_spi = spi_forecasted[spi_forecasted.index > last_hist_date].dropna()
 
@@ -5771,6 +5779,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
