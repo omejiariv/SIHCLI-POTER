@@ -3554,7 +3554,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                 st.warning(f"No se encontraron datos mensuales para la estación '{station_to_analyze_acf}' con los filtros actuales.")
                 
     # -------------------------------------------------------------------------
-    # --- PESTAÑA: PRONÓSTICO SARIMA ---
+# --- PESTAÑA: PRONÓSTICO SARIMA ---
     # -------------------------------------------------------------------------
     with pronostico_sarima_tab:
         st.subheader("Pronóstico de Precipitación (Modelo SARIMA)")
@@ -3587,7 +3587,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
         use_auto_arima = st.checkbox("Encontrar parámetros óptimos automáticamente (Auto-ARIMA)",
                                      value=False)
         
-
+        # --- LÓGICA MULTI-REGRESOR ---
         regresores_sarima = None
         available_regressors_sarima = list(st.session_state.get('forecasted_regressors_sarima', {}).keys())
         
@@ -3612,6 +3612,7 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
             except Exception as e:
                 st.error(f"Error al combinar regresores: {e}")
                 regresores_sarima = None
+        # --- FIN LÓGICA MULTI-REGRESOR ---
 
         if (station_to_forecast or analysis_type_sarima == "Promedio Regional") and st.button("Generar Pronóstico SARIMA"):
             with st.spinner(f"Preparando y completando datos (SARIMA) para {station_name_for_title}..."):
@@ -3660,13 +3661,11 @@ def display_trends_and_forecast_tab(df_full_monthly, stations_for_analysis,
                     st.info("Mostrando el pronóstico y los datos de prueba (en lugar de toda la serie histórica) para mejorar el rendimiento.")
                     
                     fig_pronostico = go.Figure()
-
                     fig_pronostico.add_trace(go.Scatter(x=forecast_ci.index, y=forecast_ci.iloc[:, 0], mode='lines', line=dict(width=0), name='Incertidumbre (Baja)', legendgroup='forecast'))
                     fig_pronostico.add_trace(go.Scatter(x=forecast_ci.index, y=forecast_ci.iloc[:, 1], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)', name='Intervalo de Confianza', legendgroup='forecast'))
                     fig_pronostico.add_trace(go.Scatter(x=forecast_mean.index, y=forecast_mean, mode='lines', line=dict(color='red', dash='dash', width=3), name='Pronóstico SARIMA', legendgroup='forecast'))
                     test_data_plot = ts_hist.iloc[-test_size:]
                     fig_pronostico.add_trace(go.Scatter(x=test_data_plot.index, y=test_data_plot, mode='markers', marker=dict(color='black', size=5), name='Datos Reales (Prueba)'))
-
                     fig_pronostico.update_layout(title=f"Pronóstico SARIMA para {station_name_for_title}", xaxis_title="Fecha", yaxis_title="Precipitación (mm)", height=600, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                     st.plotly_chart(fig_pronostico, use_container_width=True)
                     
@@ -3855,13 +3854,14 @@ def display_downloads_tab(df_anual_melted, df_monthly_filtered, stations_for_ana
 def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered,
                               stations_for_analysis, **kwargs):
     st.header("Información Detallada de las Estaciones")
-    # --- INICIO BLOQUE AÑADIDO ---
-    # @st.cache_data # No cachear esta función local
-    def convert_df_to_csv(df):
+    
+    # --- INICIO BLOQUE AÑADIDO (Helper de Descarga) ---
+    @st.cache_data
+    def convert_df_to_csv_local(df):
         """Función auxiliar local para convertir DFs a CSV."""
         return df.to_csv(index=False, sep=';').encode('utf-8')
     # --- FIN BLOQUE AÑADIDO ---
-                                  
+    
     if not stations_for_analysis:
         st.warning("Por favor, seleccione al menos una estación para ver esta sección.")
         return
@@ -3871,12 +3871,10 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
     if st.button("Calcular Estadísticas Detalladas"):
         with st.spinner("Realizando cálculos, por favor espera..."):
             try:
-                # La función auxiliar para el cálculo de estadísticas completas debe estar en el visualizador o importada
                 @st.cache_data
                 def calculate_comprehensive_stats(_df_anual, _df_monthly, _stations):
                     """Calcula un conjunto completo de estadísticas para cada estación seleccionada."""
                     results = []
-                    # Importamos numpy y scipy/pymannkendall localmente para robustez
                     import numpy as np
                     from scipy import stats
                     try:
@@ -3926,24 +3924,20 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
                     
                     return pd.DataFrame(results)
 
-
                 detailed_stats_df = calculate_comprehensive_stats(df_anual_melted,
                                                                   df_monthly_filtered, stations_for_analysis)
                 
-                # [CORRECCIÓN] Manejar si gdf_filtered es None o vacío
                 base_info_df = pd.DataFrame()
                 if gdf_filtered is not None and not gdf_filtered.empty:
-                    base_info_df = gdf_filtered[[Config.STATION_NAME_COL, Config.ALTITUDE_COL,
+                     base_info_df = gdf_filtered[[Config.STATION_NAME_COL, Config.ALTITUDE_COL,
                                                 Config.MUNICIPALITY_COL, Config.REGION_COL]].copy()
-                    base_info_df.rename(columns={Config.STATION_NAME_COL: 'Estación'},
-                                        inplace=True)
-                    # Corregir el merge: Usar 'Estación' como columna de unión
-                    final_df = pd.merge(base_info_df.drop_duplicates(subset=['Estación']),
-                                        detailed_stats_df, on="Estación", how="right")
+                     base_info_df.rename(columns={Config.STATION_NAME_COL: 'Estación'},
+                                             inplace=True)
+                     final_df = pd.merge(base_info_df.drop_duplicates(subset=['Estación']),
+                                         detailed_stats_df, on="Estación", how="right")
                 else:
-                    final_df = detailed_stats_df # Fallback si gdf_filtered falla
+                    final_df = detailed_stats_df 
 
-                # Asegurar que las columnas de Config coincidan con los nombres reales antes de ordenar
                 column_order = [
                     'Estación', Config.MUNICIPALITY_COL, Config.REGION_COL, Config.ALTITUDE_COL,
                     'Años con Datos', 'Ppt. Media Anual (mm)', 'Desv. Estándar Anual (mm)', 
@@ -3955,11 +3949,9 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
                     'Ppt Media Oct (mm)', 'Ppt Media Nov (mm)', 'Ppt Media Dic (mm)'
                 ]
                 
-                # Filtrar solo las columnas que existen en final_df
                 display_columns = [col for col in column_order if col in final_df.columns]
                 final_df_display = final_df[display_columns]
                 
-                # Formateo de los datos para la visualización
                 format_dict = {
                     'Ppt. Media Anual (mm)': '{:.1f}', 'Desv. Estándar Anual (mm)': '{:.1f}', 
                     'Ppt. Máxima Anual (mm)': '{:.1f}', 'Ppt. Mínima Anual (mm)': '{:.1f}', 
@@ -3972,59 +3964,51 @@ def display_station_table_tab(gdf_filtered, df_anual_melted, df_monthly_filtered
                     'Ppt Media Nov (mm)': '{:.1f}', 'Ppt Media Dic (mm)': '{:.1f}'
                 }
                 
-                # [CORRECCIÓN] Mostrar solo los primeros 200 registros en UI para evitar "Bad message format"
                 if not final_df_display.empty:
                     st.markdown("Mostrando los primeros 200 registros. Descarga completa disponible abajo.")
                     st.dataframe(final_df_display.head(200).style.format({k: v for k, v in format_dict.items() if k in final_df_display.columns}))
                     
-                    # [CORRECCIÓN] Usar final_df_display (el DataFrame reordenado) para el CSV
-                    csv_bytes = final_df_display.to_csv(index=False).encode('utf-8')
-                    st.download_button("Descargar tabla completa (CSV)", data=csv_bytes, file_name="estadisticas_estaciones.csv", mime="text/csv")
+                    csv_bytes = convert_df_to_csv_local(final_df_display) # Usa la función local
+                    st.download_button("Descargar tabla completa (CSV)", data=csv_bytes, 
+                                     file_name="estadisticas_estaciones.csv", mime="text/csv")
                 else:
                     st.info("No se generaron estadísticas (resultado vacío).")
-
 
             except Exception as e:
                 st.error(f"Ocurrió un error al calcular las estadísticas: {e}")
 
-    # --- (LÓGICA DE DESCARGAS) ---
+    # --- (LÓGICA DE DESCARGAS DENTRO DE LA MISMA PESTAÑA) ---
     st.markdown("---")
-    analysis_mode = kwargs.get('analysis_mode', 'Usar datos originales') 
-    st.subheader("Opciones de Descarga")
-
-    if not stations_for_analysis:
-        st.warning("Seleccione al menos una estación para activar las descargas.")
-        return # Ya estabas regresando al inicio de la función, pero por si acaso.
-
+    st.subheader("Opciones de Descarga de Datos Filtrados")
+    st.markdown("Descarga los datos procesados y filtrados actualmente en la aplicación.")
+    
     st.markdown("#### Datos de Precipitación Anual (Filtrados)")
     if not df_anual_melted.empty:
-        csv_anual = convert_df_to_csv(df_anual_melted)
-        st.download_button(label="  Descargar CSV Anual", data=csv_anual,
+        csv_anual = convert_df_to_csv_local(df_anual_melted)
+        st.download_button(label=" Descargar CSV Anual", data=csv_anual,
                            file_name='precipitacion_anual_filtrada.csv', mime='text/csv', 
-                           key='download-anual-tablestats') # Key actualizada para evitar conflictos
+                           key='download-anual-tablestats')
     else:
         st.info("No hay datos anuales para descargar con los filtros actuales.")
     
     st.markdown("---")
     
-    # Usar la variable 'analysis_mode' que ya es un argumento de esta función
     if analysis_mode == "Completar series (interpolación)":
         st.markdown("#### Datos de Series Mensuales Completas (Interpoladas)")
         st.info("Los datos a continuación han sido completados (interpolados) para rellenar los vacíos.")
-        csv_completed = convert_df_to_csv(df_monthly_filtered)
-        st.download_button(label="  Descargar CSV de Series Completas",
+        csv_completed = convert_df_to_csv_local(df_monthly_filtered)
+        st.download_button(label=" Descargar CSV de Series Completas",
                            data=csv_completed, file_name='precipitacion_mensual_completa.csv', mime='text/csv',
-                           key='download-completed-tablestats') # Key actualizada
+                           key='download-completed-tablestats')
     else:
         st.markdown("#### Datos de Precipitación Mensual (Originales Filtrados)")
         if not df_monthly_filtered.empty:
-            csv_mensual = convert_df_to_csv(df_monthly_filtered)
-            st.download_button(label="  Descargar CSV Mensual", data=csv_mensual,
+            csv_mensual = convert_df_to_csv_local(df_monthly_filtered)
+            st.download_button(label=" Descargar CSV Mensual", data=csv_mensual,
                                file_name='precipitacion_mensual_filtrada.csv', mime='text/csv', 
-                               key='download-mensual-tablestats') # Key actualizada
+                               key='download-mensual-tablestats')
         else:
             st.info("No hay datos mensuales para descargar con los filtros actuales.")
-    # --- FIN BLOQUE AÑADIDO ---
 
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     st.header("Pronóstico del Tiempo a 7 Días (Open-Meteo)")
@@ -4051,7 +4035,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     # Botón para obtener/actualizar pronóstico
     if st.button("Obtener/Actualizar Pronóstico", key="get_forecast_button"):
         if selected_station:
-            # [CORRECCIÓN] Manejar si gdf_filtered es None
             if gdf_filtered is None or gdf_filtered.empty:
                 st.error("No hay datos de estaciones filtradas disponibles.")
                 return
@@ -4067,7 +4050,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
             lon = station_info.geometry.x
 
             with st.spinner(f"Obteniendo pronóstico para {selected_station}..."):
-                # Llama a la función MODIFICADA de forecasting.py
                 forecast_df_new = get_weather_forecast(lat, lon) 
 
                 if forecast_df_new is not None and not forecast_df_new.empty:
@@ -4075,9 +4057,7 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
                     st.session_state['forecast_station_name'] = selected_station
                     
                     # --- INICIO BLOQUE AÑADIDO (Guardar tabla formateada) ---
-                    # (Esto tiene la misma indentación que las líneas de st.session_state)
                     df_display_weekly = forecast_df_new.copy()
-                    
                     try:
                         start_date = pd.to_datetime(df_display_weekly['date'].iloc[0])
                         df_display_weekly['date_corrected'] = pd.date_range(start=start_date, periods=len(df_display_weekly))
@@ -4101,14 +4081,12 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
                     cols_to_display = ['Fecha'] + [col for col in column_rename_map if col in df_display_weekly.columns and col != 'Fecha']
                     df_for_table = df_display_weekly[cols_to_display].rename(columns=column_rename_map)
                     
-                    # Guardar la tabla formateada en la sesión
                     st.session_state['forecast_df_formatted'] = df_for_table
                     # --- FIN BLOQUE AÑADIDO ---
 
-                    st.success("Pronóstico obtenido con éxito.") # <-- Indentación corregida
+                    st.success("Pronóstico obtenido con éxito.")
                 else:
-                    # El error ya se muestra dentro de get_weather_forecast
-                    st.session_state['forecast_df'] = None # Limpia si falla
+                    st.session_state['forecast_df'] = None 
                     st.session_state['forecast_station_name'] = None
         else:
              st.warning("Por favor, seleccione una estación primero.")
@@ -4122,7 +4100,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         st.subheader(f"Pronóstico para los próximos 7 días en: {station_name}")
 
         # --- Tabla con Nuevas Variables ---
-        # (Esta lógica ahora lee la tabla formateada que guardamos)
         df_for_table = st.session_state.get('forecast_df_formatted')
 
         # Fallback por si la tabla formateada no se generó
@@ -4144,14 +4121,12 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
             cols_to_display = ['Fecha'] + [col for col in column_rename_map if col in display_df.columns and col != 'Fecha']
             df_for_table = display_df[cols_to_display].rename(columns=column_rename_map)
 
-        # Diccionario de formato para la tabla
         format_dict = {
              'T. Máx (°C)': '{:.1f}', 'T. Mín (°C)': '{:.1f}', 'Ppt. (mm)': '{:.1f}',
              'HR Media (%)': '{:.0f}', 'Presión (hPa)': '{:.1f}', 'ET₀ (mm)': '{:.2f}',
              'Radiación SW (MJ/m²)': '{:.1f}', 'Viento Máx (km/h)': '{:.1f}'
         }
         
-        # Aplicar formato solo a columnas existentes
         valid_format_dict = {k: v for k, v in format_dict.items() if k in df_for_table.columns}
 
         st.dataframe(
@@ -4163,8 +4138,7 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         st.markdown("---")
         st.subheader("Gráfico de Temperatura y Precipitación")
         
-        # Usar el 'display_df' (que tiene 'date_corrected') de la lógica de fallback
-        display_df = forecast_df.copy()
+        display_df = forecast_df.copy() # Usar el DF crudo para los gráficos
         try:
              start_date = pd.to_datetime(display_df['date'].iloc[0])
              display_df['date_corrected'] = pd.date_range(start=start_date, periods=len(display_df))
@@ -4173,7 +4147,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         
         fig_temp_ppt = make_subplots(specs=[[{"secondary_y": True}]])
 
-        # Temperaturas (eje Y primario)
         if 'temperature_2m_max' in display_df.columns:
             fig_temp_ppt.add_trace(go.Scatter(
                 x=display_df['date_corrected'], y=display_df['temperature_2m_max'],
@@ -4186,7 +4159,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
                 fill='tonexty', fillcolor='rgba(173, 216, 230, 0.2)'
             ), secondary_y=False)
 
-        # Precipitación (eje Y secundario)
         if 'precipitation_sum' in display_df.columns:
              fig_temp_ppt.add_trace(go.Bar(
                 x=display_df['date_corrected'], y=display_df['precipitation_sum'],
@@ -4197,7 +4169,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
             xaxis_title="Fecha",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-        # Ajustar rangos de ejes si hay datos
         if 'temperature_2m_min' in display_df.columns and 'temperature_2m_max' in display_df.columns:
              min_temp = display_df['temperature_2m_min'].min()
              max_temp = display_df['temperature_2m_max'].max()
@@ -4218,7 +4189,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
         col_g1, col_g2 = st.columns(2)
 
         with col_g1:
-            # Gráfico de Humedad y ET₀
             fig_hr_et = make_subplots(specs=[[{"secondary_y": True}]])
             if 'relative_humidity_2m_mean' in display_df.columns:
                  fig_hr_et.add_trace(go.Scatter(
@@ -4236,7 +4206,6 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
             st.plotly_chart(fig_hr_et, use_container_width=True)
 
         with col_g2:
-             # Gráfico de Viento y Radiación
              fig_wind_rad = make_subplots(specs=[[{"secondary_y": True}]])
              if 'wind_speed_10m_max' in display_df.columns:
                   fig_wind_rad.add_trace(go.Scatter(
@@ -4253,42 +4222,43 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
              fig_wind_rad.update_yaxes(title_text="Radiación SW (MJ/m²)", secondary_y=True, showgrid=False)
              st.plotly_chart(fig_wind_rad, use_container_width=True)
 
-    # Si no hay pronóstico en la sesión, muestra un mensaje
     elif 'forecast_df' not in st.session_state or st.session_state.forecast_df is None:
         st.info("Presiona el botón 'Obtener/Actualizar Pronóstico' para ver los datos de la estación seleccionada.")
 
-# --- Función para Mapas Climáticos Adicionales ---
 def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
     st.header("Mapas de Variables Climáticas Adicionales (Open-Meteo)")
     st.info("Estos mapas usan datos históricos promediados de Open-Meteo para las ubicaciones de las estaciones seleccionadas y los interpolan.")
     with st.expander("Fuente de Datos y Metodología (Variables Climáticas)"):
         st.markdown("""
         **Fuente de Datos:**
-        Los datos para estos mapas provienen del modelo de reanálisis **ERA5-Land**, accesible a través de la API histórica de **Open-Meteo**.
+        Los datos para estos mapas provienen del modelo de reanálisis **ERA5-Land**, 
+        accesible a través de la API histórica de **Open-Meteo**.
         
         **Metodología:**
-        1.  La aplicación consulta a la API de Open-Meteo para obtener la serie temporal histórica (ej. 1990-2020) de la variable seleccionada (ej. 'Temperatura Media') para *cada estación* visible en el mapa.
-        2.  Calcula el **promedio** de esa variable para el período seleccionado en cada estación.
-        3.  Interpola espacialmente (usando `IDW` o `Spline`) esos valores promedio para generar la superficie (mapa de calor) que se visualiza.
-        """)    
-
+        1. La aplicación consulta a la API de Open-Meteo para obtener la serie temporal 
+        histórica (ej. 1990-2020) de la variable seleccionada (ej. 'Temperatura Media') para *cada 
+        estación* visible en el mapa.
+        2. Calcula el **promedio** de esa variable para el período seleccionado en cada 
+        estación.
+        3. Interpola espacialmente (usando `IDW` o `Spline`) esos valores promedio para 
+        generar la superficie (mapa de calor) que se visualiza.
+        """) 
+    
     if gdf_filtered is None or gdf_filtered.empty:
         st.warning("Seleccione al menos una estación en el panel de control para ver estos mapas.")
         return
-
-    # Diccionario de variables disponibles en la API diaria histórica de Open-Meteo
+    
     variables_openmeteo = {
         "Velocidad Media del Viento (10m)": "wind_speed_10m_mean",
         "Temperatura Media del Aire (2m)": "temperature_2m_mean",
         "Radiación Global Diaria (Onda Corta)": "shortwave_radiation_sum",
         "Evapotranspiración de Referencia (ET₀)": "et0_fao_evapotranspiration",
         "Humedad Relativa Media (2m)": "relative_humidity_2m_mean",
-        "Presión a Nivel del Mar": "pressure_msl_mean" # Mantener MSL si es lo que usas
+        "Presión a Nivel del Mar": "pressure_msl_mean"
     }
     
-    # --- AÑADIR ESTE DICCIONARIO DE UNIDADES ---
     variable_units = {
-        "Velocidad Media del Viento (10m)": "(km/h)", # O (m/s) - Verifica la API
+        "Velocidad Media del Viento (10m)": "(km/h)",
         "Temperatura Media del Aire (2m)": "(°C)",
         "Radiación Global Diaria (Onda Corta)": "(MJ/m²)",
         "Evapotranspiración de Referencia (ET₀)": "(mm)",
@@ -4304,16 +4274,17 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
             key="additional_var_select"
         )
     with col2:
-        # Usa el rango de años de la sesión
         year_range = st.session_state.get('year_range', (2000, 2020))
-        start_year = st.number_input("Año Inicio (Promedio):", min_value=1940, max_value=date.today().year, value=year_range[0], key="clim_start_year")
+        start_year = st.number_input("Año Inicio (Promedio):", min_value=1940, 
+                                     max_value=date.today().year, value=year_range[0], key="clim_start_year")
     with col3:
-        end_year = st.number_input("Año Fin (Promedio):", min_value=1940, max_value=date.today().year, value=year_range[1], key="clim_end_year")
-
+        end_year = st.number_input("Año Fin (Promedio):", min_value=1940, 
+                                   max_value=date.today().year, value=year_range[1], key="clim_end_year")
+    
     if start_year > end_year:
         st.error("El año de inicio debe ser menor o igual al año de fin.")
         return
-
+    
     variable_code = variables_openmeteo[selected_variable_name]
     interpolation_method_clim = st.radio(
         "Método de Interpolación:", 
@@ -4321,12 +4292,11 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
         horizontal=True, 
         key="clim_interp_method"
     )
-
+    
     if st.button(f"Generar Mapa Promedio ({start_year}-{end_year}) para {selected_variable_name}", key="gen_clim_map_btn"):
-        st.session_state['last_climate_data'] = None # Clear previous data
+        st.session_state['last_climate_data'] = None
         with st.spinner(f"Obteniendo datos de {start_year}-{end_year} y generando mapa..."):
             
-            # Prepara coordenadas únicas para la API
             gdf_unique_coords = gdf_filtered.drop_duplicates(subset=['geometry'])
             lats = gdf_unique_coords.geometry.y.tolist()
             lons = gdf_unique_coords.geometry.x.tolist()
@@ -4334,91 +4304,72 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
             start_date_str = f"{start_year}-01-01" 
             end_date_str = f"{end_year}-12-31" 
             
-            # Llama a la función de la API para obtener los promedios
-            df_climate_data = get_historical_climate_average(lats, lons, variable_code, start_date_str, end_date_str)
-            # Store the fetched data in session state for download
+            df_climate_data = get_historical_climate_average(lats, lons, variable_code, 
+                                                             start_date_str, end_date_str)
             if df_climate_data is not None and not df_climate_data.empty:
                 st.session_state['last_climate_data'] = df_climate_data
                 st.session_state['last_climate_variable'] = selected_variable_name
                 st.session_state['last_climate_period'] = f"{start_year}-{end_year}"
 
             if df_climate_data is not None and not df_climate_data.empty:
-                
-                # Prepara lons, lats, vals para interpolar (usando WGS84 - EPSG:4326)
                 lons_data = df_climate_data['longitude'].values
                 lats_data = df_climate_data['latitude'].values
                 vals_data = df_climate_data['valor_promedio'].values 
 
                 if len(vals_data) >= 4:
-                    # Define la grilla de interpolación (en WGS84)
-                    bounds = gdf_filtered.total_bounds # gdf_filtered está en WGS84
-                    grid_lon = np.linspace(bounds[0] - 0.1, bounds[2] + 0.1, 100) # Menor resolución
+                    bounds = gdf_filtered.total_bounds
+                    grid_lon = np.linspace(bounds[0] - 0.1, bounds[2] + 0.1, 100)
                     grid_lat = np.linspace(bounds[1] - 0.1, bounds[3] + 0.1, 100)
                     
-                    # Selecciona el método
                     method_call = 'cubic' if interpolation_method_clim == "Spline (Suave)" else 'linear'
                     
-                    # Interpola usando griddata (más flexible que interpolate_idw)
                     grid_x, grid_y = np.meshgrid(grid_lon, grid_lat)
                     points = np.column_stack((lons_data, lats_data))
                     
                     try:
                         z_grid = griddata(points, vals_data, (grid_x, grid_y), method=method_call)
-                        # Rellenar NaNs con el vecino más cercano si es necesario
                         nan_mask = np.isnan(z_grid)
                         if np.any(nan_mask):
                              fill_values = griddata(points, vals_data, (grid_x[nan_mask], grid_y[nan_mask]), method='nearest')
                              z_grid[nan_mask] = fill_values
-                        z_grid = np.nan_to_num(z_grid) # Asegura que no queden NaNs
+                        z_grid = np.nan_to_num(z_grid)
 
-                        # Crea la figura con go.Contour
-                        # --- MODIFICAR LA CREACIÓN DE LA FIGURA ---
-                        # Obtener la unidad
-                        unit = variable_units.get(selected_variable_name, "") # Obtiene la unidad, "" si no se encuentra
+                        unit = variable_units.get(selected_variable_name, "")
                         
                         fig = go.Figure(data=go.Contour(
                             z=z_grid.T, 
                             x=grid_lon, 
                             y=grid_lat,
                             colorscale='viridis', 
-                            # Modifica esta línea para añadir la unidad:
                             colorbar_title=f"{selected_variable_name} {unit}", 
                             contours=dict(showlabels=True, labelfont=dict(size=10, color='white')),
                             line_smoothing=0.85
                         ))
-                        # --- FIN DE LA MODIFICACIÓN DE LA FIGURA ---
-                        # Añade los puntos de las estaciones originales con sus valores
                         fig.add_trace(go.Scatter(
                             x=lons_data, y=lats_data, mode='markers', 
                             marker=dict(color='red', size=5, line=dict(width=1, color='black')),
                             name='Estaciones',
                             hoverinfo='text',
-                            text=[f"Valor: {val:.2f}" for val in vals_data] # Texto simple para el hover
+                            text=[f"Valor: {val:.2f}" for val in vals_data]
                         ))
                         fig.update_layout(
                             title=f"Promedio ({start_year}-{end_year}) de {selected_variable_name}",
                             xaxis_title="Longitud", yaxis_title="Latitud", height=600
                         )
                         st.plotly_chart(fig, use_container_width=True)
-
                     except Exception as e:
                          st.error(f"Error durante la interpolación o graficación: {e}")
-
                 else:
                     st.warning("No hay suficientes datos válidos (<4) devueltos por la API para interpolar.")
             else:
                 st.error(f"No se pudieron obtener datos históricos para '{variable_code}' de la API.")
-
-# --- ADD THIS BLOCK OUTSIDE (AFTER) THE if st.button(...) BLOCK ---
-    # Display download button if data exists in session state
+    
     if 'last_climate_data' in st.session_state and st.session_state['last_climate_data'] is not None:
         st.markdown("---")
         st.subheader("Descargar Datos Climáticos")
         
-        # Use a helper function (or define one if needed) to convert DataFrame to CSV
-        # @st.cache_data # Cache the conversion
         def convert_df_to_csv_bytes(df):
-            return df.to_csv(index=False, sep=';').encode('utf-8') # Use semicolon separator
+            return df.to_csv(index=False, sep=';').encode('utf-8')
 
         csv_data = convert_df_to_csv_bytes(st.session_state['last_climate_data'])
         
@@ -4432,7 +4383,8 @@ def display_additional_climate_maps_tab(gdf_filtered, **kwargs):
             mime="text/csv",
             key="download_climate_data_btn"
         )
-    # --- END ADD ---
+        
+# --- END ADD ---
 
 # --- Función para Imágenes Satelitales ---
 def display_satellite_imagery_tab(gdf_filtered, **kwargs):
@@ -4452,47 +4404,42 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
         La disponibilidad y actualización de las imágenes dependen enteramente del proveedor del servicio.
         """)
     
-    # --- Configuración de Capas WMS (ACTUALIZADA) ---
-    # Usando la información proporcionada
     wms_layers_options = {
         "GOES-East B13 Full Disk (SSEC/Wisc)": {
-            "url": "https://sats-ftp.ssec.wisc.edu/wms/wms_goes_east.cgi?", # VERIFICAR si aún funciona
-            "layers": "goes_east_abi_b13_fd", # VERIFICAR si el nombre es correcto
+            "url": "https://sats-ftp.ssec.wisc.edu/wms/wms_goes_east.cgi?",
+            "layers": "goes_east_abi_b13_fd",
             "fmt": 'image/png',
             "transparent": True,
             "attr": "NOAA / SSEC-UWisc",
         },
         "IDEAM - GOES B13 (Nombre a Verificar)": {
-             "url": "http://geoapps.ideam.gov.co:8080/geoserver/wms?", # VERIFICAR si el servicio está activo
-             "layers": "ideam:goes16_abi_band13", # ¡NECESITA VERIFICACIÓN URGENTE! Buscar nombre real en GetCapabilities
+             "url": "http://geoapps.ideam.gov.co:8080/geoserver/wms?",
+             "layers": "ideam:goes16_abi_band13", 
              "fmt": 'image/png',
              "transparent": True,
              "attr": "IDEAM",
         },
         "EUMETSAT - Meteosat IR 10.8 (Ejemplo)": {
-             "url": "https://eumetview.eumetsat.int/geoserv/wms", # VERIFICAR si aún funciona
-             "layers": "meteosat:msg_ir108", # VERIFICAR si el nombre es correcto
+             "url": "https://eumetview.eumetsat.int/geoserv/wms",
+             "layers": "meteosat:msg_ir108",
              "fmt": 'image/png',
              "transparent": True,
              "attr": "EUMETSAT",
         },
          "EUMETSAT - Meteosat Vapor de Agua 6.2 (Ejemplo)": {
-             "url": "https://eumetview.eumetsat.int/geoserv/wms", # VERIFICAR si aún funciona
-             "layers": "meteosat:msg_wv062", # VERIFICAR si el nombre es correcto
+             "url": "https://eumetview.eumetsat.int/geoserv/wms",
+             "layers": "meteosat:msg_wv062", 
              "fmt": 'image/png',
              "transparent": True,
              "attr": "EUMETSAT",
         },
     }
-    # --- Fin Configuración ---
-
-    # Columnas para controles y mapa
+    
     col1, col2 = st.columns([1, 2])
 
     with col1:
         st.markdown("##### Opciones de Visualización")
-
-        # --- Define base map options directly here ---
+        
         base_map_options = {
             "CartoDB Positron": {"tiles": "cartodbpositron", "attr": "CartoDB"},
             "OpenStreetMap": {"tiles": "OpenStreetMap", "attr": "OpenStreetMap"},
@@ -4500,36 +4447,29 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
                 "tiles": "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
                 "attr": "Open TopoMap"
             },
-            # Add other base maps if you used them elsewhere in display_map_controls
         }
-        # --- Create only the base map selectbox directly ---
         selected_base_map_name = st.selectbox(
             "Seleccionar Mapa Base",
             list(base_map_options.keys()),
-            key="satellite_base_map" # Ensure this unique key is used ONLY here in this tab
+            key="satellite_base_map"
         )
         selected_base_map_config = base_map_options[selected_base_map_name]
-        # --- End direct widget creation ---
-
-        # Selector de capas WMS
+        
         selected_wms_names = st.multiselect(
             "Seleccionar Capas Satelitales:",
             options=list(wms_layers_options.keys()),
-            # Select the SSEC layer by default if it exists
             default=[list(wms_layers_options.keys())[0]] if wms_layers_options else []
         )
 
     with col2:
-        # Crea el mapa base
         m = create_folium_map(
-            location=[4.6, -74.0], # Centrado en Colombia
+            location=[4.6, -74.0],
             zoom=5,
-            base_map_config=selected_base_map_config, # Usa la selección directa
-            overlays_config=[], # Los WMS se añaden manualmente
-            fit_bounds_data=gdf_filtered if (gdf_filtered is not None and not gdf_filtered.empty) else None # [CORRECCIÓN]
+            base_map_config=selected_base_map_config,
+            overlays_config=[], 
+            fit_bounds_data=gdf_filtered if (gdf_filtered is not None and not gdf_filtered.empty) else None
         )
-
-        # Añade las capas WMS seleccionadas
+        
         added_layers = False
         for name in selected_wms_names:
             if name in wms_layers_options:
@@ -4540,36 +4480,30 @@ def display_satellite_imagery_tab(gdf_filtered, **kwargs):
                         layers=config["layers"],
                         fmt=config.get("fmt", 'image/png'),
                         transparent=config.get("transparent", True),
-                        overlay=True, # Importante para que sea una capa superpuesta
-                        control=True, # Para que aparezca en el control de capas
-                        name=name, # Nombre en el control de capas
+                        overlay=True,
+                        control=True,
+                        name=name,
                         attr=config.get("attr", name)
                     ).add_to(m)
                     added_layers = True
                 except Exception as e:
-                    # Muestra un error si una capa específica falla, pero continúa
                     st.error(f"No se pudo añadir la capa '{name}'. Verifica la URL ('{config['url']}') y el nombre de la capa ('{config['layers']}'). Error: {e}")
-
-        # Mensajes informativos
+        
         if not added_layers and selected_wms_names:
              st.warning("No se pudo añadir ninguna de las capas WMS seleccionadas. Verifica la configuración o las URLs.")
         elif not selected_wms_names:
              st.info("Selecciona al menos una capa satelital para visualizar.")
-
-        # Añade control de capas si se añadió alguna
+        
         if added_layers:
             folium.LayerControl().add_to(m)
-
-        # Muestra el mapa
+        
         folium_static(m, height=700, width=None)
 
 def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     st.header("Análisis de Cobertura del Suelo por Cuenca (Raster)")
-
-    # --- Configuración ---
+    
     land_cover_raster_filename = "Cob25m_WGS84.tif"
-
-    # --- LEYENDA (Basada en tu lista 1-13 Y la imagen de error 0 y 16) ---
+    
     land_cover_legend = {
         1: "Zonas urbanizadas",
         2: "Zonas industriales o comerciales y redes de comunicación",
@@ -4584,43 +4518,34 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         11: "Áreas abiertas, sin o con poca vegetación",
         12: "Áreas húmedas continentales",
         13: "Aguas continentales",
-        
-        # --- ENTRADAS FALTANTES (BASADAS EN image_e21236.png) ---
-        0: "Sin Datos / Fuera de Área", # 0 es comúnmente NoData
-        16: "NOMBRE_DE_LA_COBERTURA_PARA_16" # !! REEMPLAZA ESTO con el nombre correcto !!
-        # (Si hay más códigos desconocidos, añádelos aquí)
+        0: "Sin Datos / Fuera de Área",
+        16: "NOMBRE_DE_LA_COBERTURA_PARA_16" # Reemplazar
     }
-    # --- FIN LEYENDA ---
-
-    projected_crs = "EPSG:3116" # CRS para cálculo de área (Ej. MAGNA-SIRGAS Bogota)
-    # --- Fin Configuración ---
-
-    # Construir ruta al raster
+    
+    projected_crs = "EPSG:3116"
+    
     _THIS_FILE_DIR = os.path.dirname(__file__)
     land_cover_raster_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', land_cover_raster_filename))
-
+    
     st.info(f"Se utilizará el archivo raster de coberturas: '{os.path.basename(land_cover_raster_path)}'.")
-
-    # Obtener la cuenca unificada de la sesión
+    
     unified_basin_gdf = st.session_state.get('unified_basin_gdf')
     basin_name = st.session_state.get('selected_basins_title', 'Cuenca Seleccionada')
-
+    
     if unified_basin_gdf is None or unified_basin_gdf.empty:
         st.warning("Primero debes generar un mapa para una cuenca específica en la pestaña 'Mapas Avanzados -> Superficies de Interpolación'.")
         return
-
-    # Verificar existencia del raster de cobertura (CORREGIDO)
+    
     if not os.path.exists(land_cover_raster_path):
         st.error(f"No se encontró el archivo raster de coberturas en la ruta: {land_cover_raster_path}")
         return
-
+    
     col1, col2 = st.columns([1, 1])
-
+    
     with col1:
         st.subheader(f"Cobertura del Suelo en: {basin_name}")
         try:
             with st.spinner("Cargando y procesando raster de coberturas..."):
-                # --- OBTENER ÁREA TOTAL PRIMERO ---
                 total_area_km2 = None
                 balance_results_check = st.session_state.get('balance_results')
                 
@@ -4631,91 +4556,78 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
                     st.error("No se pudo obtener el Área Total de la cuenca (calculada en 'Mapas Avanzados -> Balance Hídrico').")
                     st.warning("Por favor, genera primero el Balance Hídrico para la cuenca seleccionada.")
                     st.session_state['current_coverage_stats'] = None
-                    return # Detener si no tenemos el área total
-                # --- FIN OBTENER ÁREA ---
-
-                # Abrir el raster de cobertura
+                    return
+                
                 with rasterio.open(land_cover_raster_path) as cover_src:
                     cover_crs = cover_src.crs
                     nodata_val = cover_src.nodata
                     internal_nodata = nodata_val if nodata_val is not None else 0
                     if internal_nodata not in land_cover_legend:
                         land_cover_legend[internal_nodata] = "Sin Datos / NoData"
-
-                    # Reproyectar la geometría de la cuenca al CRS del raster
+                    
                     basin_reproj = unified_basin_gdf.to_crs(cover_crs)
-
-                    # Recortar (enmascarar) el raster
-                    out_image, out_transform = mask(cover_src, basin_reproj.geometry, crop=True, nodata=internal_nodata, all_touched=True)
-
+                    
+                    out_image, out_transform = mask(cover_src, basin_reproj.geometry, 
+                                                    crop=True, nodata=internal_nodata, all_touched=True)
+                    
                     if out_image.ndim > 2:
                         out_image = out_image[0]
-
-                    # Calcular estadísticas (excluyendo nodata INTERNO)
+                    
                     valid_pixel_mask = (out_image != internal_nodata)
-                    unique_values, counts = np.unique(out_image[valid_pixel_mask], return_counts=True)
-
+                    unique_values, counts = np.unique(out_image[valid_pixel_mask], 
+                                                     return_counts=True)
+                    
                     if unique_values.size == 0:
                         st.warning("No se encontraron píxeles de cobertura válidos dentro del área de la cuenca.")
                         st.session_state['current_coverage_stats'] = None
                         return
-
-                    # --- CÁLCULO DE ÁREA POR PROPORCIÓN ---
+                    
                     coverage_stats_list = []
-                    total_valid_pixels = counts.sum() # Total de píxeles válidos
-
+                    total_valid_pixels = counts.sum()
+                    
                     for value, count in zip(unique_values, counts):
                         value_int = int(value)
                         class_name = land_cover_legend.get(value_int, f"Código Desconocido ({value_int})")
-                        
-                        # Calcular porcentaje de píxeles
                         percentage = (count / total_valid_pixels) * 100 if total_valid_pixels > 0 else 0
-                        
-                        # Calcular área en km² basado en la proporción del área total
                         area_km2 = (count / total_valid_pixels) * total_area_km2
                         
                         coverage_stats_list.append({
                             "ID_Clase": value_int, 
                             "Tipo de Cobertura": class_name,
-                            "area_km2": area_km2, # Área en km² calculada por proporción
+                            "area_km2": area_km2,
                             "percentage": percentage
                         })
-
+                    
                     coverage_stats = pd.DataFrame(coverage_stats_list).sort_values(by="percentage", ascending=False)
-                    # --- FIN CÁLCULO PROPORCIÓN ---
-
-                # Guardar resultados
+                
                 st.session_state['current_coverage_stats'] = coverage_stats
-                # Guardar el área total correcta que usamos
                 st.session_state['total_basin_area_km2'] = total_area_km2 
-
-                # Mostrar tabla
+                
                 st.dataframe(coverage_stats[['Tipo de Cobertura', 'area_km2', 'percentage']]
                              .rename(columns={'area_km2': 'Área (km²)', 'percentage': 'Porcentaje (%)'})
                              .style.format({'Área (km²)': '{:.2f}', 'Porcentaje (%)': '{:.1f}%'}),
                              use_container_width=True)
-
+        
         except Exception as e:
             st.error(f"Error al procesar el raster de coberturas: {e}")
             import traceback
             st.error(traceback.format_exc())
             st.session_state['current_coverage_stats'] = None
             return
-
+    
     with col2:
         st.subheader("Visualización y Relación con Escorrentía")
         if 'current_coverage_stats' in st.session_state and st.session_state['current_coverage_stats'] is not None:
             stats_df = st.session_state['current_coverage_stats']
             if not stats_df.empty:
                 if any("Código Desconocido" in name for name in stats_df["Tipo de Cobertura"]):
-                     st.warning("Hay códigos de cobertura desconocidos en la cuenca. Revisa la leyenda `land_cover_legend`.")
+                    st.warning("Hay códigos de cobertura desconocidos en la cuenca. Revisa la leyenda `land_cover_legend`.")
                 
                 fig_pie = px.pie(stats_df, names='Tipo de Cobertura', values='percentage',
                                  title=f"Distribución de Coberturas (%)", hole=0.3)
                 fig_pie.update_traces(textposition='inside', textinfo='percent+label', sort=False)
                 st.plotly_chart(fig_pie, use_container_width=True)
-
-                # Mostrar Escorrentía
+                
                 balance_results = st.session_state.get('balance_results')
                 if balance_results and not balance_results.get("error"):
                     q_mm = balance_results.get('Q_mm'); q_m3 = balance_results.get('Q_m3_año')
@@ -4732,15 +4644,13 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
                 st.info("No hay estadísticas de cobertura válidas para visualizar.")
         else:
             st.info("Procesa las coberturas primero para ver la visualización.")
-
-    # --- Sección Escenarios Hipotéticos (SIN CAMBIOS) ---
+    
     st.markdown("---")
     st.subheader("Modelado de Escenarios Hipotéticos de Cobertura")
-    # ... (El código de escenarios que ya tenías va aquí, sin cambios) ...
-    # Asegúrate de que el resto de la función (escenarios) esté presente
     balance_results = st.session_state.get('balance_results')
     q_actual_mm = None
     p_actual_mm = None
+    
     if balance_results and not balance_results.get("error"):
         q_actual_mm = balance_results.get('Q_mm')
         p_actual_mm = balance_results.get('P_media_anual_mm')
@@ -4748,10 +4658,8 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
     if q_actual_mm is not None and p_actual_mm is not None:
         st.markdown("##### Define los Porcentajes de Cobertura:")
         cn_values = {
-            "Bosque (Buena condición)": 70,
-            "Pasto (Buena condición)": 74,
-            "Cultivos (Contorno, buena condición)": 78,
-            "Suelo Desnudo": 86,
+            "Bosque (Buena condición)": 70, "Pasto (Buena condición)": 74,
+            "Cultivos (Contorno, buena condición)": 78, "Suelo Desnudo": 86,
             "Áreas Urbanas/Impermeables": 92
         }
         with st.expander("Ver/Editar Números de Curva (CN) Base"):
@@ -4806,39 +4714,31 @@ def display_land_cover_analysis_tab(gdf_filtered, **kwargs):
         para obtener la precipitación y escorrentía actuales.
         """)
 
-# --- INICIO FUNCIÓN display_life_zones_tab ---
 def display_life_zones_tab(**kwargs):
     st.header("Clasificación de Zonas de Vida (Holdridge)")
     st.info("""
     Genera un mapa de Zonas de Vida basado en precipitación media anual y altitud
     (según clasificación experta local). Puedes ajustar la resolución y aplicar una máscara de cuenca.
     """)
-
-    # --- Configuración ---
+    
     precip_raster_filename = "PPAMAnt.tif"
-    # --- Fin Configuración ---
-
-    # Rutas y DEM (SOLO BASE)
+    
     _THIS_FILE_DIR = os.path.dirname(__file__)
     precip_raster_path = os.path.abspath(os.path.join(_THIS_FILE_DIR, '..', 'data', precip_raster_filename))
     
-    # Obtener la ruta del DEM base desde el sidebar
     effective_dem_path_for_function = st.session_state.get('dem_file_path')
     dem_is_geographic = st.session_state.get('dem_crs_is_geographic', True)
-
-    # Verificar existencia de archivos base
+    
     if not os.path.exists(precip_raster_path):
         st.error(f"No se encontró el archivo raster de precipitación: {precip_raster_path}")
         return
     if not effective_dem_path_for_function:
          st.warning("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
-         return # Detener si no hay DEM
-
-    # --- Controles ---
+         return
+    
     col_ctrl1, col_ctrl2 = st.columns(2)
     with col_ctrl1:
         resolution_options = {"Baja (Rápido)": 8, "Media": 4, "Alta (Lento)": 2, "Original (Muy Lento)": 1}
-        # CONFIGURAR 'Baja' como default para evitar 'Bad message format'
         selected_resolution = st.select_slider("Seleccionar Resolución del Mapa:", options=list(resolution_options.keys()), value="Baja (Rápido)", key="lifezone_resolution")
         downscale_factor = resolution_options[selected_resolution]
     with col_ctrl2:
@@ -4848,40 +4748,36 @@ def display_life_zones_tab(**kwargs):
             basin_to_mask = st.session_state.get('unified_basin_gdf')
             basin_name_mask = st.session_state.get('selected_basins_title')
             if basin_to_mask is not None and not basin_to_mask.empty:
-                st.success(f"Se usará la máscara: {basin_name_mask}")
-                mask_geometry_to_use = basin_to_mask # [CORRECCIÓN] Pasar el GDF, no solo la geometría
+                 st.success(f"Se usará la máscara: {basin_name_mask}")
+                 mask_geometry_to_use = basin_to_mask
             else:
                 st.warning("No hay cuenca seleccionada en 'Mapas Avanzados' para usar como máscara."); apply_basin_mask = False
-    # --- Fin Controles ---
-
+    
     if st.button("Generar Mapa de Zonas de Vida", key="gen_life_zone_map"):
         
-        mask_arg = basin_to_mask if apply_basin_mask else None # [CORRECCIÓN] Pasar el GDF
+        mask_arg = basin_to_mask if apply_basin_mask else None
         
-        # --- CORRECCIÓN LLAMADA (Error 4): SIN 'maskgeometry' ---
         classified_raster, output_profile, name_map = generate_life_zone_map(
             effective_dem_path_for_function,
             precip_raster_path,
-            mask_geometry=mask_arg, # <-- ¡¡CORREGIDO!!
+            mask_geometry=mask_arg,
             downscale_factor=downscale_factor
         )
-        # --- FIN CORRECCIÓN ---
-
-        # --- Visualización ---
+        
         if classified_raster is not None and output_profile is not None and name_map is not None:
             st.subheader("Mapa de Zonas de Vida Generado")
-
+            
             height, width = classified_raster.shape
             crs_profile = output_profile.get('crs')
             crs_str = str(crs_profile) if crs_profile else "Desconocido"
             nodata_val = output_profile.get('nodata', 0)
             transform = rasterio.transform.Affine(*output_profile['transform'][:6])
-
+            
             x_start, y_start = transform.c, transform.f
             x_end = x_start + transform.a * width; y_end = y_start + transform.e * height
             x_coords = np.linspace(x_start + transform.a / 2, x_end - transform.a / 2, width)
             y_coords_raw = np.linspace(y_start + transform.e / 2, y_end - transform.e / 2, height)
-
+            
             unique_zones_present = np.unique(classified_raster)
             present_zone_ids = sorted([zone_id for zone_id in unique_zones_present if zone_id != nodata_val])
             fig = None
@@ -4889,7 +4785,7 @@ def display_life_zones_tab(**kwargs):
                 st.warning("No se encontraron zonas de vida clasificadas en el área.")
             else:
                 tick_values = present_zone_ids
-                tick_texts = [str(val) for val in tick_values] # Leyenda con IDs
+                tick_texts = [str(val) for val in tick_values]
                 color_palette1=px.colors.qualitative.Plotly; color_palette2=px.colors.qualitative.Alphabet
                 color_palette_combined=color_palette1 + color_palette2
                 if len(present_zone_ids)>len(color_palette_combined): color_palette_combined=color_palette_combined*(len(present_zone_ids)//len(color_palette_combined)+1)
@@ -4916,20 +4812,17 @@ def display_life_zones_tab(**kwargs):
                     for val, col in color_scale_discrete:
                          if val>last_val: simplified_colorscale.append([val, col]); last_val=val
                     color_scale_discrete=simplified_colorscale
-
+                
                 if transform.e < 0:
                     y_coords = y_coords_raw[::-1]
                     classified_raster_display = np.flipud(classified_raster)
                 else:
                     y_coords = y_coords_raw
                     classified_raster_display = classified_raster
-
+                
                 raster_for_heatmap = classified_raster_display.astype(float)
-                raster_for_heatmap[raster_for_heatmap == nodata_val] = np.nan # Hacer NoData transparente
-
-                # get_zone_name=np.vectorize(lambda zid: name_map.get(zid, "NoData" if zid==nodata_val else f"ID {zid}?"))
-                # hover_names_raster=get_zone_name(classified_raster_display)
-
+                raster_for_heatmap[raster_for_heatmap == nodata_val] = np.nan
+                
                 fig=go.Figure(data=go.Heatmap(
                     z=raster_for_heatmap,
                     x=x_coords,
@@ -4939,38 +4832,35 @@ def display_life_zones_tab(**kwargs):
                     zmax=max(present_zone_ids)+0.5 if present_zone_ids else 1,
                     showscale=True,
                     colorbar=dict(title="ID Zona de Vida", tickvals=tick_values, ticktext=tick_texts, tickmode='array'),
-                    hoverinfo='skip', # Mantener hover desactivado por estabilidad
+                    hoverinfo='skip',
                 ))
-
+            
             if fig is not None:
                 fig.update_layout(title="Mapa de Zonas de Vida", xaxis_title=f"Coordenada X ({crs_str})", yaxis_title=f"Coordenada Y ({crs_str})", yaxis_scaleanchor="x", height=700)
                 st.plotly_chart(fig, use_container_width=True)
-
-                # --- LEYENDA DETALLADA ID -> Nombre + Hectáreas (CORREGIDO check CRS - Error 2) ---
+                
                 st.markdown("---"); st.subheader("Leyenda y Área por Zona de Vida Presente")
                 area_hectares = []; pixel_counts = []; total_area_ha_calc = 0.0
                 can_calculate_area = False
-
+                
                 if crs_profile and transform:
                     try:
                         if crs_profile.is_projected:
-                            crs_units = crs_profile.linear_units.lower()
-                            if 'metre' in crs_units or 'meter' in crs_units:
-                                can_calculate_area = True
-                            else: st.warning(f"ADVERTENCIA: Unidades CRS ({crs_units}) no son metros. Cálculo de área impreciso.")
+                             crs_units = crs_profile.linear_units.lower()
+                             if 'metre' in crs_units or 'meter' in crs_units:
+                                 can_calculate_area = True
+                             else: st.warning(f"ADVERTENCIA: Unidades CRS ({crs_units}) no son metros. Cálculo de área impreciso.")
                         elif crs_profile.is_geographic:
-                             # Esto ahora usa el flag del sidebar, es más fiable
                              st.warning("ADVERTENCIA: El CRS del DEM está en grados geográficos. No se puede calcular el área. Use un DEM métrico.")
                         else: st.warning(f"Tipo de CRS ({crs_str}) no reconocido.")
-                    except AttributeError: # Fallback
-                         if dem_is_geographic: # Usar el flag del sidebar
+                    except AttributeError:
+                         if dem_is_geographic:
                              st.warning("ADVERTENCIA: El CRS del DEM está en grados geográficos (WGS84). No se puede calcular el área. Use un DEM métrico.")
-                         else: # Si no es geográfico pero falla .linear_units
+                         else:
                              st.warning(f"No se pudieron determinar las unidades del CRS ({crs_str}). Asumiendo métrico.")
-                             # Intentar calcular de todas formas si no es geográfico
                              if crs_profile.is_projected: can_calculate_area = True 
                     except Exception as e_crs_check: st.warning(f"Error al verificar unidades del CRS: {e_crs_check}")
-
+                
                 if can_calculate_area:
                     pixel_size_x = abs(transform.a); pixel_size_y = abs(transform.e)
                     pixel_area_m2 = pixel_size_x * pixel_size_y; pixel_area_ha = pixel_area_m2 / 10000.0
@@ -4986,23 +4876,21 @@ def display_life_zones_tab(**kwargs):
                     legend_data = {"ID": present_zone_ids, "Zona de Vida": [name_map.get(zid, f"ID {zid} Desconocido") for zid in present_zone_ids]}
                     if present_zone_ids:
                          legend_df = pd.DataFrame(legend_data).sort_values(by="ID"); st.dataframe(legend_df.set_index('ID'), use_container_width=True)
-                # --- FIN LEYENDA DETALLADA ---
-
-                # --- EXPANDER INFO ---
+                
                 st.markdown("---")
                 with st.expander("Sobre la Clasificación de Zonas de Vida"):
                      st.markdown("""
                      El sistema de Zonas de Vida de Holdridge... (basado en Altitud y Precipitación según tabla local).
                      ... (Resto del texto explicativo) ...
                      """)
-                # --- FIN EXPANDER ---
-
+        
         else:
              st.error("La generación del mapa de zonas de vida falló.")
     
     elif not effective_dem_path_for_function and os.path.exists(precip_raster_path):
          st.info("DEM base no encontrado o no cargado (revisa el sidebar). No se puede generar el mapa.")
 
+# -------------------------------------------------------------------------
 # --- PESTAÑA DE ALERTAS Y RESUMEN ---
 # -------------------------------------------------------------------------
 def display_alerts_tab(**kwargs):
@@ -5012,11 +4900,9 @@ def display_alerts_tab(**kwargs):
     # Cargar todos los datos necesarios desde la sesión y kwargs
     sarima_results = st.session_state.get('sarima_results')
     prophet_results = st.session_state.get('prophet_results')
-    # Corregido: 'last_forecasted_index_data' es probablemente el nombre incorrecto
-    # 'enso_forecast_full' es el nombre usado en el código anterior. Usar ese.
-    enso_forecast_full = st.session_state.get('enso_forecast_full', st.session_state.get('last_forecasted_index_data'))
+    # CORRECCIÓN: Usar la nueva clave donde se guarda el pronóstico del índice
+    enso_forecast_full = st.session_state.get('last_forecasted_index_data')
     weekly_forecast = st.session_state.get('forecast_df')
-    formatted_table = st.session_state.get('forecast_df_formatted')
     df_long = kwargs.get('df_long') # Necesitamos el df_long original
     
     # Definir columnas
@@ -5025,13 +4911,10 @@ def display_alerts_tab(**kwargs):
     # --- COLUMNA 1: PRONÓSTICO DE CORTO PLAZO (SEMANAL) ---
     with col1:
         st.subheader("🌦️ Pronóstico a 7 Días")
-        
-        # --- INICIO DE BLOQUE LÓGICO CORREGIDO ---
-        # 1. Comprobar si el pronóstico base existe
         if weekly_forecast is not None and not weekly_forecast.empty:
             st.success("Pronóstico semanal cargado.")
             
-            # 2. Resumen de precipitación y métricas
+            # Resumen de precipitación
             total_precip = weekly_forecast['precipitation_sum'].sum()
             max_precip_day = weekly_forecast.loc[weekly_forecast['precipitation_sum'].idxmax()]
             
@@ -5042,29 +4925,33 @@ def display_alerts_tab(**kwargs):
             elif total_precip < 5:
                 st.info("**Condiciones Secas:** No se esperan lluvias significativas en los próximos 7 días.")
             
-            # 3. Expander con la tabla detallada
             with st.expander("Ver pronóstico semanal detallado"):
-                # 3.1. Priorizar la tabla formateada
+                # --- INICIO DE BLOQUE CORREGIDO (V2) ---
+                
+                # 1. Leer la tabla formateada de la sesión
+                formatted_table = st.session_state.get('forecast_df_formatted')
+                
                 if formatted_table is not None and not formatted_table.empty:
+                    # 2. Definir el diccionario de formato
                     format_dict = {
-                        'T. Máx (°C)': '{:.1f}', 'T. Mín (°C)': '{:.1f}', 'Ppt. (mm)': '{:.1f}',
-                        'HR Media (%)': '{:.0f}', 'Presión (hPa)': '{:.1f}', 'ET₀ (mm)': '{:.2f}',
-                        'Radiación SW (MJ/m²)': '{:.1f}', 'Viento Máx (km/h)': '{:.1f}'
+                         'T. Máx (°C)': '{:.1f}', 'T. Mín (°C)': '{:.1f}', 'Ppt. (mm)': '{:.1f}',
+                         'HR Media (%)': '{:.0f}', 'Presión (hPa)': '{:.1f}', 'ET₀ (mm)': '{:.2f}',
+                         'Radiación SW (MJ/m²)': '{:.1f}', 'Viento Máx (km/h)': '{:.1f}'
                     }
                     valid_format_dict = {k: v for k, v in format_dict.items() if k in formatted_table.columns}
-                    
+        
+                    # 3. Mostrar el DataFrame formateado
                     st.dataframe(
                         formatted_table.set_index('Fecha').style.format(valid_format_dict),
                         use_container_width=True
                     )
                 else:
-                    # 3.2. Fallback: Mostrar la tabla base si la formateada no existe
-                    st.dataframe(weekly_forecast, use_container_width=True)
-        
+                    # Fallback por si la tabla formateada no existe
+                    st.dataframe(weekly_forecast)
+                
+                # --- FIN DE BLOQUE CORREGIDO (V2) ---
         else:
-            # 4. Si 'weekly_forecast' NO existe, mostrar advertencia
-            st.warning("No se ha generado un pronóstico semanal. Vaya a la pestaña 'Pronóstico Semanal' para generarlo.")
-        # --- FIN DE BLOQUE LÓGICO CORREGIDO ---
+            st.warning("No se ha generado un pronóstico. Vaya a la pestaña 'Pronóstico Semanal' para generarlo.")
 
     # --- COLUMNA 2: ESTADO ENSO (MEDIANO PLAZO) ---
     with col2:
@@ -5091,9 +4978,10 @@ def display_alerts_tab(**kwargs):
                 with st.expander("Ver pronóstico ENSO detallado"):
                     st.dataframe(future_enso[['ds', 'yhat', 'Clasificación']].style.format({'yhat': '{:.2f}'}))
             else:
-                st.error("El pronóstico ENSO en memoria está desactualizado.")
+                 st.error("El pronóstico ENSO en memoria está desactualizado.")
         else:
-            st.warning("No se ha generado un pronóstico ENSO. Vaya a 'Pronóstico Climático' para generarlo.")
+            # CORRECCIÓN: Mensaje de ayuda actualizado
+            st.warning("No se ha generado un pronóstico. Vaya a 'Pronóstico Climático' para generarlo.")
 
     st.markdown("---")
 
@@ -5137,16 +5025,9 @@ def display_alerts_tab(**kwargs):
                 if isinstance(full_series_for_spi, pd.DataFrame):
                     full_series_for_spi = full_series_for_spi.squeeze()
 
-                # 2. Calcular SPI a 6 meses (Asumiendo que calculate_spi existe)
-                # spi_forecasted = calculate_spi(full_series_for_spi, window=6)
-                # Placeholder: Como no tengo calculate_spi, simularé una salida
-                if 'spi_forecasted' not in locals():
-                     st.warning("Simulando SPI: `calculate_spi` no está definido en este contexto.")
-                     spi_forecasted = pd.Series(
-                         [0.5, -0.5, -1.0, -1.6, -1.0, -0.5], 
-                         index=pd.date_range(start=last_hist_date + pd.DateOffset(months=1), periods=6, freq='MS')
-                     )
-
+                # 2. Calcular SPI a 6 meses
+                spi_forecasted = calculate_spi(full_series_for_spi, window=6)
+                
                 # 3. Obtener solo los valores futuros
                 future_spi = spi_forecasted[spi_forecasted.index > last_hist_date].dropna()
 
@@ -5187,6 +5068,7 @@ def display_alerts_tab(**kwargs):
     else:
         st.warning("No se ha generado un pronóstico de precipitación (SARIMA o Prophet). Vaya a la pestaña 'Tendencias y Pronósticos' para generar uno.")
 
+# -------------------------------------------------------------------------
 # --- PESTAÑA DE ESCENARIOS DE CAMBIO CLIMÁTICO (CORREGIDA) ---
 # -------------------------------------------------------------------------
 def display_climate_scenarios_tab(**kwargs):
@@ -5356,6 +5238,7 @@ def display_climate_scenarios_tab(**kwargs):
             desplazamiento geográfico de los ecosistemas.
             """)
 
+# -------------------------------------------------------------------------
 # --- PESTAÑA NUEVA: PRONÓSTICO CLIMÁTICO (ONI, SOI, IOD) ---
 # -------------------------------------------------------------------------
 def display_climate_forecast_tab(**kwargs):
@@ -5424,14 +5307,12 @@ def display_climate_forecast_tab(**kwargs):
         try:
             from prophet.plot import plot_plotly
             
-            # --- CORRECCIÓN DE GRÁFICO (Ligero) ---
             model = st.session_state['last_forecasted_index_model']
             forecast_data = st.session_state['last_forecasted_index_data']
             index_name = st.session_state['last_forecasted_index_name']
             
             fig_index = go.Figure()
 
-            # 1. Añadir banda de confianza (Intervalo de Incertidumbre)
             horizon = len(forecast_data) - len(model.history)
             forecast_plot_data = forecast_data.iloc[-horizon:]
             
@@ -5445,14 +5326,12 @@ def display_climate_forecast_tab(**kwargs):
                 name='Incertidumbre (Baja)', legendgroup='forecast'
             ))
             
-            # 2. Añadir la línea del pronóstico (yhat)
             fig_index.add_trace(go.Scatter(
                 x=forecast_plot_data['ds'], y=forecast_plot_data['yhat'], mode='lines', 
                 line=dict(color='rgba(0,176,246,1)', width=3),
                 name=f'Pronóstico ({index_name})', legendgroup='forecast'
             ))
             
-            # 3. Añadir datos históricos (SOLO ÚLTIMOS 20 AÑOS)
             history_data = model.history
             history_plot_data = history_data.iloc[-(12*20):] # Últimos 20 años
             
@@ -5468,7 +5347,6 @@ def display_climate_forecast_tab(**kwargs):
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             st.plotly_chart(fig_index, use_container_width=True)
-            # --- FIN CORRECCIÓN DE GRÁFICO ---
 
         except ImportError:
             st.error("Librería 'prophet' no instalada correctamente para graficar.")
