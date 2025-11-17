@@ -183,6 +183,10 @@ def migrar_datos():
                 
         gdf_estaciones_sql = gdf_estaciones_sql[columnas_tabla_estacion]
         
+        # Antes de guardar, debemos re-asignar la columna de geometría activa,
+        # ya que 'to_postgis' la busca por el nombre 'geometry' por defecto.
+        gdf_estaciones_sql = gdf_estaciones_sql.set_geometry("geom")
+
         print(f"Cargando {len(gdf_estaciones_sql)} estaciones a la base de datos...")
         gdf_estaciones_sql.to_postgis('estaciones', engine, if_exists='replace', index=False)
         print("Migración de 'estaciones' completada.")
