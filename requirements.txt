@@ -32,3 +32,5 @@ rich==13.7.1
 rasterstats
 cmdstanpy
 sqlalchemy
+psycopg2-binary
+geoalchemy2
