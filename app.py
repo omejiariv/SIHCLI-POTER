@@ -203,30 +203,36 @@ def main():
                      st.info("Para comenzar, seleccione al menos una estación en el panel de la izquierda.")
         st.stop()
 
-    #--- Procesamiento de Datos Post-Filtros (Sin cambios) ---
+    #--- Procesamiento de Datos Post-Filtros (Lógica Optimizada) ---
+
+    # 1. Ejecutar complete_series SOLO UNA VEZ si es necesario y guardarlo en session_state
     if analysis_mode == "Completar series (interpolación)":
         if 'df_completed' not in st.session_state:
             with st.spinner("Procesando y cacheando series completadas por primera vez..."):
+                # [CORRECCIÓN] Llama a complete_series con la variable local df_long
                 st.session_state.df_completed = complete_series(df_long)
                 if st.session_state.df_completed.empty:
                     st.warning("La completación de series no produjo resultados.")
-                    st.session_state.df_completed = df_long
+                    st.session_state.df_completed = df_long # Fallback
         base_df_monthly = st.session_state.df_completed
     else:
+        # [CORRECCIÓN] Usa la variable local df_long
         base_df_monthly = df_long
         if Config.ORIGIN_COL not in base_df_monthly.columns:
             base_df_monthly[Config.ORIGIN_COL] = 'Original'
 
+    # 2. Aplicar TODOS los filtros (Estación, Fecha, Mes) al DataFrame base seleccionado
     if not base_df_monthly.empty:
         df_monthly_filtered = base_df_monthly[
             (base_df_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)) &
             (base_df_monthly[Config.DATE_COL].dt.year >= year_range[0]) &
             (base_df_monthly[Config.DATE_COL].dt.year <= year_range[1]) &
             (base_df_monthly[Config.DATE_COL].dt.month.isin(meses_numeros))
-        ].copy()
+        ].copy() # .copy() es importante para evitar warnings
     else:
-        df_monthly_filtered = pd.DataFrame()
+        df_monthly_filtered = pd.DataFrame() # DataFrame vacío si base_falla
 
+    # 3. Aplicar exclusión de NaN y Ceros
     if not df_monthly_filtered.empty:
         if exclude_na:
             df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
@@ -235,9 +241,14 @@ def main():
             df_monthly_filtered = df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL]) 
             df_monthly_filtered = df_monthly_filtered[df_monthly_filtered[Config.PRECIPITATION_COL] > 0]
     
+    # 4. Calcular datos anuales
     df_anual_melted = pd.DataFrame() 
+    
+    # --- INICIO DEL BLOQUE CORREGIDO (IndentationError) ---
+    # (Asegúrate de que este bloque 'if' esté indentado 4 espacios)
     if not df_monthly_filtered.empty and Config.PRECIPITATION_COL in df_monthly_filtered.columns and Config.MONTH_COL in df_monthly_filtered.columns:
-         try:
+        # (Este 'try' debe estar indentado 8 espacios)
+        try:
             annual_agg = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).agg(
                 precipitation_sum=(Config.PRECIPITATION_COL, lambda x: pd.to_numeric(x, errors='coerce').sum()), 
                 meses_validos=(Config.MONTH_COL, 'nunique') 
@@ -245,11 +256,14 @@ def main():
             annual_agg.loc[annual_agg['meses_validos'] < 10, 'precipitation_sum'] = np.nan 
             df_anual_melted = annual_agg.rename(columns={'precipitation_sum': Config.PRECIPITATION_COL})
             df_anual_melted = df_anual_melted[[Config.STATION_NAME_COL, Config.YEAR_COL, Config.PRECIPITATION_COL, 'meses_validos']]
+        # (Este 'except' debe estar indentado 8 espacios, alineado con 'try')
         except Exception as e_agg:
             st.error(f"Error durante la agregación anual: {e_agg}")
             df_anual_melted = pd.DataFrame()
+    # (Este 'elif' debe estar indentado 4 espacios, alineado con 'if')
     elif not df_monthly_filtered.empty:
-        st.warning("Columnas necesarias ('precipitation', 'month') no encontradas en df_monthly_filtered para agregación anual.")
+         st.warning("Columnas necesarias ('precipitation', 'month') no encontradas en df_monthly_filtered para agregación anual.")
+    # --- FIN DEL BLOQUE CORREGIDO ---
 
     #--- Preparar argumentos para las pestañas (Sin cambios) ---
     display_args = {
@@ -546,4 +560,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
