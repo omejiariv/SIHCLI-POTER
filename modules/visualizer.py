@@ -1388,7 +1388,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
             gif_path = Config.GIF_PATH
             if gif_path and os.path.exists(gif_path):
                 try:
-                     with open(gif_path, "rb") as f: gif_bytes = f.read()
+                    with open(gif_path, "rb") as f: gif_bytes = f.read()
                     gif_b64 = base64.b64encode(gif_bytes).decode("utf-8")
                     html_string = f'<img src="data:image/gif;base64,{gif_b64}" width="600" alt="Animación PPAM">'
                     st.markdown(html_string, unsafe_allow_html=True)
@@ -5369,5 +5369,6 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
