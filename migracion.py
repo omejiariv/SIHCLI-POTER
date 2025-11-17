@@ -244,29 +244,27 @@ def migrar_datos():
         df_indices.to_sql('indices_climaticos', engine, if_exists='replace', index=False)
         print("Migración de 'indices_climaticos' completada.")
 
-        # --- C. Migrar Geometrías (CORREGIDO V2) ---
+        # --- C. Migrar Geometrías (CORREGIDO V2 - Minúsculas) ---
         print("\nIniciando migración de 'geometrias'...")
         
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Cargar archivos
+        # 1. Cargar archivos
         gdf_subcuencas = gpd.read_file("data/SubcuencasAinfluencia.geojson")
         gdf_predios = gpd.read_file("data/PrediosEjecutados.geojson")
         gdf_municipios = gpd.read_file("data/mapaCVENSO.zip")
         
-        # Estandarizar columnas a minúsculas (la causa del error)
+        # 2. Estandarizar columnas a minúsculas (la causa del error)
         gdf_subcuencas.columns = [col.strip().lower() for col in gdf_subcuencas.columns]
         gdf_predios.columns = [col.strip().lower() for col in gdf_predios.columns]
         gdf_municipios.columns = [col.strip().lower() for col in gdf_municipios.columns]
         
-        # Llamar a la función con los nombres de columna en minúsculas
+        # 3. Llamar a la función con los nombres de columna en minúsculas
         gdf_subcuencas_sql = preparar_geometria(gdf_subcuencas, 'subcuenca', 'subc_lbl')
         gdf_predios_sql = preparar_geometria(gdf_predios, 'predio', 'nombre_pre')
         gdf_municipios_sql = preparar_geometria(gdf_municipios, 'municipio', 'mpio_cnmbr')
-        # --- FIN DE LA CORRECCIÓN ---
         
+        # 4. Combinar y guardar
         gdf_geometrias_final = pd.concat([gdf_subcuencas_sql, gdf_predios_sql, gdf_municipios_sql], ignore_index=True)
         
-        # Asegurarse de que 'geom' es la columna de geometría activa
         gdf_geometrias_final = gdf_geometrias_final.set_geometry("geom")
 
         print(f"Cargando {len(gdf_geometrias_final)} geometrías (cuencas, predios, municipios)...")
