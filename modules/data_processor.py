@@ -19,7 +19,7 @@ import tempfile # Se mantiene por si se usa en otra parte
 
 # --- URL DE LA BASE DE DATOS ---
 # ¡IMPORTANTE! EDITA ESTA LÍNEA con tu usuario, contraseña y nombre de BD
-DATABASE_URL = "postgresql://postgres:admin@localhost:5432/sihcli_poter_db"
+DATABASE_URL = "SIHCLI-POTER123*@db.ldunpssoxvifemoyeuac.supabase.co:5432/postgres"
 # -----------------------------
 
 # --- UTILS (Se mantienen) ---
@@ -266,3 +266,4 @@ def load_parquet_from_url(url):
     except Exception as e:
         st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
         return None
+
