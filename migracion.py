@@ -260,7 +260,7 @@ def migrar_datos():
         # 3. Llamar a la función con los nombres de columna en minúsculas
         gdf_subcuencas_sql = preparar_geometria(gdf_subcuencas, 'subcuenca', 'subc_lbl')
         gdf_predios_sql = preparar_geometria(gdf_predios, 'predio', 'nombre_pre')
-        gdf_municipios_sql = preparar_geometria(gdf_municipios, 'municipio', 'mpio_cnmbr')
+        gdf_municipios_sql = preparar_geometria(gdf_municipios, 'municipio', 'municipio')
         
         # 4. Combinar y guardar
         gdf_geometrias_final = pd.concat([gdf_subcuencas_sql, gdf_predios_sql, gdf_municipios_sql], ignore_index=True)
