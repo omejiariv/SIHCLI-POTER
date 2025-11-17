@@ -11,6 +11,7 @@ import time
 
 # --- Importaciones de Módulos Propios ---
 from modules.config import Config
+# Se eliminan las funciones de carga de archivos, solo se importa la nueva
 from modules.data_processor import load_and_process_all_data, complete_series
 from modules.visualizer import (
     display_welcome_tab,
@@ -51,8 +52,8 @@ except NameError:
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+# La función apply_filters_to_stations se queda igual (no necesita cambios)
 def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celdas):
-    """Aplica una serie de filtros al DataFrame de estaciones."""
     stations_filtered = df.copy()
     if Config.PERCENTAGE_COL in stations_filtered.columns:
         stations_filtered[Config.PERCENTAGE_COL] = pd.to_numeric(
@@ -67,6 +68,7 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
         for r in altitudes:
             if r == '0-500': conditions.append((altitude_col_numeric >= 0) & (altitude_col_numeric <= 500))
             elif r == '500-1000': conditions.append((altitude_col_numeric > 500) & (altitude_col_numeric <= 1000))
+            # (Tu lógica de altitudes completa va aquí)
             elif r == '1000-2000': conditions.append((altitude_col_numeric > 1000) & (altitude_col_numeric <= 2000))
             elif r == '2000-3000': conditions.append((altitude_col_numeric > 2000) & (altitude_col_numeric <= 3000))
             elif r == '>3000': conditions.append(altitude_col_numeric > 3000)
@@ -95,10 +97,9 @@ def main():
                     with rasterio.open(_DEM_PATH_APP) as src:
                         if src.crs:
                              st.session_state['dem_crs_is_geographic'] = bool(src.crs.is_geographic)
-                            st.session_state['dem_file_path'] = _DEM_PATH_APP
-                            st.session_state['dem_file_path_validated'] = True
-                            st.session_state['dem_source_name'] = os.path.basename(_DEM_PATH_APP)
-                            # st.info(f"DEM base encontrado: {st.session_state['dem_source_name']}") # Opcional: Ocultar para UI más limpia
+                        st.session_state['dem_file_path'] = _DEM_PATH_APP
+                        st.session_state['dem_file_path_validated'] = True
+                        st.session_state['dem_source_name'] = os.path.basename(_DEM_PATH_APP)
                 except Exception as e_dem:
                     st.warning(f"No se pudo validar DEM base {_DEM_PATH_APP}: {e_dem}")
                     st.session_state['dem_file_path_validated'] = False
@@ -267,7 +268,7 @@ def main():
         "selected_altitudes": sidebar_filters["selected_altitudes"]
     }
     
-    #--- Renderizado de Pestañas (Sin cambios, ya corregido) ---
+    #--- Renderizado de Pestañas (CORREGIDO Y ALINEADO) ---
     
     with tabs[0]:  # Bienvenida
         display_welcome_tab()
@@ -317,7 +318,8 @@ def main():
     with tabs[15]: # Pronóstico Climático
         display_climate_forecast_tab(**display_args)
         
-    with tabs[16]: # Tendencias y Pronósticos
+    with tabs[16]: # Tendencias y Pronósticos (LA LÍNEA DEL ERROR)
+        # CORRECCIÓN: Pasa la variable local 'df_long', no 'st.session_state.df_long'
         display_trends_and_forecast_tab(df_full_monthly=df_long, **display_args)
         
     with tabs[17]: # Pronóstico Semanal
@@ -325,7 +327,7 @@ def main():
             stations_for_analysis=stations_for_analysis,
             gdf_filtered=gdf_filtered
         )
-
+    
     with tabs[18]: # Análisis por Cuenca
         st.header("Análisis Agregado por Cuenca Hidrográfica")
         if gdf_subcuencas is not None and not gdf_subcuencas.empty:
