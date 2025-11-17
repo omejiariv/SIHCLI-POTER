@@ -210,31 +210,35 @@ def migrar_datos():
         df_indices.to_sql('indices_climaticos', engine, if_exists='replace', index=False)
         print("Migración de 'indices_climaticos' completada.")
 
-        # --- C. Migrar Geometrías ---
+        # --- C. Migrar Geometrías (CORREGIDO V2) ---
         print("\nIniciando migración de 'geometrias'...")
         
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Cargar archivos
         gdf_subcuencas = gpd.read_file("data/SubcuencasAinfluencia.geojson")
         gdf_predios = gpd.read_file("data/PrediosEjecutados.geojson")
         gdf_municipios = gpd.read_file("data/mapaCVENSO.zip")
         
-        def preparar_geometria(gdf, tipo, col_nombre):
-            gdf['tipo_geometria'] = tipo
-            gdf = gdf.rename(columns={col_nombre: 'nombre', 'geometry': 'geom'})
-            # Guardar todas las otras propiedades en la columna JSON
-            prop_cols = [col for col in gdf.columns if col not in ['geom', 'nombre', 'tipo_geometria']]
-            gdf['metadatos'] = gdf[prop_cols].to_dict('records')
-            return gdf[['nombre', 'tipo_geometria', 'geom', 'metadatos']]
-
-        gdf_subcuencas_sql = preparar_geometria(gdf_subcuencas, 'subcuenca', 'SUBC_LBL')
-        gdf_predios_sql = preparar_geometria(gdf_predios, 'predio', 'NOMBRE_PRE')
-        gdf_municipios_sql = preparar_geometria(gdf_municipios, 'municipio', 'MPIO_CNMBR')
+        # Estandarizar columnas a minúsculas (la causa del error)
+        gdf_subcuencas.columns = [col.strip().lower() for col in gdf_subcuencas.columns]
+        gdf_predios.columns = [col.strip().lower() for col in gdf_predios.columns]
+        gdf_municipios.columns = [col.strip().lower() for col in gdf_municipios.columns]
+        
+        # Llamar a la función con los nombres de columna en minúsculas
+        gdf_subcuencas_sql = preparar_geometria(gdf_subcuencas, 'subcuenca', 'subc_lbl')
+        gdf_predios_sql = preparar_geometria(gdf_predios, 'predio', 'nombre_pre')
+        gdf_municipios_sql = preparar_geometria(gdf_municipios, 'municipio', 'mpio_cnmbr')
+        # --- FIN DE LA CORRECCIÓN ---
         
         gdf_geometrias_final = pd.concat([gdf_subcuencas_sql, gdf_predios_sql, gdf_municipios_sql], ignore_index=True)
         
+        # Asegurarse de que 'geom' es la columna de geometría activa
+        gdf_geometrias_final = gdf_geometrias_final.set_geometry("geom")
+
         print(f"Cargando {len(gdf_geometrias_final)} geometrías (cuencas, predios, municipios)...")
         gdf_geometrias_final.to_postgis('geometrias', engine, if_exists='replace', index=False)
         print("Migración de 'geometrias' completada.")
-
+        
         # --- D. Migrar Rasters (solo las rutas) ---
         print("\nIniciando migración de 'rasters'...")
         rasters_data = [
