@@ -249,7 +249,7 @@ def main():
             st.error(f"Error durante la agregación anual: {e_agg}")
             df_anual_melted = pd.DataFrame()
     elif not df_monthly_filtered.empty:
-         st.warning("Columnas necesarias ('precipitation', 'month') no encontradas en df_monthly_filtered para agregación anual.")
+        st.warning("Columnas necesarias ('precipitation', 'month') no encontradas en df_monthly_filtered para agregación anual.")
 
     #--- Preparar argumentos para las pestañas (Sin cambios) ---
     display_args = {
@@ -546,3 +546,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
