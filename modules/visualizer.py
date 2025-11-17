@@ -5071,12 +5071,14 @@ def display_alerts_tab(**kwargs):
 # -------------------------------------------------------------------------
 # --- PESTAÑA DE ESCENARIOS DE CAMBIO CLIMÁTICO (CORREGIDA) ---
 # -------------------------------------------------------------------------
+# --- PESTAÑA DE ESCENARIOS DE CAMBIO CLIMÁTICO (CORREGIDA) ---
+# -------------------------------------------------------------------------
 def display_climate_scenarios_tab(**kwargs):
     st.header("Modelado de Escenarios de Cambio Climático")
     st.info("""
     Esta herramienta le permite simular el impacto de cambios en la temperatura y la precipitación
     sobre la hidrología y la frecuencia de sequías en la cuenca seleccionada.
-    """)
+    """) [cite: 3101-3102]
 
     # --- 1. Cargar Dependencias ---
     basin_gdf = st.session_state.get('unified_basin_gdf')
@@ -5091,7 +5093,7 @@ def display_climate_scenarios_tab(**kwargs):
     gdf_filtered = kwargs.get('gdf_filtered')
     gdf_subcuencas = kwargs.get('gdf_subcuencas')
 
-    if not all([basin_gdf is not None, p_base is not None, alt_base is not None, df_long is not None]):
+    if not all([basin_gdf is not None, p_base is not None, alt_base is not None, df_long is not None]): [cite: 3103]
         st.warning(f"""
         **Datos insuficientes para modelar escenarios.**
         
@@ -5099,10 +5101,10 @@ def display_climate_scenarios_tab(**kwargs):
         `Mapas Avanzados` -> `Superficies de Interpolación` -> `Por Cuenca Específica`
         
         Asegúrese de que el cálculo del **Balance Hídrico** esté activado.
-        """)
+        """) [cite: 3103-3104]
         st.stop()
 
-    st.success(f"Analizando escenarios para la cuenca: **{basin_name}**")
+    st.success(f"Analizando escenarios para la cuenca: **{basin_name}**") [cite: 3105]
 
     # --- 2. Sliders de Escenario ---
     st.subheader("Definir el Escenario Futuro")
@@ -5123,22 +5125,25 @@ def display_climate_scenarios_tab(**kwargs):
         st.metric("Escenario ΔP", f"{delta_precip:+d} %")
 
     # --- 3. Botón de Cálculo ---
-    if st.button("Calcular Impacto del Escenario"):
+    if st.button("Calcular Impacto del Escenario"): [cite: 3106]
         with st.spinner("Modelando el impacto del escenario..."):
             
             # --- 4. ANÁLISIS DE BALANCE HÍDRICO ---
-            st.subheader("Impacto en el Balance Hídrico Anual")
+            st.subheader("Impacto en el Balance Hídrico Anual") [cite: 3107]
             
-            balance_base = calculate_hydrological_balance(p_base, alt_base, basin_gdf, delta_temp_c=0.0)
+            # 4a. Calcular Línea Base
+            balance_base = calculate_hydrological_balance(p_base, alt_base, basin_gdf, delta_temp_c=0.0) [cite: 3108]
             q_base = balance_base.get('Q_mm', 0)
             etp_base = balance_base.get('ET_media_anual_mm', 0)
 
+            # 4b. Calcular Escenario
             p_escenario = p_base * (1 + delta_precip / 100.0)
-            balance_escenario = calculate_hydrological_balance(p_escenario, alt_base, basin_gdf, delta_temp_c=delta_temp)
+            balance_escenario = calculate_hydrological_balance(p_escenario, alt_base, basin_gdf, delta_temp_c=delta_temp) [cite: 3109]
             q_escenario = balance_escenario.get('Q_mm', 0)
             etp_escenario = balance_escenario.get('ET_media_anual_mm', 0)
 
-            c1, c2 = st.columns(2)
+            # 4c. Mostrar Métricas de Impacto
+            c1, c2 = st.columns(2) [cite: 3110]
             c1.metric(
                 "Escorrentía (Q) - Línea Base", 
                 f"{q_base:.0f} mm/año"
@@ -5149,13 +5154,13 @@ def display_climate_scenarios_tab(**kwargs):
                 delta=f"{(q_escenario - q_base):.0f} mm/año"
             )
             
-            with st.expander("Ver desglose del Balance Hídrico"):
+            with st.expander("Ver desglose del Balance Hídrico"): [cite: 3111]
                 df_balance = pd.DataFrame({
                     "Variable": ["Precipitación (P)", "Evapotranspiración (ETP)", "Escorrentía (Q = P - ETP)"],
                     "Línea Base (mm/año)": [p_base, etp_base, q_base],
                     "Escenario (mm/año)": [p_escenario, etp_escenario, q_escenario]
                 })
-                # CORRECCIÓN: Aplicar formato solo a columnas numéricas
+                # CORRECCIÓN de ValueError: Aplicar formato solo a columnas numéricas
                 st.dataframe(df_balance.style.format({
                     'Línea Base (mm/año)': '{:.1f}',
                     'Escenario (mm/año)': '{:.1f}'
@@ -5164,29 +5169,29 @@ def display_climate_scenarios_tab(**kwargs):
             # --- 5. ANÁLISIS DE SEQUÍA (SPI) ---
             st.subheader("Impacto en la Frecuencia de Sequías (SPI)")
             
-            # --- INICIO DE BLOQUE CON INDENTACIÓN CORREGIDA ---
-            try:
+            # --- INICIO DE BLOQUE CON INDENTACIÓN CORREGIDA (SyntaxError) ---
+            try: [cite: 3112]
                 # 5a. Encontrar estaciones en la cuenca
                 stations_in_basin_gdf = gpd.sjoin(gdf_filtered, basin_gdf, how="inner", predicate="intersects")
                 station_names_in_basin = stations_in_basin_gdf[Config.STATION_NAME_COL].unique().tolist()
 
                 if not station_names_in_basin:
                     st.warning("No se encontraron estaciones en la cuenca para el análisis SPI.")
-                else:
+                else: [cite: 3113]
                     # 5b. Crear serie regional (Base)
                     df_regional_base = df_long[
                         df_long[Config.STATION_NAME_COL].isin(station_names_in_basin)
-                    ].groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().dropna()
+                    ].groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().dropna() [cite: 3114]
                     
                     # 5c. Crear serie regional (Escenario)
-                    df_regional_escenario = df_regional_base * (1 + delta_precip / 100.0)
+                    df_regional_escenario = df_regional_base * (1 + delta_precip / 100.0) [cite: 3115]
                     
                     # 5d. Calcular SPI para ambas series
-                    spi_base = calculate_spi(df_regional_base, window=6).dropna()
+                    spi_base = calculate_spi(df_regional_base, window=6).dropna() [cite: 3116]
                     spi_escenario = calculate_spi(df_regional_escenario, window=6).dropna()
 
                     # 5e. Mostrar histograma comparativo
-                    fig = go.Figure()
+                    fig = go.Figure() [cite: 3117]
                     fig.add_trace(go.Histogram(
                         x=spi_base, name="Línea Base", 
                         opacity=0.7, nbinsx=30, histnorm='percent'
@@ -5200,11 +5205,11 @@ def display_climate_scenarios_tab(**kwargs):
                         title="Distribución Comparativa del SPI a 6 Meses",
                         xaxis_title="Valor SPI", yaxis_title="Frecuencia (%)"
                     )
-                    fig.add_vrect(x0=-2, x1=-1.5, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Sequía Severa")
+                    fig.add_vrect(x0=-2, x1=-1.5, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Sequía Severa") [cite: 3118]
                     st.plotly_chart(fig, use_container_width=True)
 
                     # 5f. Mostrar Métricas de Sequía
-                    base_drought_months = (spi_base < -1.5).sum()
+                    base_drought_months = (spi_base < -1.5).sum() [cite: 3119]
                     escenario_drought_months = (spi_escenario < -1.5).sum()
                     total_months = len(spi_base)
                     
@@ -5224,12 +5229,12 @@ def display_climate_scenarios_tab(**kwargs):
             
             # Este 'except' AHORA ESTÁ ALINEADO CON EL 'try'
             except Exception as e_spi:
-                st.error(f"No se pudo completar el análisis de sequía (SPI): {e_spi}")
-                st.exception(e_spi)
+                st.error(f"No se pudo completar el análisis de sequía (SPI): {e_spi}") [cite: 3119]
+                st.exception(e_spi) [cite: 3119]
             # --- FIN DE BLOQUE CORREGIDO ---
 
             # --- 6. ZONAS DE VIDA (DIFERIDO) ---
-            st.markdown("---")
+            st.markdown("---") [cite: 3120]
             st.info("""
             **Análisis de Zonas de Vida (Próximamente):**
             
@@ -5364,3 +5369,4 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
