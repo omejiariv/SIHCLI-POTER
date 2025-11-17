@@ -77,7 +77,7 @@ class Geometria(Base):
     nombre = Column(Text)
     tipo_geometria = Column(Text, nullable=False) # 'subcuenca', 'municipio', 'predio'
     geom = Column(Geometry(geometry_type='MULTIPOLYGON', srid=4326))
-    metadatos = Column(JSONB) # Para guardar propiedades extra
+    metadatos = Column(JSON) # Para guardar propiedades extra
 
 class Raster(Base):
     __tablename__ = "rasters"
@@ -190,7 +190,7 @@ def migrar_datos():
         def preparar_geometria(gdf, tipo, col_nombre):
             gdf['tipo_geometria'] = tipo
             gdf = gdf.rename(columns={col_nombre: 'nombre', 'geometry': 'geom'})
-            # Guardar todas las otras propiedades en la columna JSONB
+            # Guardar todas las otras propiedades en la columna JSON
             prop_cols = [col for col in gdf.columns if col not in ['geom', 'nombre', 'tipo_geometria']]
             gdf['metadatos'] = gdf[prop_cols].to_dict('records')
             return gdf[['nombre', 'tipo_geometria', 'geom', 'metadatos']]
