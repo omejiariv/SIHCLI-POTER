@@ -13,7 +13,7 @@ from modules.utils import standardize_numeric_column
 
 # --- NUEVAS IMPORTACIONES PARA BASE DE DATOS ---
 from sqlalchemy import create_engine
-import zipfile  # Se mantiene por si se usa en otra parte, aunque load_shapefile se va
+import zipfile  # Se mantiene por si se usa en otra parte
 import tempfile # Se mantiene por si se usa en otra parte
 # -------------------------------------------
 
@@ -136,15 +136,21 @@ def load_and_process_all_data():
         # 1. Cargar Estaciones (reemplaza mapaCVENSO.csv)
         sql_estaciones = "SELECT * FROM estaciones"
         gdf_stations = gpd.read_postgis(sql_estaciones, engine, geom_col='geom', crs="EPSG:4326")
+        
         # Renombrar columnas de BD a las que la app espera (Config)
         gdf_stations = gdf_stations.rename(columns={
-            'id_estacion': Config.STATION_NAME_COL, # 'nom_est' ya es correcto
+            'id_estacion': Config.STATION_NAME_COL, # <--- ¡ERROR CORREGIDO! El PK es 'id_estacion'
+            'nom_est': 'nom_est_temp', # Renombre temporal
             'alt_est': Config.ALTITUDE_COL,
             'municipio': Config.MUNICIPALITY_COL,
             'depto_region': Config.REGION_COL,
             'geom': 'geometry', # GeoPandas espera 'geometry' como col activa
             'et_mmy': Config.ET_COL
         })
+        # Ahora, 'nom_est_temp' se renombra a 'nom_est'
+        gdf_stations[Config.STATION_NAME_COL] = gdf_stations['nom_est_temp']
+        gdf_stations = gdf_stations.drop(columns=['nom_est_temp'])
+        
         gdf_stations = gdf_stations.set_geometry('geometry')
         gdf_stations[Config.LONGITUDE_COL] = gdf_stations.geometry.x
         gdf_stations[Config.LATITUDE_COL] = gdf_stations.geometry.y
@@ -152,62 +158,39 @@ def load_and_process_all_data():
         # 2. Cargar Municipios (reemplaza mapaCVENSO.zip)
         sql_municipios = "SELECT * FROM geometrias WHERE tipo_geometria = 'municipio'"
         gdf_municipios = gpd.read_postgis(sql_municipios, engine, geom_col='geom', crs="EPSG:4326")
-        # (Aquí puedes añadir lógica para extraer de 'metadatos' (JSONB) si es necesario)
+        # (Aquí puedes añadir lógica para extraer de 'metadatos' (JSON) si es necesario)
 
         # 3. Cargar Subcuencas (reemplaza SubcuencasAinfluencia.geojson)
         sql_subcuencas = "SELECT * FROM geometrias WHERE tipo_geometria = 'subcuenca'"
         gdf_subcuencas = gpd.read_postgis(sql_subcuencas, engine, geom_col='geom', crs="EPSG:4326")
-        # (Aquí puedes añadir lógica para extraer de 'metadatos' (JSONB) si es necesario)
+        # (Aquí puedes añadir lógica para extraer de 'metadatos' (JSON) si es necesario)
 
         # 4. Cargar df_long (reemplaza datos_precipitacion_largos.parquet)
         sql_precip = "SELECT * FROM precipitacion_mensual"
         df_long = pd.read_sql(sql_precip, engine)
+        
+        # Renombrar columnas de BD a las que la app espera
         df_long = df_long.rename(columns={
-            'id_estacion_fk': 'id_estacion', # Usamos 'id_estacion' para el merge
+            'id_estacion_fk': Config.STATION_NAME_COL, # <--- ¡CORRECCIÓN! Usamos nom_est como clave
             'precipitation': Config.PRECIPITATION_COL
         })
         
         # 5. Cargar df_enso (reemplaza DatosPptnmes_ENSO.csv)
         sql_indices = "SELECT * FROM indices_climaticos"
         df_enso = pd.read_sql(sql_indices, engine)
+        df_enso[Config.DATE_COL] = pd.to_datetime(df_enso[Config.DATE_COL])
+
 
         # --- INICIO DE LÓGICA DE PROCESAMIENTO (Movida de app.py) ---
         
-        # Estandarizar fechas (ya deberían estar como Date, pero por si acaso)
         df_long[Config.DATE_COL] = pd.to_datetime(df_long[Config.DATE_COL])
-        df_enso[Config.DATE_COL] = pd.to_datetime(df_enso[Config.DATE_COL])
 
-        # Añadir columnas de Año/Mes
         df_long[Config.YEAR_COL] = df_long[Config.DATE_COL].dt.year
         df_long[Config.MONTH_COL] = df_long[Config.DATE_COL].dt.month
-
-        # Mapear nom_est a df_long
-        # (Nota: La tabla 'estaciones' usa nom_est como PK, la app usa 'id_estacio')
-        # Tu lógica original de 'data_processor' usaba 'id_estacio' de 'mapaCVENSO.csv'
-        # Nuestra BD usa 'id_estacion' (texto, ej "26230240"). Asumimos que 'id_estacion' en df_long
-        # coincide con 'id_estacion' en gdf_stations.
-        
-        # Renombramos 'id_estacion' (el PK de la tabla estaciones) al 'id_estacio' que
-        # el resto de tu app (como el merge de 'df_enso') podría esperar.
-        # *Revisión*: No, tu data_processor original (línea 133) mapea 'id_estacion' (de df_long)
-        # a 'nom_est' (de gdf_stations) usando 'id_estacio' como clave.
-        
-        # Vamos a seguir la lógica de la BD:
-        # gdf_stations tiene 'nom_est' y 'id_estacion' (PK, ej. "26230240")
-        # df_long tiene 'id_estacion' (FK, ej. "26230240")
-        
-        station_mapping = gdf_stations.set_index(Config.STATION_NAME_COL)[Config.STATION_NAME_COL].to_dict()
-        # Esto es un mapeo 1:1, pero la lógica original buscaba 'id_estacio'.
-        # Vamos a usar el 'id_estacion' (PK/FK) para el merge.
         
         # Limpiar IDs
         gdf_stations[Config.STATION_NAME_COL] = gdf_stations[Config.STATION_NAME_COL].astype(str).str.strip()
-        df_long['id_estacion'] = df_long['id_estacion'].astype(str).str.strip()
-
-        # Mapear 'nom_est' a df_long usando 'id_estacion' como clave
-        station_mapping = gdf_stations.set_index('id_estacion')[Config.STATION_NAME_COL].to_dict()
-        df_long[Config.STATION_NAME_COL] = df_long['id_estacion'].map(station_mapping)
-        df_long.dropna(subset=[Config.STATION_NAME_COL], inplace=True)
+        df_long[Config.STATION_NAME_COL] = df_long[Config.STATION_NAME_COL].astype(str).str.strip()
 
         # Unir metadatos (la lógica de las líneas 103-127 de data_processor.txt)
         station_metadata_cols = [
@@ -273,3 +256,13 @@ def download_and_load_remote_dem(url):
         raise ValueError("La URL del servidor DEM no está configurada.")
     st.info(f"Simulación de descarga remota. En un entorno real, se usaría un archivo temporal. Usando '{url}' como marcador.")
     return url
+
+@st.cache_data
+def load_parquet_from_url(url):
+    """ (Esta función ahora está obsoleta pero se mantiene por si se usa en otro lugar) """
+    if not url: return None
+    try:
+        return pd.read_parquet(url)
+    except Exception as e:
+        st.error(f"No se pudo cargar el Parquet desde la URL: {e}")
+        return None
