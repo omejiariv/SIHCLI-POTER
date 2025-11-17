@@ -1,5 +1,4 @@
 # app.py
-
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
@@ -14,54 +13,38 @@ import time
 from modules.config import Config
 from modules.data_processor import load_and_process_all_data, complete_series
 from modules.visualizer import (
-    display_welcome_tab, 
+    display_welcome_tab,
     display_alerts_tab,
-    display_spatial_distribution_tab, 
+    display_spatial_distribution_tab,
     display_graphs_tab,
-    display_advanced_maps_tab, 
-    display_anomalies_tab, 
+    display_advanced_maps_tab,
+    display_anomalies_tab,
     display_drought_analysis_tab,
-    display_stats_tab, 
-    display_correlation_tab, 
+    display_stats_tab,
+    display_correlation_tab,
     display_enso_tab,
-    
-    # --- ESTAS SON LAS IMPORTANTES ---
-    display_climate_forecast_tab,    # <--- ¡NUEVA FUNCIÓN!
-    display_trends_and_forecast_tab, # <--- ¡LA FUNCIÓN ORIGINAL!
-    # ---
-    
+    display_climate_forecast_tab,
+    display_trends_and_forecast_tab,
     display_weekly_forecast_tab,
-    display_additional_climate_maps_tab, 
+    display_additional_climate_maps_tab,
     display_satellite_imagery_tab,
     display_land_cover_analysis_tab,
     display_life_zones_tab,
     display_climate_scenarios_tab,
     display_station_table_tab
 )
-
-# [CORRECCIÓN PENDIENTE] Asegúrate de que 'modules/sidebar.py' contenga una función 'def create_sidebar(...):'
-# Si el error 'ImportError' persiste, es porque el archivo sidebar.py no tiene esa función.
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
 from modules.analysis import calculate_monthly_anomalies, calculate_basin_stats
-from modules.github_loader import load_csv_from_url, load_zip_from_url
-from modules.data_processor import load_parquet_from_url
+# (Importaciones de github_loader y load_parquet_from_url eliminadas)
 
 # --- INICIO BLOQUE INICIALIZACIÓN DEM ---
-
-# Define el nombre del archivo DEM aquí o impórtalo desde Config si lo prefieres
 DEM_FILENAME = "DemAntioquia_EPSG3116.tif" 
-
-# Calcula la ruta absoluta una sola vez
 try:
-    # Obtener la ruta del directorio actual del script app.py
     _APP_DIR = os.path.dirname(__file__) 
-    # Construir la ruta a la carpeta 'data'
     _DATA_DIR = os.path.abspath(os.path.join(_APP_DIR, 'data'))
-    # Construir la ruta completa al DEM
     _DEM_PATH_APP = os.path.join(_DATA_DIR, DEM_FILENAME)
 except NameError:
-     # Fallback si __file__ no está definido (puede pasar en algunos entornos de ejecución)
      _DEM_PATH_APP = os.path.join('data', DEM_FILENAME) 
 
 # --- Desactivar Advertencias ---
@@ -77,7 +60,7 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
             errors='coerce'
         ).fillna(0)
     if min_perc > 0:
-        stations_filtered = stations_filtered[stations_filtered[Config.PERCENTAGE_COL] >= min_perc]
+           stations_filtered = stations_filtered[stations_filtered[Config.PERCENTAGE_COL] >= min_perc]
     if altitudes:
         conditions = []
         altitude_col_numeric = pd.to_numeric(stations_filtered[Config.ALTITUDE_COL], errors='coerce')
@@ -92,7 +75,7 @@ def apply_filters_to_stations(df, min_perc, altitudes, regions, municipios, celd
     if regions:
         stations_filtered = stations_filtered[stations_filtered[Config.REGION_COL].isin(regions)]
     if municipios:
-        stations_filtered = stations_filtered[stations_filtered[Config.MUNICIPALITY_COL].isin(municipios)]
+      stations_filtered = stations_filtered[stations_filtered[Config.MUNICIPALITY_COL].isin(municipios)]
     if celdas and Config.CELL_COL in stations_filtered.columns:
         stations_filtered = stations_filtered[stations_filtered[Config.CELL_COL].isin(celdas)]
     return stations_filtered
@@ -103,33 +86,28 @@ def main():
     Config.initialize_session_state()
     st.set_page_config(layout="wide", page_title=Config.APP_TITLE)
     
-    # --- INICIO BLOQUE MODIFICADO ---
-    # Validación segura del DEM
+    # --- Validación segura del DEM (Sin cambios) ---
     try:
-        # Priorizar DEM en session_state (que pudo ser subido por el usuario en sidebar.py).
-        # Si ya está validado (por el sidebar), no hacer nada.
         if not st.session_state.get('dem_file_path_validated', False):
-            # Si no hay DEM validado en la sesión, BUSCAR EL DEM BASE
             if os.path.exists(_DEM_PATH_APP):
                 try:
                     import rasterio
                     with rasterio.open(_DEM_PATH_APP) as src:
                         if src.crs:
-                            st.session_state['dem_crs_is_geographic'] = bool(src.crs.is_geographic)
-                        st.session_state['dem_file_path'] = _DEM_PATH_APP
-                        st.session_state['dem_file_path_validated'] = True
-                        st.session_state['dem_source_name'] = os.path.basename(_DEM_PATH_APP) # Guardar nombre base
-                        st.info(f"DEM base encontrado: {st.session_state['dem_source_name']}")
+                             st.session_state['dem_crs_is_geographic'] = bool(src.crs.is_geographic)
+                            st.session_state['dem_file_path'] = _DEM_PATH_APP
+                            st.session_state['dem_file_path_validated'] = True
+                            st.session_state['dem_source_name'] = os.path.basename(_DEM_PATH_APP)
+                            # st.info(f"DEM base encontrado: {st.session_state['dem_source_name']}") # Opcional: Ocultar para UI más limpia
                 except Exception as e_dem:
                     st.warning(f"No se pudo validar DEM base {_DEM_PATH_APP}: {e_dem}")
                     st.session_state['dem_file_path_validated'] = False
     except RuntimeError:
         pass
-    # --- FIN BLOQUE MODIFICADO ---
         
     st.markdown("""<style>div.block-container{padding-top:1rem;} [data-testid="stMetricValue"] {font-size: 1.8rem;} [data-testid="stMetricLabel"] {font-size: 1rem; padding-bottom:5px; }</style>""", unsafe_allow_html=True)
 
-    #--- TÍTULO DE LA APP ---
+    #--- TÍTULO DE LA APP (Sin cambios) ---
     title_col1, title_col2 = st.columns([0.05, 0.95])
     with title_col1:
         if os.path.exists(Config.LOGO_PATH):
@@ -137,154 +115,72 @@ def main():
     with title_col2:
         st.markdown(f'<h1 style="font-size:28px; margin-top:1rem;">{Config.APP_TITLE}</h1>', unsafe_allow_html=True)
 
-    #--- DEFINICIÓN DE PESTAÑAS (CORREGIDA) ---
+    #--- DEFINICIÓN DE PESTAÑAS (Sin cambios) ---
     tab_names = [
-        "Bienvenida",                 # 0
-        "Alertas y Resumen",          # 1
-        "Distribución Espacial",      # 2
-        "Gráficos",                   # 3
-        "Mapas Avanzados",            # 4
-        "Variables Climáticas",       # 5
-        "Imágenes Satelitales",       # 6
-        "Análisis Cobertura Suelo",   # 7
-        "Zonas de Vida",              # 8
-        "Escenarios Climáticos",      # 9
-        "Análisis de Anomalías",      # 10
-        "Análisis de Extremos",       # 11
-        "Estadísticas",               # 12
-        "Correlación",                # 13
-        "Análisis ENSO",              # 14
-        "Pronóstico Climático",       # 15 (La nueva para ONI/SOI)
-        "Tendencias y Pronósticos",    # 16 (La original para Precipitación)
-        "Pronóstico Semanal",         # 17
-        "Análisis por Cuenca",        # 18
-        "Comparación de Periodos",    # 19
-        "Tabla de Estaciones",        # 20
-        "Generar Reporte"             # 21
+        "Bienvenida", "Alertas y Resumen", "Distribución Espacial", "Gráficos", "Mapas Avanzados",
+        "Variables Climáticas", "Imágenes Satelitales", "Análisis Cobertura Suelo", "Zonas de Vida",
+        "Escenarios Climáticos", "Análisis de Anomalías", "Análisis de Extremos", "Estadísticas",
+        "Correlación", "Análisis ENSO", "Pronóstico Climático", "Tendencias y Pronósticos",
+        "Pronóstico Semanal", "Análisis por Cuenca", "Comparación de Periodos",
+        "Tabla de Estaciones", "Generar Reporte"
     ]
     tabs = st.tabs(tab_names)
+
+    #--- PANEL DE CARGA DE DATOS (REEMPLAZADO) ---
+    # Ya no mostramos un expander para cargar, solo el botón de limpiar caché
+    # La carga se maneja automáticamente en la siguiente sección.
+    with st.sidebar.expander("**Gestión de Datos**", expanded=True):
+        st.info("Los datos se cargan automáticamente desde la base de datos.")
+        if st.button("Limpiar Caché y Recargar Datos"):
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            requests_cache.clear()
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+    #--- LÓGICA DE CONTROL DE FLUJO Y CARGA DE DATOS (REEMPLAZADO) ---
     
-    #--- PANEL DE CARGA DE DATOS (LÓGICA CORREGIDA) ---
-    with st.sidebar.expander("**Subir/Actualizar Archivos Base**", expanded=not st.session_state.get('data_loaded', False)):
-        
-        # Guardar el modo de carga en la sesión
-        st.radio("Modo de Carga", ("GitHub", "Manual"), key="load_mode", horizontal=True)
-        
-        if st.session_state.load_mode == "Manual":
-            # Guardar los objetos FileUploader en la sesión (son ligeros)
-            st.file_uploader("1. Archivo de estaciones (CSV)", type="csv", key="file_mapa")
-            st.file_uploader("2. Archivo de precipitación (CSV)", type="csv", key="file_precip")
-            st.file_uploader("3. Shapefile de municipios (.zip)", type="zip", key="file_shape")
-            # [CORRECCIÓN] Añadido el uploader para el Parquet que faltaba en tu app.py
-            st.file_uploader("4. Datos largos (Parquet)", type="parquet", key="file_parquet")
-
-            if st.button("Procesar Datos Manuales"):
-                if all([st.session_state.file_mapa, st.session_state.file_precip, st.session_state.file_shape, st.session_state.file_parquet]):
-                    # Solo activamos el 'flag' de que los datos están listos.
-                    # La carga real se hará después del st.stop()
-                    st.session_state.data_loaded = True
-                    st.rerun() # Forzamos un rerun para salir del expander y cargar datos
-                else:
-                    st.warning("Por favor, suba los 4 archivos requeridos (Estaciones, Precipitación, Municipios y Parquet).")
-        else:
-            st.info(f"Datos desde: **{Config.GITHUB_USER}/{Config.GITHUB_REPO}**")
-            if st.button("Cargar Datos desde GitHub"):
-                # Solo activamos el 'flag'. La carga se hará después.
-                st.session_state.data_loaded = True
-                st.rerun() # Forzamos un rerun
-
-    #--- LÓGICA DE CONTROL DE FLUJO (CORREGIDA) ---
+    # 1. Comprobar si los datos ya están en la sesión
     if not st.session_state.get('data_loaded', False):
-        with tabs[0]:
-            display_welcome_tab()
-        for i, tab in enumerate(tabs):
-            if i > 0:
-                with tab:
-                    st.warning("Para comenzar, cargue los datos usando el panel de la izquierda.")
-        st.stop() # Detiene la ejecución si no hay datos cargados
-
-    #--- CARGA DE DATOS DESDE CACHÉ (ESTA ES LA CORRECCIÓN CLAVE) ---
-    # Si 'data_loaded' es True, esta sección se ejecuta EN CADA RERUN.
-    # Pero como 'load_and_process_all_data' está cacheada (@st.cache_data),
-    # solo se ejecutará la primera vez. Las siguientes veces será instantáneo.
-    
-    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = None, None, None, None, None
-    
-    try:
-        if st.session_state.load_mode == "Manual":
-            # Verifica que los archivos sigan en la sesión
-            if all([st.session_state.file_mapa, st.session_state.file_precip, st.session_state.file_shape, st.session_state.file_parquet]):
-                with st.spinner("Cargando datos locales (desde caché si es posible)..."):
-                    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = \
-                        load_and_process_all_data(
-                            st.session_state.file_mapa, 
-                            st.session_state.file_precip, 
-                            st.session_state.file_shape,
-                            st.session_state.file_parquet
-                        )
-            else:
-                st.error("Se perdieron las referencias a los archivos. Por favor, recárguelos.")
-                st.session_state.data_loaded = False
+        try:
+            # 2. Si no están, llamamos a la nueva función (que usa SQL)
+            with st.spinner("Conectando a la Base de Datos y cargando datos..."):
+                gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = load_and_process_all_data()
+            
+            # 3. Chequeo de que la carga fue exitosa
+            if df_long is None or gdf_stations is None or gdf_subcuencas is None:
+                st.error("Error fatal: No se pudieron cargar los datos de la base de datos.")
+                with tabs[0]:
+                    display_welcome_tab()
                 st.stop()
-        
-        else: # st.session_state.load_mode == "GitHub"
-            with st.spinner("Cargando datos de GitHub (desde caché si es posible)..."):
-                # Las funciones de carga de URL también están cacheadas
-                file_mapa_git = load_csv_from_url(Config.URL_ESTACIONES_CSV)
-                file_precip_git = load_csv_from_url(Config.URL_PRECIPITACION_CSV)
-                file_shape_git = load_zip_from_url(Config.URL_SHAPEFILE_ZIP)
-                file_parquet_git = load_parquet_from_url(Config.URL_PARQUET)
-                
-                # [CORRECCIÓN] Se comprueba explícitamente que ningún item sea 'None'
-                # en lugar de evaluar el "valor de verdad" (que falla en DataFrames).
-                if all(item is not None for item in [file_mapa_git, file_precip_git, file_shape_git, file_parquet_git]):
-                    # Llamamos a la función principal de procesamiento
-                    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = \
-                        load_and_process_all_data(
-                            file_mapa_git, 
-                            file_precip_git, 
-                            file_shape_git,
-                            file_parquet_git
-                        )
-                else:
-                    st.error("No se pudieron descargar los archivos de GitHub. Verifique la conexión o las URLs.")
-                    st.session_state.data_loaded = False
-                    st.stop()
-        
-        # Chequeo final de que los datos se cargaron en las variables locales
-        if df_long is None or gdf_stations is None or gdf_municipios is None or gdf_subcuencas is None:
-            st.error("La carga de datos falló. Verifique los archivos de origen.")
-            st.session_state.data_loaded = False
+            
+            # 4. Guardar en session_state (la corrección que hicimos)
+            st.session_state.gdf_stations = gdf_stations
+            st.session_state.df_long = df_long
+            st.session_state.df_enso = df_enso
+            st.session_state.gdf_municipios = gdf_municipios
+            st.session_state.gdf_subcuencas = gdf_subcuencas
+            st.session_state.data_loaded = True
+            st.rerun() # Forzar un rerun para que el sidebar se pueble
+
+        except Exception as e:
+            st.error(f"Error fatal al conectar o cargar datos de la base de datos: {e}")
+            st.exception(e)
+            with tabs[0]:
+                display_welcome_tab()
             st.stop()
+            
+    # 5. Si los datos SÍ están cargados, asignarlos a variables locales
+    gdf_stations = st.session_state.gdf_stations
+    gdf_municipios = st.session_state.gdf_municipios
+    df_long = st.session_state.df_long
+    df_enso = st.session_state.df_enso
+    gdf_subcuencas = st.session_state.gdf_subcuencas
+    
+    # --- FIN DE LA LÓGICA DE CARGA ---
 
-    except Exception as e:
-        st.error(f"Error fatal durante la carga de datos: {e}")
-        st.exception(e) # Muestra el traceback completo para depuración
-        st.session_state.data_loaded = False
-        st.stop()
-
-    # --- INICIO DE BLOQUE AÑADIDO ---
-    # Guardar las variables locales clave en session_state
-    # para que las pestañas heredadas (Análisis por Cuenca, etc.) puedan encontrarlas.
-    st.session_state.gdf_stations = gdf_stations
-    st.session_state.df_long = df_long
-    st.session_state.df_enso = df_enso
-    st.session_state.gdf_municipios = gdf_municipios
-    st.session_state.gdf_subcuencas = gdf_subcuencas
-    # --- FIN DE BLOQUE AÑADIDO ---
-
-    #--- SECCIÓN DE CONTROL DEL SIDEBAR (DATOS YA CARGADOS) ---
-    st.sidebar.success("Datos cargados.")
-    if st.sidebar.button("Limpiar Caché y Reiniciar"):
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        requests_cache.clear()
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-
-    # [CORRECCIÓN] Llamada a create_sidebar ahora usa las variables locales,
-    # NO las de st.session_state
+    #--- SECCIÓN DE CONTROL DEL SIDEBAR (Sin cambios) ---
     sidebar_filters = create_sidebar(gdf_stations, df_long)
     
     # Extraemos los valores del diccionario retornado
@@ -292,7 +188,7 @@ def main():
     stations_for_analysis = sidebar_filters["selected_stations"]
     year_range = sidebar_filters["year_range"]
     meses_numeros = sidebar_filters["meses_numeros"]
-    analysis_mode = sidebar_filters["analysis_mode"] 
+    analysis_mode = sidebar_filters["analysis_mode"]
     exclude_na = sidebar_filters["exclude_na"]
     exclude_zeros = sidebar_filters["exclude_zeros"]
     
@@ -306,25 +202,20 @@ def main():
                      st.info("Para comenzar, seleccione al menos una estación en el panel de la izquierda.")
         st.stop()
 
-    #--- Procesamiento de Datos Post-Filtros (Lógica Optimizada) ---
-
-    # 1. Ejecutar complete_series SOLO UNA VEZ si es necesario
+    #--- Procesamiento de Datos Post-Filtros (Sin cambios) ---
     if analysis_mode == "Completar series (interpolación)":
         if 'df_completed' not in st.session_state:
             with st.spinner("Procesando y cacheando series completadas por primera vez..."):
-                # [CORRECCIÓN] Llama a complete_series con la variable local df_long
                 st.session_state.df_completed = complete_series(df_long)
                 if st.session_state.df_completed.empty:
                     st.warning("La completación de series no produjo resultados.")
-                    st.session_state.df_completed = df_long # Fallback
+                    st.session_state.df_completed = df_long
         base_df_monthly = st.session_state.df_completed
     else:
-        # [CORRECCIÓN] Usa la variable local df_long
         base_df_monthly = df_long
         if Config.ORIGIN_COL not in base_df_monthly.columns:
             base_df_monthly[Config.ORIGIN_COL] = 'Original'
 
-    # 2. Aplicar TODOS los filtros (Estación, Fecha, Mes)
     if not base_df_monthly.empty:
         df_monthly_filtered = base_df_monthly[
             (base_df_monthly[Config.STATION_NAME_COL].isin(stations_for_analysis)) &
@@ -333,9 +224,8 @@ def main():
             (base_df_monthly[Config.DATE_COL].dt.month.isin(meses_numeros))
         ].copy()
     else:
-        df_monthly_filtered = pd.DataFrame() 
+        df_monthly_filtered = pd.DataFrame()
 
-    # 3. Aplicar exclusión de NaN y Ceros
     if not df_monthly_filtered.empty:
         if exclude_na:
             df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
@@ -344,10 +234,9 @@ def main():
             df_monthly_filtered = df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL]) 
             df_monthly_filtered = df_monthly_filtered[df_monthly_filtered[Config.PRECIPITATION_COL] > 0]
     
-    # 4. Calcular datos anuales
     df_anual_melted = pd.DataFrame() 
     if not df_monthly_filtered.empty and Config.PRECIPITATION_COL in df_monthly_filtered.columns and Config.MONTH_COL in df_monthly_filtered.columns:
-        try:
+         try:
             annual_agg = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).agg(
                 precipitation_sum=(Config.PRECIPITATION_COL, lambda x: pd.to_numeric(x, errors='coerce').sum()), 
                 meses_validos=(Config.MONTH_COL, 'nunique') 
@@ -361,31 +250,24 @@ def main():
     elif not df_monthly_filtered.empty:
          st.warning("Columnas necesarias ('precipitation', 'month') no encontradas en df_monthly_filtered para agregación anual.")
 
-    # --- FIN LÓGICA REVISADA ---
-    
-    # [CORRECCIÓN] Preparar argumentos para las pestañas, usando variables locales
+    #--- Preparar argumentos para las pestañas (Sin cambios) ---
     display_args = {
-        # --- Datos base cargados (locales) ---
         "gdf_stations": gdf_stations,
         "gdf_municipios": gdf_municipios,
         "df_long": df_long,
         "df_enso": df_enso,
         "gdf_subcuencas": gdf_subcuencas,
-        
-        # --- Resultados de filtros (locales) ---
         "gdf_filtered": gdf_filtered,
         "stations_for_analysis": stations_for_analysis,
         "df_anual_melted": df_anual_melted,
         "df_monthly_filtered": df_monthly_filtered,
-        "analysis_mode": analysis_mode, 
-        
-        # --- Opciones de filtro (del sidebar) ---
+        "analysis_mode": analysis_mode,
         "selected_regions": sidebar_filters["selected_regions"],
         "selected_municipios": sidebar_filters["selected_municipios"],
         "selected_altitudes": sidebar_filters["selected_altitudes"]
     }
     
-    #--- Renderizado de Pestañas (CORREGIDO Y COMPLETO) ---
+    #--- Renderizado de Pestañas (Sin cambios, ya corregido) ---
     
     with tabs[0]:  # Bienvenida
         display_welcome_tab()
@@ -432,14 +314,10 @@ def main():
     with tabs[14]: # Análisis ENSO
         display_enso_tab(**display_args)
     
-    # --- PESTAÑAS DE PRONÓSTICO CORREGIDAS ---
-    
-    with tabs[15]: # Pronóstico Climático (NUEVA FUNCIÓN)
-        # Pasa df_enso y df_long (original) que están dentro de display_args
+    with tabs[15]: # Pronóstico Climático
         display_climate_forecast_tab(**display_args)
         
-    with tabs[16]: # Tendencias y Pronósticos (FUNCIÓN ORIGINAL)
-        # Pasa el df_long original como df_full_monthly
+    with tabs[16]: # Tendencias y Pronósticos
         display_trends_and_forecast_tab(df_full_monthly=df_long, **display_args)
         
     with tabs[17]: # Pronóstico Semanal
@@ -447,19 +325,17 @@ def main():
             stations_for_analysis=stations_for_analysis,
             gdf_filtered=gdf_filtered
         )
-    
-# --- PESTAÑAS DE ANÁLISIS RESTANTES ---
 
     with tabs[18]: # Análisis por Cuenca
         st.header("Análisis Agregado por Cuenca Hidrográfica")
-        if 'gdf_subcuencas' in st.session_state and st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
-            BASIN_NAME_COLUMN = 'SUBC_LBL'
-            if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns:
-                basin_names = []
-                regions_from_sidebar = sidebar_filters.get("selected_regions", [])
-                basins_in_selected_regions = st.session_state.gdf_subcuencas.copy()
+        if gdf_subcuencas is not None and not gdf_subcuencas.empty:
+            BASIN_NAME_COLUMN = 'SUBC_LBL' 
+            if BASIN_NAME_COLUMN in gdf_subcuencas.columns:
+                basin_names = [] 
+                regions_from_sidebar = sidebar_filters.get("selected_regions", []) 
+                basins_in_selected_regions = gdf_subcuencas.copy() 
 
-                if regions_from_sidebar:
+                if regions_from_sidebar: 
                     if Config.REGION_COL in basins_in_selected_regions.columns:
                          basins_in_selected_regions = basins_in_selected_regions[
                              basins_in_selected_regions[Config.REGION_COL].isin(regions_from_sidebar)
@@ -470,8 +346,8 @@ def main():
                          st.warning(f"El archivo de subcuencas no tiene la columna '{Config.REGION_COL}'. No se puede filtrar por región.")
                 
                 if not basins_in_selected_regions.empty and 'gdf_filtered' in sidebar_filters and not sidebar_filters['gdf_filtered'].empty:
-                     if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(st.session_state.gdf_stations.crs, allow_override=True)
-                     if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(st.session_state.gdf_stations.crs, allow_override=True)
+                     if basins_in_selected_regions.crs is None: basins_in_selected_regions.set_crs(gdf_stations.crs, allow_override=True)
+                     if sidebar_filters['gdf_filtered'].crs is None: sidebar_filters['gdf_filtered'].set_crs(gdf_stations.crs, allow_override=True)
                      target_crs_sjoin = "EPSG:4326"
                      try:
                           basins_for_sjoin = basins_in_selected_regions.to_crs(target_crs_sjoin)
@@ -496,18 +372,14 @@ def main():
                      )
                      if selected_basin:
                         stats_df, stations_in_selected_basin, error_msg = calculate_basin_stats(
-                            sidebar_filters['gdf_filtered'],
-                            st.session_state.gdf_subcuencas,
-                            df_monthly_filtered,
-                            selected_basin,
-                            BASIN_NAME_COLUMN
+                            sidebar_filters['gdf_filtered'], gdf_subcuencas,
+                            df_monthly_filtered, selected_basin, BASIN_NAME_COLUMN
                         )
-
                         if error_msg: st.warning(error_msg)
-                        if stations_in_selected_basin:
+                        if stations_in_selected_basin: 
                             st.subheader(f"Resultados para la cuenca: {selected_basin}")
                             st.metric("Número de Estaciones Filtradas en la Cuenca", len(stations_in_selected_basin))
-                            with st.expander("Ver estaciones incluidas"):
+                            with st.expander("Ver estaciones incluidas"): 
                                 st.write(", ".join(stations_in_selected_basin))
                             if stats_df is not None and not stats_df.empty:
                                 st.markdown("---")
@@ -531,14 +403,14 @@ def main():
 
         if analysis_level == "Por Cuenca Específica":
             st.markdown("---")
-            if st.session_state.gdf_subcuencas is not None and not st.session_state.gdf_subcuencas.empty:
+            if gdf_subcuencas is not None and not gdf_subcuencas.empty:
                 BASIN_NAME_COLUMN = 'SUBC_LBL'
-                if BASIN_NAME_COLUMN in st.session_state.gdf_subcuencas.columns:
-                    relevant_basins_gdf = gpd.sjoin(st.session_state.gdf_subcuencas, gdf_filtered, how="inner", predicate="intersects")
+                if BASIN_NAME_COLUMN in gdf_subcuencas.columns:
+                    relevant_basins_gdf = gpd.sjoin(gdf_subcuencas, gdf_filtered, how="inner", predicate="intersects")
                     if not relevant_basins_gdf.empty:
                         basin_names = sorted(relevant_basins_gdf[BASIN_NAME_COLUMN].dropna().unique())
                     else:
-                         basin_names = []
+                        basin_names = []
                     if not basin_names:
                         st.warning("Ninguna cuenca contiene estaciones que coincidan con los filtros actuales.", icon="⚠️")
                     else:
@@ -547,7 +419,7 @@ def main():
                             options=basin_names,
                             key="compare_basin_selector"
                         )
-                         target_basin_geom = st.session_state.gdf_subcuencas[st.session_state.gdf_subcuencas[BASIN_NAME_COLUMN] == selected_basin]
+                         target_basin_geom = gdf_subcuencas[gdf_subcuencas[BASIN_NAME_COLUMN] == selected_basin]
                          stations_in_basin = gpd.sjoin(gdf_filtered, target_basin_geom, how="inner", predicate="within")
                          station_names_in_basin = stations_in_basin[Config.STATION_NAME_COL].unique().tolist()
                          df_to_compare = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL].isin(station_names_in_basin)]
@@ -568,20 +440,10 @@ def main():
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("#### Periodo 1")
-                periodo1 = st.slider(
-                    "Seleccione el rango de años para el Periodo 1",
-                    min_year, max_year,
-                    (min_year, min_year + 10 if min_year + 10 < max_year else max_year),
-                    key="periodo1_slider_comp"
-                )
+                periodo1 = st.slider("Seleccione el rango de años para el Periodo 1", min_year, max_year, (min_year, min_year + 10 if min_year + 10 < max_year else max_year), key="periodo1_slider_comp")
             with col2:
                 st.markdown("#### Periodo 2")
-                periodo2 = st.slider(
-                    "Seleccione el rango de años para el Periodo 2",
-                    min_year, max_year,
-                    (max_year - 10 if max_year - 10 > min_year else min_year, max_year),
-                    key="periodo2_slider_comp"
-                )
+                periodo2 = st.slider("Seleccione el rango de años para el Periodo 2", min_year, max_year, (max_year - 10 if max_year - 10 > min_year else min_year, max_year), key="periodo2_slider_comp")
             df_periodo1 = df_to_compare[(df_to_compare[Config.DATE_COL].dt.year >= periodo1[0]) & (df_to_compare[Config.DATE_COL].dt.year <= periodo1[1])]
             df_periodo2 = df_to_compare[(df_to_compare[Config.DATE_COL].dt.year >= periodo2[0]) & (df_to_compare[Config.DATE_COL].dt.year <= periodo2[1])]
             st.markdown("---")
@@ -592,11 +454,7 @@ def main():
                 stats1_mean = df_periodo1[Config.PRECIPITATION_COL].mean()
                 stats2_mean = df_periodo2[Config.PRECIPITATION_COL].mean()
                 delta = ((stats2_mean - stats1_mean) / stats1_mean) * 100 if stats1_mean != 0 else 0
-                st.metric(
-                    label=f"Precipitación Media Mensual ({periodo1[0]}-{periodo1[1]} vs. {periodo2[0]}-{periodo2[1]})",
-                    value=f"{stats2_mean:.1f} mm",
-                    delta=f"{delta:.2f}% (respecto a {stats1_mean:.1f} mm del Periodo 1)"
-                )
+                st.metric(label=f"Precipitación Media Mensual ({periodo1[0]}-{periodo1[1]} vs. {periodo2[0]}-{periodo2[1]})", value=f"{stats2_mean:.1f} mm", delta=f"{delta:.2f}% (respecto a {stats1_mean:.1f} mm del Periodo 1)")
                 st.markdown("##### Desglose Estadístico Completo")
                 col1_stats, col2_stats = st.columns(2)
                 with col1_stats:
@@ -611,6 +469,21 @@ def main():
     
     with tabs[21]: # Generar Reporte
         st.header("Generación de Reporte PDF")
+        
+        # --- 1. Preparar los datos faltantes ---
+        summary_data = {
+            "total_stations_count": len(gdf_stations),
+            "selected_stations_count": len(stations_for_analysis),
+            "year_range": year_range,
+            "selected_months_count": len(meses_numeros),
+            "analysis_mode": analysis_mode,
+            "selected_regions": sidebar_filters["selected_regions"],
+            "selected_municipios": sidebar_filters["selected_municipios"],
+            "selected_altitudes": sidebar_filters["selected_altitudes"]
+        }
+        df_anomalies = calculate_monthly_anomalies(df_monthly_filtered, df_long) 
+        
+        # Opciones para el reporte
         st.subheader("Seleccionar Secciones para Incluir en el Reporte:")
         report_sections_options = [
             "Resumen General", "Tabla de Estaciones", "Mapa de Distribución Espacial",
@@ -621,89 +494,53 @@ def main():
             "Análisis de Tendencias y Pronósticos", "Comparación de Periodos"
         ]
         select_all_checkbox = st.checkbox("Seleccionar todas las secciones", value=st.session_state.select_all_report_sections_checkbox, key="select_all_report_sections_checkbox")
+        
         if select_all_checkbox:
             st.session_state.selected_report_sections_multiselect = report_sections_options
+        
         selected_report_sections = st.multiselect(
             "Secciones disponibles:",
             options=report_sections_options,
             default=st.session_state.selected_report_sections_multiselect,
             key="selected_report_sections_multiselect"
         )
+
         st.markdown("---")
         st.subheader("Configuración Adicional")
         report_title = st.text_input("Título del Reporte", value="Reporte de Análisis Climatológico", key="report_title_input")
         author_name = st.text_input("Nombre del Autor", value="Generado por SIHCLI", key="author_name_input")
+        
         if st.button("Generar Reporte PDF", key="generate_pdf_button"):
             if not selected_report_sections:
                 st.warning("Por favor, seleccione al menos una sección para incluir en el reporte.")
             else:
                 with st.spinner("Generando reporte PDF... Esto puede tardar unos minutos."):
-                    
-                    # [INICIO DE BLOQUE CORREGIDO]
                     try:
-                        # --- 1. Preparar los datos faltantes ---
-                        
-                        # 'summary_data' (datos del resumen de filtros)
-                        summary_data = {
-                            "total_stations_count": len(gdf_stations), # Variable local
-                            "selected_stations_count": len(stations_for_analysis),
-                            "year_range": year_range,
-                            "selected_months_count": len(meses_numeros),
-                            "analysis_mode": analysis_mode,
-                            "selected_regions": sidebar_filters["selected_regions"],
-                            "selected_municipios": sidebar_filters["selected_municipios"],
-                            "selected_altitudes": sidebar_filters["selected_altitudes"]
-                        }
-
-                        # 'df_anomalies' (calculadas con la función de analysis.py)
-                        # (calculate_monthly_anomalies ya está importada en app.py)
-                        df_anomalies = calculate_monthly_anomalies(df_monthly_filtered, df_long) 
-
                         # --- 2. Llamar a la función con los argumentos correctos ---
                         report_pdf_bytes = generate_pdf_report(
-                            # Argumento con nombre corregido:
-                            sections_to_include=selected_report_sections,
-
-                            # Argumentos nuevos que faltaban:
-                            summary_data=summary_data,
-                            df_anomalies=df_anomalies,
-
-                            # Argumentos que ya tenías (usando variables locales):
+                            sections_to_include=selected_report_sections, # Nombre corregido
+                            summary_data=summary_data,                   # Argumento añadido
+                            df_anomalies=df_anomalies,                   # Argumento añadido
                             report_title=report_title,
                             author_name=author_name,
                             gdf_filtered=gdf_filtered,
-                            df_long=df_long,                 # Usar variable local, no st.session_state
+                            df_long=df_long,                 # Usar variable local
                             df_anual_melted=df_anual_melted,
                             df_monthly_filtered=df_monthly_filtered,
                             stations_for_analysis=stations_for_analysis,
-                            df_enso=df_enso                   # Usar variable local, no st.session_state
+                            df_enso=df_enso                   # Usar variable local
                         )
-                        # --- Fin de la llamada a la función ---
+                        st.success("Reporte PDF generado exitosamente!")
+                        st.download_button(
+                            label="Descargar Reporte PDF",
+                            data=report_pdf_bytes,
+                            file_name=f"{report_title.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf",
+                            mime="application/pdf",
+                            key="download_pdf_button"
+                        )
+                    except Exception as e:
+                        st.error(f"Error al generar el reporte PDF: {e}")
+                        st.exception(e)
 
-                        st.success("Reporte PDF generado exitosamente!")
-                        st.download_button(
-                            label="Descargar Reporte PDF",
-                            data=report_pdf_bytes,
-                            file_name=f"{report_title.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf",
-                            mime="application/pdf",
-                            key="download_pdf_button"
-                        )
-                    except Exception as e:
-                        st.error(f"Error al generar el reporte PDF: {e}")
-                        st.exception(e)
-                    # [FIN DE BLOQUE CORREGIDO]
-                        
-                        st.success("Reporte PDF generado exitosamente!")
-                        st.download_button(
-                            label="Descargar Reporte PDF",
-                            data=report_pdf_bytes,
-                            file_name=f"{report_title.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf",
-                            mime="application/pdf",
-                            key="download_pdf_button"
-                        )
-                    except Exception as e:
-                        st.error(f"Error al generar el reporte PDF: {e}")
-                        st.exception(e)
-                        
 if __name__ == "__main__":
     main()
