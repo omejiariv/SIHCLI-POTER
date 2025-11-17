@@ -117,11 +117,11 @@ def migrar_datos():
 
         # --- A. Migrar Estaciones ---
         print("\nIniciando migración de 'estaciones'...")
-        df_estaciones_raw = pd.read_csv("data/mapaCVENSO.csv", sep=";")
+        df_estaciones_raw = pd.read_csv("data/mapaCVENSO.csv", sep=";", encoding='latin1')
         df_estaciones_raw.columns = [col.strip().lower() for col in df_estaciones_raw.columns]
         
         # Cargar ET_MMY desde el archivo de precipitación (como en tu data_processor)
-        df_precip_raw = pd.read_csv("data/DatosPptnmes_ENSO.csv", sep=";")
+        df_precip_raw = pd.read_csv("data/DatosPptnmes_ENSO.csv", sep=";", encoding='latin1')
         df_precip_raw.columns = [col.strip().lower() for col in df_precip_raw.columns]
         
         df_et_mmy = df_precip_raw[['id_estacio', 'et_mmy']].drop_duplicates(subset=['id_estacio'])
