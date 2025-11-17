@@ -5078,7 +5078,7 @@ def display_climate_scenarios_tab(**kwargs):
     st.info("""
     Esta herramienta le permite simular el impacto de cambios en la temperatura y la precipitación
     sobre la hidrología y la frecuencia de sequías en la cuenca seleccionada.
-    """) [cite: 3101-3102]
+    """)
 
     # --- 1. Cargar Dependencias ---
     basin_gdf = st.session_state.get('unified_basin_gdf')
@@ -5101,10 +5101,10 @@ def display_climate_scenarios_tab(**kwargs):
         `Mapas Avanzados` -> `Superficies de Interpolación` -> `Por Cuenca Específica`
         
         Asegúrese de que el cálculo del **Balance Hídrico** esté activado.
-        """) [cite: 3103-3104]
+        """)
         st.stop()
 
-    st.success(f"Analizando escenarios para la cuenca: **{basin_name}**") [cite: 3105]
+    st.success(f"Analizando escenarios para la cuenca: **{basin_name}**")
 
     # --- 2. Sliders de Escenario ---
     st.subheader("Definir el Escenario Futuro")
@@ -5125,25 +5125,25 @@ def display_climate_scenarios_tab(**kwargs):
         st.metric("Escenario ΔP", f"{delta_precip:+d} %")
 
     # --- 3. Botón de Cálculo ---
-    if st.button("Calcular Impacto del Escenario"): [cite: 3106]
+    if st.button("Calcular Impacto del Escenario"):
         with st.spinner("Modelando el impacto del escenario..."):
             
             # --- 4. ANÁLISIS DE BALANCE HÍDRICO ---
-            st.subheader("Impacto en el Balance Hídrico Anual") [cite: 3107]
+            st.subheader("Impacto en el Balance Hídrico Anual")
             
             # 4a. Calcular Línea Base
-            balance_base = calculate_hydrological_balance(p_base, alt_base, basin_gdf, delta_temp_c=0.0) [cite: 3108]
+            balance_base = calculate_hydrological_balance(p_base, alt_base, basin_gdf, delta_temp_c=0.0)
             q_base = balance_base.get('Q_mm', 0)
             etp_base = balance_base.get('ET_media_anual_mm', 0)
 
             # 4b. Calcular Escenario
             p_escenario = p_base * (1 + delta_precip / 100.0)
-            balance_escenario = calculate_hydrological_balance(p_escenario, alt_base, basin_gdf, delta_temp_c=delta_temp) [cite: 3109]
+            balance_escenario = calculate_hydrological_balance(p_escenario, alt_base, basin_gdf, delta_temp_c=delta_temp)
             q_escenario = balance_escenario.get('Q_mm', 0)
             etp_escenario = balance_escenario.get('ET_media_anual_mm', 0)
 
             # 4c. Mostrar Métricas de Impacto
-            c1, c2 = st.columns(2) [cite: 3110]
+            c1, c2 = st.columns(2)
             c1.metric(
                 "Escorrentía (Q) - Línea Base", 
                 f"{q_base:.0f} mm/año"
@@ -5154,7 +5154,7 @@ def display_climate_scenarios_tab(**kwargs):
                 delta=f"{(q_escenario - q_base):.0f} mm/año"
             )
             
-            with st.expander("Ver desglose del Balance Hídrico"): [cite: 3111]
+            with st.expander("Ver desglose del Balance Hídrico"):
                 df_balance = pd.DataFrame({
                     "Variable": ["Precipitación (P)", "Evapotranspiración (ETP)", "Escorrentía (Q = P - ETP)"],
                     "Línea Base (mm/año)": [p_base, etp_base, q_base],
@@ -5234,7 +5234,7 @@ def display_climate_scenarios_tab(**kwargs):
             # --- FIN DE BLOQUE CORREGIDO ---
 
             # --- 6. ZONAS DE VIDA (DIFERIDO) ---
-            st.markdown("---") [cite: 3120]
+            st.markdown("---")
             st.info("""
             **Análisis de Zonas de Vida (Próximamente):**
             
@@ -5369,6 +5369,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
