@@ -1896,7 +1896,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
                                  import traceback
                                  st.error(traceback.format_exc())
                         if fig_hypso_plot is not None: 
-                             st.plotly_chart(fig_hypso_plot, use_container_width=True)
+                            st.plotly_chart(fig_hypso_plot, use_container_width=True)
                             if hypso_data_for_download is not None and not hypso_data_for_download.empty:
                                 @st.cache_data
                                 def convert_df_to_csv_hypso(df):
@@ -5369,6 +5369,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
