@@ -228,9 +228,9 @@ def main():
             (base_df_monthly[Config.DATE_COL].dt.year >= year_range[0]) &
             (base_df_monthly[Config.DATE_COL].dt.year <= year_range[1]) &
             (base_df_monthly[Config.DATE_COL].dt.month.isin(meses_numeros))
-        ].copy() # .copy() es importante para evitar warnings
+        ].copy()
     else:
-        df_monthly_filtered = pd.DataFrame() # DataFrame vacío si base_falla
+        df_monthly_filtered = pd.DataFrame()
 
     # 3. Aplicar exclusión de NaN y Ceros
     if not df_monthly_filtered.empty:
@@ -238,11 +238,11 @@ def main():
             df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL], inplace=True)
         if exclude_zeros:
             df_monthly_filtered[Config.PRECIPITATION_COL] = pd.to_numeric(df_monthly_filtered[Config.PRECIPITATION_COL], errors='coerce')
-            df_monthly_filtered = df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL]) 
+            df_monthly_filtered = df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL])
             df_monthly_filtered = df_monthly_filtered[df_monthly_filtered[Config.PRECIPITATION_COL] > 0]
     
     # 4. Calcular datos anuales
-    df_anual_melted = pd.DataFrame() 
+    df_anual_melted = pd.DataFrame()
     
     # --- INICIO DEL BLOQUE CORREGIDO (IndentationError) ---
     # (Asegúrate de que este bloque 'if' esté indentado 4 espacios)
@@ -250,10 +250,10 @@ def main():
         # (Este 'try' debe estar indentado 8 espacios)
         try:
             annual_agg = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).agg(
-                precipitation_sum=(Config.PRECIPITATION_COL, lambda x: pd.to_numeric(x, errors='coerce').sum()), 
-                meses_validos=(Config.MONTH_COL, 'nunique') 
+                precipitation_sum=(Config.PRECIPITATION_COL, lambda x: pd.to_numeric(x, errors='coerce').sum()),
+                meses_validos=(Config.MONTH_COL, 'nunique')
             ).reset_index()
-            annual_agg.loc[annual_agg['meses_validos'] < 10, 'precipitation_sum'] = np.nan 
+            annual_agg.loc[annual_agg['meses_validos'] < 10, 'precipitation_sum'] = np.nan
             df_anual_melted = annual_agg.rename(columns={'precipitation_sum': Config.PRECIPITATION_COL})
             df_anual_melted = df_anual_melted[[Config.STATION_NAME_COL, Config.YEAR_COL, Config.PRECIPITATION_COL, 'meses_validos']]
         # (Este 'except' debe estar indentado 8 espacios, alineado con 'try')
@@ -265,7 +265,7 @@ def main():
          st.warning("Columnas necesarias ('precipitation', 'month') no encontradas en df_monthly_filtered para agregación anual.")
     # --- FIN DEL BLOQUE CORREGIDO ---
 
-    #--- Preparar argumentos para las pestañas (Sin cambios) ---
+    #--- Preparar argumentos para las pestañas (código original tuyo) ---
     display_args = {
         "gdf_stations": gdf_stations,
         "gdf_municipios": gdf_municipios,
@@ -560,5 +560,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
