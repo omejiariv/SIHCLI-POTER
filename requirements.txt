@@ -31,3 +31,4 @@ retry-requests
 rich==13.7.1
 rasterstats
 cmdstanpy
+sqlalchemy
