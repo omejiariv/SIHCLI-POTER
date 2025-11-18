@@ -253,19 +253,19 @@ def main():
 
     #--- Preparar argumentos para las pestañas (código original tuyo) ---
     display_args = {
-        "gdf_stations": gdf_stations,
-        "gdf_municipios": gdf_municipios,
-        "df_long": df_long,
-        "df_enso": df_enso,
-        "gdf_subcuencas": gdf_subcuencas,
-        "gdf_filtered": gdf_filtered,
-        "stations_for_analysis": stations_for_analysis,
-        "df_anual_melted": df_anual_melted,
-        "df_monthly_filtered": df_monthly_filtered,
-        "analysis_mode": analysis_mode,
-        "selected_regions": sidebar_filters["selected_regions"],
-        "selected_municipios": sidebar_filters["selected_municipios"],
-        "selected_altitudes": sidebar_filters["selected_altitudes"]
+        'df_long': df_long,
+        'gdf_stations': gdf_stations,
+        'gdf_municipios': gdf_municipios,
+        'gdf_subcuencas': gdf_subcuencas,
+        'df_enso': df_enso,
+        'start_date': start_date,
+        'end_date': end_date,
+        'stations_for_analysis': stations_for_analysis,
+        'gdf_filtered': gdf_filtered,
+        'analysis_mode': analysis_mode,
+        'selected_regions': selected_regions,
+        'selected_municipios': selected_municipios,
+        'selected_altitudes': selected_altitudes
     }
     
     #--- Renderizado de Pestañas (CORREGIDO Y ALINEADO) ---
@@ -546,6 +546,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
