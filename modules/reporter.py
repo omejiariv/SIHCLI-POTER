@@ -1,296 +1,118 @@
+# modules/reporter.py
+
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import folium
 from fpdf import FPDF
-import io
-import os
-import tempfile
-import pymannkendall as mk
+from modules.utils import standardize_numeric_column
 
 # Importaciones de Módulos Propios
 from modules.config import Config
-from modules.visualizer import create_folium_map, generate_station_popup_html
-from modules.analysis import calculate_monthly_anomalies # Reutilizando importación en reportes
-# from modules.utils import ...
 
-#--- Configuración para Selenium (Importaciones MOVIDAS al interior de setup_driver)
+# --- CORRECCIÓN DE IMPORTACIONES ---
+# Eliminamos create_folium_map y generate_station_popup_html porque ya no existen en visualizer.py
+# Importamos solo lo que podríamos necesitar o dejamos la importación limpia.
+# Si visualizer.py tiene funciones auxiliares útiles, las importaríamos aquí.
+# Por ahora, importamos create_enso_chart por si acaso se reutiliza.
+from modules.visualizer import create_enso_chart 
 
-def setup_driver():
-    """Configura y retorna un driver de Selenium para usar Chromium en Streamlit Cloud."""
-    
-    # IMPORTACIONES MOVIDAS AL INTERIOR PARA EVITAR EL KEYERROR EN EL ARRANQUE
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service as ChromeService
-        from selenium.webdriver.chrome.options import Options
-    except ImportError as e:
-        # En Streamlit Cloud, si el entorno no está listo, esto puede fallar.
-        # Es mejor no mostrar un error crítico, sino retornar None.
-        return None
+# Reutilizando análisis si es necesario
+from modules.analysis import calculate_monthly_anomalies 
 
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1200,800")
-    
-    # Asumiendo que el contenedor de Streamlit Cloud tiene Chromium en /usr/bin/chromium
-    chrome_options.binary_location = "/usr/bin/chromium"
-    
-    try:
-        # Asumiendo que el ChromeDriver también está en la ruta estándar del contenedor
-        service = ChromeService(executable_path="/usr/bin/chromedriver")
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        return driver
-    except Exception as e:
-        # st.error(f"Error al iniciar WebDriver para generar mapa: {e}")
-        return None
-
-#--- Clase para generar el PDF
-
-class PDF(FPDF):
+# --- CLASE PDF PERSONALIZADA ---
+class PDFReport(FPDF):
     def header(self):
+        # Logo
         if os.path.exists(Config.LOGO_PATH):
-            self.image(Config.LOGO_PATH, 10, 8, 25)
-        self.set_font('Arial', 'B', 14)
-        self.cell(0, 10, 'Reporte de Análisis Hidroclimático', 0, 1, 'C')
-        self.ln(15)
+            try:
+                self.image(Config.LOGO_PATH, 10, 8, 33)
+            except Exception:
+                pass # Si falla la imagen, no rompemos el reporte
+                
+        self.set_font('Arial', 'B', 15)
+        self.cell(80)  # Mover a la derecha
+        self.cell(30, 10, 'Reporte Hidroclimático', 0, 0, 'C')
+        self.ln(20)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
+        self.cell(0, 10, f'Página {self.page_no()}/{{nb}}', 0, 0, 'C')
 
-    def add_section_title(self, title):
+    def chapter_title(self, label):
         self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, title, 0, 1, 'L')
-        self.ln(2)
+        self.set_fill_color(200, 220, 255)
+        self.cell(0, 6, label, 0, 1, 'L', 1)
+        self.ln(4)
 
-    def add_body_text(self, text):
-        self.set_font('Arial', '', 10)
-        self.multi_cell(0, 5, text)
+    def chapter_body(self, body):
+        self.set_font('Arial', '', 11)
+        self.multi_cell(0, 5, body)
         self.ln()
 
-    def add_dataframe(self, df):
-        if df.empty:
-            self.add_body_text("No hay datos disponibles para esta tabla.")
-            return
-
-        self.set_font('Arial', 'B', 8)
-        col_width = (self.w - 2 * self.l_margin) / len(df.columns)
-
-        for col_name in df.columns:
-            self.cell(col_width, 8, str(col_name), 1, 0, 'C')
-
-        self.ln()
-
-        self.set_font('Arial', '', 7)
-        for _, row in df.iterrows():
-            for item in row:
-                self.cell(col_width, 8, str(item), 1, 0, 'L')
-
-            self.ln()
-
-        self.ln(5)
-
-    def add_plotly_fig(self, fig, width=190):
-        try:
-            import io
-            # Intentar generar imagen con tamaño moderado
-            try:
-                # generar imagen con tamaño controlado
-                img_bytes = fig.to_image(format="png", width=800, height=400, scale=1)
-                # Evitar enviar imágenes > ~2MB al PDF en memoria: comprobar tamaño
-                if len(img_bytes) > 2_500_000:
-                    # Reducir resolución si es muy grande
-                    img_bytes = fig.to_image(format="png", width=600, height=300, scale=1)
-                self.image(io.BytesIO(img_bytes), w=width)
-                self.ln(5)
-            except Exception:
-                # Fallback: generar HTML embebido (más ligero para Streamlit) y colocar nota en el PDF
-                try:
-                    html = fig.to_html(include_plotlyjs='cdn')
-                    self.add_body_text("Se incluye una versión HTML del gráfico (formato interactivo) en la interfaz; la imagen en PDF fue omitida por tamaño.")
-                except Exception as e_html:
-                    self.add_body_text(f"Error alternativo al generar imagen/HTML del gráfico: {e_html}")
-        except Exception as e:
-            self.add_body_text(f"Error al generar imagen del gráfico: {e}")
-
-    def add_folium_map(self, map_obj, width=190):
-        # Esta importación es segura porque setup_driver() ya maneja la lógica de Selenium
-        import tempfile
-        import os
+# --- FUNCIÓN PRINCIPAL DE GENERACIÓN DE REPORTE ---
+def generate_pdf_report(df_long, gdf_stations, analysis_results, **kwargs):
+    """
+    Genera un reporte PDF descargable con los análisis seleccionados.
+    """
+    try:
+        pdf = PDFReport()
+        pdf.alias_nb_pages()
+        pdf.add_page()
         
-        driver = setup_driver()
-
-        if not driver:
-            self.add_body_text("No se pudo generar la imagen del mapa (WebDriver no disponible).")
-            return
-
-        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode='w', encoding='utf-8') as tmp_html:
-            map_obj.save(tmp_html.name)
-
-        html_path = tmp_html.name
-        png_path = html_path.replace(".html", ".png")
-
-        try:
-            driver.get(f"file://{html_path}")
-            driver.save_screenshot(png_path)
-            self.image(png_path, w=width)
-            self.ln(5)
-
-        finally:
-            driver.quit()
-            if os.path.exists(html_path): os.unlink(html_path)
-            if os.path.exists(png_path): os.unlink(png_path)
-
-#--- Función Principal para Generar el Reporte ---
-
-def generate_pdf_report(report_title, sections_to_include, summary_data, df_anomalies, **data):
-    pdf = PDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-    pdf.set_font('Arial', 'B', 16)
-    pdf.cell(0, 10, report_title, 0, 1, 'C')
-    pdf.ln(10)
-
-    #--- Extracción de DataFrames para fácil acceso
-    gdf_filtered = data.get('gdf_filtered', pd.DataFrame())
-    df_anual_melted = data.get('df_anual_melted', pd.DataFrame())
-    df_monthly_filtered = data.get('df_monthly_filtered', pd.DataFrame())
-    stations_for_analysis = data.get('stations_for_analysis', [])
-
-    #--- LÓGICA COMPLETA PARA TODAS LAS SECCIONES
-
-    if "Resumen Ejecutivo" in sections_to_include:
-        # NUEVA SECCIÓN: Resumen Ejecutivo (Texto de ejemplo)
-        pdf.add_section_title("1. Resumen Ejecutivo")
-        pdf.add_body_text(
-            "Este reporte presenta un análisis hidroclimático detallado de las estaciones seleccionadas."
-            "Se evalúan las tendencias de precipitación, la ocurrencia de anomalías y eventos extremos, "
-            "y se realizan análisis de correlación con fenómenos macroclimáticos. El objetivo es proporcionar "
-            "una visión integral del comportamiento de la lluvia en la región de estudio."
+        # Título del Reporte
+        pdf.set_font('Arial', 'B', 16)
+        pdf.cell(0, 10, Config.APP_TITLE, 0, 1, 'C')
+        pdf.ln(10)
+        
+        # Sección 1: Resumen General
+        pdf.chapter_title('1. Resumen General')
+        
+        n_estaciones = df_long[Config.STATION_NAME_COL].nunique()
+        fecha_min = df_long[Config.DATE_COL].min().strftime('%Y-%m-%d')
+        fecha_max = df_long[Config.DATE_COL].max().strftime('%Y-%m-%d')
+        total_precip = df_long[Config.PRECIPITATION_COL].sum()
+        
+        resumen_texto = (
+            f"Este reporte presenta un análisis de los datos hidrometeorológicos para el período "
+            f"comprendido entre {fecha_min} y {fecha_max}.\n\n"
+            f"Se analizaron datos de {n_estaciones} estaciones de monitoreo. "
+            f"La precipitación total acumulada registrada en todas las estaciones para el período fue de {total_precip:,.0f} mm."
         )
+        pdf.chapter_body(resumen_texto)
+        
+        # Sección 2: Estadísticas Básicas (Ejemplo)
+        pdf.chapter_title('2. Estadísticas Descriptivas')
+        
+        # Calcular promedios por estación
+        df_avg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+        top_3_lluviosas = df_avg.sort_values(Config.PRECIPITATION_COL, ascending=False).head(3)
+        
+        stats_texto = "Las estaciones con mayor precipitación promedio mensual fueron:\n"
+        for idx, row in top_3_lluviosas.iterrows():
+            stats_texto += f"- {row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:.1f} mm/mes\n"
+            
+        pdf.chapter_body(stats_texto)
 
-    if "Resumen de Filtros" in sections_to_include:
-        pdf.add_section_title("2. Resumen de Filtros Aplicados")
-        filter_text = ""
-        for key, value in summary_data.items():
-            filter_text += f"- {key}: {value}\n"
-        pdf.add_body_text(filter_text)
+        # Sección 3: Alertas (Si se pasaron en kwargs o analysis_results)
+        # Aquí podrías añadir lógica para listar alertas si las tuvieras pre-calculadas
+        
+        # Generar el archivo
+        # Nota: FPDF devuelve el string en 'latin-1' por defecto, a veces da problemas con tildes.
+        # En streamlit usamos output() con 'S' para string o bytes.
+        
+        # Opción segura para Streamlit: Guardar en tmp y leer bytes
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            pdf.output(tmp_file.name)
+            with open(tmp_file.name, "rb") as f:
+                pdf_bytes = f.read()
+        
+        return pdf_bytes
 
-    if "Tabla de Estaciones" in sections_to_include:
-        # NUEVA SECCIÓN: Tabla de Estaciones
-        pdf.add_section_title("3. Tabla de Estaciones Analizadas")
-        if not gdf_filtered.empty:
-            stations_table = gdf_filtered[[Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.REGION_COL, Config.ALTITUDE_COL]].copy()
-            stations_table.rename(columns={
-                Config.STATION_NAME_COL: "Estacion",
-                Config.MUNICIPALITY_COL: "Municipio",
-                Config.REGION_COL: "Region",
-                Config.ALTITUDE_COL: "Altitud (m)"
-            }, inplace=True)
-            pdf.add_dataframe(stations_table)
-        else:
-            pdf.add_body_text("No hay datos de estaciones para mostrar.")
-
-    if "Distribución Espacial" in sections_to_include:
-        pdf.add_section_title("2. Mapa de Distribución Espacial")
-        if not gdf_filtered.empty:
-            m = create_folium_map(
-                location=[4.57, -74.29], zoom=5,
-                base_map_config={"tiles": "cartodbpositron", "attr": "CartoDB"},
-                overlays_config=[],
-                fit_bounds_data=gdf_filtered
-            )
-            for _, row in gdf_filtered.iterrows():
-                popup = generate_station_popup_html(row, df_anual_melted)
-                folium.Marker(
-                    location=[row.geometry.y, row.geometry.x],
-                    tooltip=row[Config.STATION_NAME_COL],
-                    popup=popup
-                ).add_to(m)
-            pdf.add_folium_map(m)
-        else:
-            pdf.add_body_text("No hay estaciones seleccionadas para mostrar en el mapa.")
-
-    if "Gráficos de Series Temporales" in sections_to_include:
-        pdf.add_section_title("3. Gráficos de Series Temporales")
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 10, "Precipitación Anual por Estación", 0, 1, 'L')
-        if not df_anual_melted.empty:
-            fig_anual = px.line(df_anual_melted, x=Config.YEAR_COL, y=Config.PRECIPITATION_COL, color=Config.STATION_NAME_COL, markers=True)
-            pdf.add_plotly_fig(fig_anual)
-        else:
-            pdf.add_body_text("No hay datos anuales para mostrar.")
-
-    if "Análisis de Anomalías" in sections_to_include:
-        pdf.add_section_title("4. Análisis de Anomalías")
-        if not df_anomalies.empty:
-            df_plot = df_anomalies.groupby(Config.DATE_COL).agg(anomalia=('anomalia', 'mean')).reset_index()
-            df_plot['color'] = np.where(df_plot['anomalia'] < 0, 'red', 'blue')
-            fig_anom = go.Figure(go.Bar(x=df_plot[Config.DATE_COL], y=df_plot['anomalia'], marker_color=df_plot['color']))
-            fig_anom.update_layout(title="Anomalías Mensuales de Precipitación (Promedio Regional)")
-            pdf.add_plotly_fig(fig_anom)
-        else:
-            pdf.add_body_text("No hay datos de anomalías para mostrar.")
-
-    if "Estadísticas Descriptivas" in sections_to_include:
-        pdf.add_section_title("7. Estadísticas Descriptivas Mensuales")
-        if not df_monthly_filtered.empty:
-            # CORRECCIÓN: Se añade .reset_index() para incluir la columna de la estación
-            stats_df = df_monthly_filtered.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].describe().reset_index().round(1)
-            pdf.add_dataframe(stats_df)
-        else:
-            pdf.add_body_text("No hay datos para calcular estadísticas.")
-
-    if "Análisis de Correlación" in sections_to_include:
-        # NUEVA SECCIÓN: Matriz de Correlación
-        pdf.add_section_title("8. Matriz de Correlación entre Estaciones")
-        if len(stations_for_analysis) > 1:
-            df_pivot = df_monthly_filtered.pivot_table(index=Config.DATE_COL, columns=Config.STATION_NAME_COL, values=Config.PRECIPITATION_COL)
-            corr_matrix = df_pivot.corr()
-            fig = px.imshow(corr_matrix, text_auto='.2f', aspect="auto", color_continuous_scale='RdBu_r', title="Correlación de Precipitación Mensual")
-            pdf.add_plotly_fig(fig, width=180)
-        else:
-            pdf.add_body_text("Se necesitan al menos dos estaciones para generar la matriz de correlación.")
-
-    if "Análisis de Tendencias y Pronósticos" in sections_to_include:
-        # NUEVA SECCIÓN: Análisis de Tendencias
-        pdf.add_section_title("9. Análisis de Tendencias (Mann-Kendall)")
-        if not df_anual_melted.empty:
-            results = []
-            for station in stations_for_analysis:
-                station_data = df_anual_melted[df_anual_melted[Config.STATION_NAME_COL] == station].dropna(subset=[Config.PRECIPITATION_COL])
-                if len(station_data) > 3:
-                    mk_result = mk.original_test(station_data[Config.PRECIPITATION_COL])
-                    results.append({
-                        "Estacion": station,
-                        "Tendencia": mk_result.trend,
-                        "p-valor": mk_result.p,
-                        "Pendiente Sen (mm/año)": mk_result.slope
-                    })
-            if results:
-                trends_df = pd.DataFrame(results)
-                pdf.add_dataframe(trends_df)
-            else:
-                pdf.add_body_text("No hay suficientes datos para calcular las tendencias.")
-        else:
-            pdf.add_body_text("No hay datos anuales para el análisis de tendencias.")
-
-    if "Metodología y Fuentes de Datos" in sections_to_include:
-        # NUEVA SECCIÓN: Metodología (Texto de ejemplo)
-        pdf.add_section_title("10. Metodología y Fuentes")
-        pdf.add_body_text(
-            "Los datos de precipitación fueron obtenidos de [Tu Fuente de Datos]. El análisis se realizó utilizando Python y las librerías Pandas, Plotly y Streamlit. "
-            "Las tendencias se evaluaron con la prueba no paramétrica de Mann-Kendall y la pendiente de Sen. Las anomalías se calcularon con respecto al promedio "
-            "histórico del período seleccionado."
-        )
-
-    return bytes(pdf.output(dest='S'))
-
-
-
+    except Exception as e:
+        st.error(f"Error al generar el reporte PDF: {e}")
+        return None
