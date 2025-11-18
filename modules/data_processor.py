@@ -124,8 +124,7 @@ def complete_series(_df):
 def load_and_process_all_data():
     """
     Carga todos los datos requeridos desde la base de datos PostgreSQL.
-    Realiza el procesamiento y merge inicial.
-    Retorna los 5 DataFrames clave que la aplicación espera.
+    ...
     """
     try:
         engine = create_engine(DATABASE_URL)
@@ -134,24 +133,29 @@ def load_and_process_all_data():
         sql_estaciones = "SELECT * FROM estaciones"
         gdf_stations = gpd.read_postgis(sql_estaciones, engine, geom_col='geom', crs="EPSG:4326")
         
-        # Renombrar columnas de BD a las que la app espera (Config)
+        # --- CORRECCIÓN CRÍTICA DE NOMBRES DE COLUMNAS (Asegurar 'nom_est') ---
+        # 1. Crear la columna de clave ('nom_est') usando 'nom_est' si existe, o 'id_estacion'.
+        # La aplicación espera Config.STATION_NAME_COL ('nom_est').
         gdf_stations = gdf_stations.rename(columns={
-            'id_estacion': Config.STATION_NAME_COL, 
-            'nom_est': 'nom_est_temp', 
             'alt_est': Config.ALTITUDE_COL,
             'municipio': Config.MUNICIPALITY_COL,
             'depto_region': Config.REGION_COL,
             'geom': 'geometry', 
             'et_mmy': Config.ET_COL
         })
-        # Usar nom_est como nombre principal si es necesario, o mantener el ID
-        if 'nom_est_temp' in gdf_stations.columns:
-            gdf_stations[Config.STATION_NAME_COL] = gdf_stations['nom_est_temp']
-            gdf_stations = gdf_stations.drop(columns=['nom_est_temp'])
         
+        # 2. Renombrar explícitamente la columna de nombre de estación
+        if 'nom_est' in gdf_stations.columns:
+            gdf_stations = gdf_stations.rename(columns={'nom_est': Config.STATION_NAME_COL})
+        elif 'id_estacion' in gdf_stations.columns:
+            # Si solo tiene ID, usarlo como nombre de estación
+            gdf_stations = gdf_stations.rename(columns={'id_estacion': Config.STATION_NAME_COL})
+            
+        # 3. Asegurar las columnas geo
         gdf_stations = gdf_stations.set_geometry('geometry')
         gdf_stations[Config.LONGITUDE_COL] = gdf_stations.geometry.x
         gdf_stations[Config.LATITUDE_COL] = gdf_stations.geometry.y
+        # --- FIN DE CORRECCIÓN CRÍTICA DE NOMBRES ---
 
         # 2. Cargar Municipios
         sql_municipios = "SELECT * FROM geometrias WHERE tipo_geometria = 'municipio'"
@@ -167,6 +171,7 @@ def load_and_process_all_data():
         
         # Renombrar columnas de BD a las que la app espera
         df_long = df_long.rename(columns={
+            # Usar la columna que apunta al nombre de la estación
             'id_estacion_fk': Config.STATION_NAME_COL, 
             'precipitation': Config.PRECIPITATION_COL
         })
@@ -174,6 +179,7 @@ def load_and_process_all_data():
         # 5. Cargar df_enso
         sql_indices = "SELECT * FROM indices_climaticos"
         df_enso = pd.read_sql(sql_indices, engine)
+        
         if not df_enso.empty:
              df_enso[Config.DATE_COL] = parse_spanish_dates(df_enso[Config.DATE_COL])
 
@@ -189,7 +195,7 @@ def load_and_process_all_data():
         gdf_stations[Config.STATION_NAME_COL] = gdf_stations[Config.STATION_NAME_COL].astype(str).str.strip()
         df_long[Config.STATION_NAME_COL] = df_long[Config.STATION_NAME_COL].astype(str).str.strip()
 
-        # Unir metadatos
+        # Unir metadatos (Aquí es donde enriquecemos df_long con latitud/altitud, etc.)
         station_metadata_cols = [
             Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.REGION_COL,
             Config.ALTITUDE_COL, Config.CELL_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ET_COL
@@ -249,4 +255,5 @@ def download_and_load_remote_dem(url):
         raise ValueError("La URL del servidor DEM no está configurada.")
     st.info(f"Simulación de descarga remota: {url}")
     return url
+
 
