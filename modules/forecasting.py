@@ -64,13 +64,15 @@ def evaluate_forecast(y_true, y_pred):
 @st.cache_data
 def generate_prophet_forecast(ts_data_raw, horizon, test_size=12):
     """Genera pronóstico con Prophet."""
+    # Preparar datos para Prophet (ds, y)
     ts_data = ts_data_raw.rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
     ts_data['ds'] = pd.to_datetime(ts_data['ds'])
     
+    # Validación de datos suficientes
     if len(ts_data) < test_size + 24:
         return None, None, None
 
-    # Modelo
+    # Modelo de Evaluación
     model = Prophet()
     train = ts_data.iloc[:-test_size]
     test = ts_data.iloc[-test_size:]
@@ -83,7 +85,7 @@ def generate_prophet_forecast(ts_data_raw, horizon, test_size=12):
     y_pred = forecast_eval.tail(test_size)['yhat']
     metrics = evaluate_forecast(test['y'], y_pred)
     
-    # Pronóstico Final
+    # Pronóstico Final (Modelo Completo)
     full_model = Prophet()
     full_model.fit(ts_data)
     future = full_model.make_future_dataframe(periods=horizon, freq='MS')
