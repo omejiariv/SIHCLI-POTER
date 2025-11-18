@@ -806,7 +806,10 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
     
     st.header("Visualizaciones de Precipitación")
     
+    # Obtener DataFrames del kwargs
     gdf_stations = kwargs.get('gdf_stations', pd.DataFrame())
+    df_long = kwargs.get('df_long', pd.DataFrame())
+    
     year_range_val = st.session_state.get('year_range', (2000, 2020))
     meses_numeros_val = st.session_state.get('meses_numeros', list(range(1,13)))
 
@@ -5413,4 +5416,5 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
