@@ -20,6 +20,7 @@ from modules.visualizer import (
     display_spatial_distribution_tab,
     display_graphs_tab,
     display_advanced_maps_tab,
+    display_climate_forecast_tab,
 )
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
@@ -89,6 +90,7 @@ def main():
         "🗺️ Distribución Espacial", 
         "📈 Gráficos", 
         "🌐 Mapas Avanzados",
+        "🔮 Pronósticos", # <--- NUEVA PESTAÑA
         "📄 Reporte PDF"
     ])
 
@@ -170,4 +172,5 @@ def main():
 # --- PUNTO DE ENTRADA ---
 if __name__ == "__main__":
     main()
+
 
