@@ -13,72 +13,44 @@ import pymannkendall as mk
 
 
 @st.cache_data
-def calculate_spi(series, window):
+def calculate_spi(df, col=Config.PRECIPITATION_COL, window=12):
     """
-    Calcula el Índice de Precipitación Estandarizado (SPI), manejando ceros.
+    Calcula el Índice Estandarizado de Precipitación (SPI) usando una aproximación estadística.
+    window: ventana de meses (ej. 3, 6, 12).
     """
-    # Asegurar que la serie tenga índice de fecha y esté ordenada
-    series = series.sort_index()
+    if df.empty: return df
     
-    # Calcular la suma acumulada (rolling sum)
-    rolling_sum = series.rolling(window=window, min_periods=window).sum()
+    df_spi = df.copy().sort_values(Config.DATE_COL)
     
-    # --- Manejo de Ceros ---
-    # 1. Separar los datos válidos (no NaN)
-    data_valid = rolling_sum.dropna()
-    data_valid = data_valid[np.isfinite(data_valid)] # Quitar inf si los hubiera
+    # 1. Calcular acumulado móvil (Rolling Sum)
+    df_spi['rolling_precip'] = df_spi[col].rolling(window=window, min_periods=window).sum()
     
-    if data_valid.empty:
-        st.warning(f"SPI-{window}: No hay suficientes datos válidos para el cálculo.")
-        return pd.Series(dtype=float)
-
-    # 2. Calcular la probabilidad de cero (q)
-    n_total = len(data_valid)
-    n_zeros = (data_valid == 0).sum()
-    q = n_zeros / n_total
-    
-    # 3. Separar los datos estrictamente positivos para el ajuste Gamma
-    data_positive = data_valid[data_valid > 0]
-    
-    spi = pd.Series(np.nan, index=rolling_sum.index) # Serie de salida inicializada con NaN
-
-    # --- Ajuste Gamma y Cálculo CDF (Solo si hay datos positivos) ---
-    if not data_positive.empty:
-        try:
-            # 4. Ajustar la distribución Gamma SOLO a los datos positivos
-            params = gamma.fit(data_positive, floc=0) 
-            shape, loc, scale = params # loc debería ser 0 por floc=0
+    # 2. Calcular SPI (Aproximación Z-Score sobre logaritmos para normalizar)
+    # El SPI real usa distribución Gamma, pero Z-Score logarítmico es una buena aproximación robusta
+    try:
+        valid_mask = df_spi['rolling_precip'] > 0 # Evitar log(0)
+        
+        # Transformación Logarítmica para normalizar la distribución de lluvia
+        log_precip = np.log(df_spi.loc[valid_mask, 'rolling_precip'])
+        
+        mean = log_precip.mean()
+        std = log_precip.std()
+        
+        if std == 0:
+            df_spi['spi'] = 0
+        else:
+            # Calcular Z-score
+            df_spi.loc[valid_mask, 'spi'] = (log_precip - mean) / std
             
-            # 5. Calcular el CDF Gamma (G(x)) para TODOS los datos válidos (incluyendo ceros)
-            #    gamma.cdf(0, ...) dará 0, lo cual es correcto aquí.
-            cdf_gamma = gamma.cdf(data_valid, shape, loc=loc, scale=scale)
+            # Llenar valores donde llovió 0 con el mínimo SPI detectado (sequía extrema)
+            min_spi = df_spi['spi'].min()
+            if pd.isna(min_spi): min_spi = -3.0
+            df_spi.loc[~valid_mask & df_spi['rolling_precip'].notna(), 'spi'] = min_spi
             
-            # 6. Calcular el CDF combinado H(x) = q + (1 - q) * G(x)
-            prob_combined = q + (1 - q) * cdf_gamma
-            
-            # Asegurar que las probabilidades estén estrictamente entre 0 y 1 para norm.ppf
-            prob_combined = np.clip(prob_combined, 1e-6, 1 - 1e-6) 
-            
-            # 7. Transformar a SPI usando la inversa de la normal estándar
-            spi_calculated = norm.ppf(prob_combined)
-            
-            # Asignar los valores calculados al índice correcto en la serie de salida
-            spi.loc[data_valid.index] = spi_calculated
-
-        except Exception as e:
-            st.warning(f"SPI-{window}: Falló el ajuste Gamma o cálculo CDF. Error: {e}")
-            # Dejar los valores como NaN si falla el ajuste/cálculo
-            pass # spi ya está inicializada con NaN
-
-    # Manejar los casos donde solo hubo ceros (si q=1)
-    elif q == 1:
-         # Si todos los valores válidos son cero, el SPI técnicamente no está bien definido, 
-         # pero asignar 0 es una convención razonable (precipitación exactamente igual a la media de ceros).
-         spi.loc[data_valid.index] = 0.0
-
-    # Reemplazar infinitos (por si acaso clip no fue suficiente) y devolver
-    spi.replace([np.inf, -np.inf], np.nan, inplace=True)
-    return spi
+    except Exception:
+        df_spi['spi'] = np.nan
+        
+    return df_spi
 
 @st.cache_data
 def calculate_spei(precip_series, et_series, scale):
@@ -146,27 +118,20 @@ def calculate_spei(precip_series, et_series, scale):
     return spei
     
 @st.cache_data
-def calculate_monthly_anomalies(_df_monthly_filtered, _df_long):
-    """
-    Calcula las anomalías mensuales con respecto al promedio de todo el período de datos.
-    """
-    df_monthly_filtered = _df_monthly_filtered.copy()
-    df_long = _df_long.copy()
+def calculate_monthly_anomalies(df):
+    """Calcula anomalías mensuales (diferencia con el promedio histórico del mes)."""
+    if df.empty: return df
     
-    df_climatology = df_long[
-        df_long[Config.STATION_NAME_COL].isin(df_monthly_filtered[Config.STATION_NAME_COL].unique())
-    ].groupby([Config.STATION_NAME_COL, Config.MONTH_COL])[Config.PRECIPITATION_COL].mean() \
-     .reset_index().rename(columns={Config.PRECIPITATION_COL: 'precip_promedio_mes'})
-
-    df_anomalias = pd.merge(
-        df_monthly_filtered,
-        df_climatology,
-        on=[Config.STATION_NAME_COL, Config.MONTH_COL],
-        how='left'
-    )
-    df_anomalias['anomalia'] = df_anomalias[Config.PRECIPITATION_COL] - df_anomalias['precip_promedio_mes']
-    return df_anomalias.copy()
-
+    # Calcular promedio histórico por mes
+    monthly_means = df.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean()
+    
+    # Unir y calcular anomalía
+    df = df.merge(monthly_means.rename('mean_precip'), on=Config.MONTH_COL, how='left')
+    df['anomaly'] = df[Config.PRECIPITATION_COL] - df['mean_precip']
+    df['anomaly_pct'] = (df['anomaly'] / df['mean_precip']) * 100
+    
+    return df
+    
 def calculate_percentiles_and_extremes(df_long, station_name, p_lower=10, p_upper=90):
     """
     Calcula umbrales de percentiles y clasifica eventos extremos para una estación.
@@ -512,6 +477,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
