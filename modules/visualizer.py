@@ -316,3 +316,48 @@ def display_climate_forecast_tab(df_long, gdf_stations, **kwargs):
             else:
                 st.warning("No se pudo obtener el pronóstico del tiempo.")
 
+def display_life_zones_tab(df_long, gdf_stations, **kwargs):
+    st.markdown("## 🌿 Zonas de Vida (Holdridge)")
+    st.info("Clasificación bioclimática basada en la precipitación anual y la altitud.")
+
+    try:
+        from modules.life_zones import calculate_life_zones_grid, holdridge_zone_map
+    except ImportError:
+        st.error("Módulo de Zonas de Vida no encontrado.")
+        return
+
+    if df_long.empty or gdf_stations.empty:
+        st.warning("Sin datos.")
+        return
+
+    # Calcular precipitación media anual por estación (para todo el histórico)
+    df_annual_sum = df_long.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+    df_mean_annual = df_annual_sum.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+
+    with st.spinner("Calculando zonas de vida..."):
+        grid_data, error = calculate_life_zones_grid(df_mean_annual, gdf_stations)
+        
+        if error:
+            st.error(f"Error: {error}")
+            return
+            
+        GX, GY, grid_zones = grid_data
+        
+        # Mapa de calor discreto
+        fig = go.Figure(data=go.Heatmap(
+            z=grid_zones,
+            x=GX[0],
+            y=GY[:, 0],
+            colorscale='Viridis',
+            colorbar=dict(title="Código Zona")
+        ))
+        
+        fig.update_layout(
+            title="Mapa Aproximado de Zonas de Vida",
+            xaxis_title="Longitud", yaxis_title="Latitud"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Leyenda
+        st.markdown("#### Leyenda de Zonas")
+        st.write(pd.DataFrame.from_dict(holdridge_zone_map, orient='index', columns=['Zona de Vida']))
