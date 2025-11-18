@@ -90,7 +90,8 @@ def main():
         "🗺️ Distribución Espacial", 
         "📈 Gráficos", 
         "🌐 Mapas Avanzados",
-        "🔮 Pronósticos", # <--- NUEVA PESTAÑA
+        "🔮 Pronósticos",
+        "🌿 Zonas de Vida",
         "📄 Reporte PDF"
     ])
 
@@ -133,8 +134,14 @@ def main():
 
     with tabs[4]:
         display_advanced_maps_tab(**display_args)
-        
+
     with tabs[5]:
+        display_climate_forecast_tab(**display_args)
+
+    with tabs[6]: # Zonas de Vida
+        display_life_zones_tab(**display_args)
+        
+    with tabs[7]:
         st.header("📄 Generar Reporte PDF")
         st.info("Genere un reporte ejecutivo descargable con los datos filtrados y las visualizaciones clave.")
         
@@ -172,5 +179,6 @@ def main():
 # --- PUNTO DE ENTRADA ---
 if __name__ == "__main__":
     main()
+
 
 
