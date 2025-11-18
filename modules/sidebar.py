@@ -5,9 +5,16 @@ from modules.config import Config
 def create_sidebar(gdf_stations, df_long):
     """
     Crea la barra lateral con los filtros y devuelve las selecciones.
+    Retorna 9 valores para coincidir con app.py.
     """
     with st.sidebar:
-        st.image(Config.LOGO_PATH, use_column_width=True)
+        if hasattr(Config, 'LOGO_PATH'):
+            # Intentar mostrar logo si existe, sino título simple
+            try:
+                st.image(Config.LOGO_PATH, use_column_width=True)
+            except:
+                pass
+        
         st.title("Panel de Control")
         
         st.subheader("Filtros de Estaciones")
@@ -31,15 +38,18 @@ def create_sidebar(gdf_stations, df_long):
             gdf_filtered = gdf_filtered[gdf_filtered[Config.MUNICIPALITY_COL].isin(selected_municipios)]
 
         # --- Filtro 3: Altitud ---
-        # (Simplificado para el ejemplo, puedes agregar lógica de rangos si lo tenías antes)
-        selected_altitudes = [] # Placeholder si no usas filtro de altitud complejo
+        # (Simplificado, retornamos lista vacía si no se usa lógica compleja aquí)
+        selected_altitudes = [] 
         
         # --- Selección de Estaciones Específicas ---
         estaciones_disponibles = sorted(gdf_filtered[Config.STATION_NAME_COL].unique())
+        # Pre-seleccionar hasta 5 estaciones por defecto para que no esté vacío
+        default_stations = estaciones_disponibles[:5] if len(estaciones_disponibles) > 0 else []
+        
         stations_for_analysis = st.multiselect(
             "Seleccione Estaciones para Análisis:", 
             estaciones_disponibles,
-            default=estaciones_disponibles[:5] # Pre-seleccionar algunas
+            default=default_stations
         )
 
         st.markdown("---")
@@ -67,7 +77,7 @@ def create_sidebar(gdf_stations, df_long):
         if stations_for_analysis:
             df_filtered_stations = df_long[df_long[Config.STATION_NAME_COL].isin(stations_for_analysis)]
         else:
-            df_filtered_stations = df_long # Si no hay selección, no mostrar nada o todo (depende de la lógica)
+            df_filtered_stations = df_long 
 
         # 2. Filtrar por rango de años
         df_monthly_filtered = df_filtered_stations[
@@ -75,13 +85,23 @@ def create_sidebar(gdf_stations, df_long):
             (df_filtered_stations[Config.YEAR_COL] <= year_range[1])
         ]
         
-        # Crear df_anual_melted (agregado anual) para compatibilidad
-        # Agrupamos por Estación y Año, sumando precipitación
+        # Crear df_anual_melted (agregado anual) para compatibilidad con visualizer
         df_anual_melted = df_monthly_filtered.groupby(
             [Config.STATION_NAME_COL, Config.YEAR_COL]
         )[Config.PRECIPITATION_COL].sum().reset_index()
 
-        # --- RETORNO DE 9 VALORES (CRÍTICO PARA QUE COINCIDA CON APP.PY) ---
+        # --- RETORNO DE 9 VALORES (CRÍTICO) ---
+        # El orden DEBE ser:
+        # 1. stations_for_analysis
+        # 2. df_anual_melted
+        # 3. df_monthly_filtered
+        # 4. gdf_filtered
+        # 5. analysis_mode
+        # 6. selected_regions
+        # 7. selected_municipios
+        # 8. selected_altitudes
+        # 9. year_range
+        
         return (
             stations_for_analysis, 
             df_anual_melted, 
@@ -91,5 +111,5 @@ def create_sidebar(gdf_stations, df_long):
             selected_regions, 
             selected_municipios, 
             selected_altitudes, 
-            year_range # <--- ¡ESTE ERA EL QUE FALTABA!
+            year_range 
         )
