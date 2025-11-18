@@ -23,22 +23,43 @@ def _filter_data_by_date(df, start_date, end_date):
     return df.loc[mask]
 
 def _get_common_filtering_ui(gdf_stations, key_suffix=""):
-    """Crea la UI común para filtrar por Municipio -> Estación."""
+    """
+    Crea la UI común para filtrar por Municipio -> Estación.
+    Retorna la estación seleccionada (nombre).
+    """
     st.markdown("#### Filtros de Selección")
     
+    # --- CORRECCIÓN DE SEGURIDAD ---
+    # Verificamos si el DataFrame es válido y tiene la columna necesaria
+    if gdf_stations is None or gdf_stations.empty or Config.MUNICIPALITY_COL not in gdf_stations.columns:
+        # Si algo falla, mostramos un aviso y retornamos None (o un valor seguro)
+        st.warning("No se pudieron cargar los municipios para el filtro.")
+        return None
+
+    # Si todo está bien, procedemos
     municipios = sorted(gdf_stations[Config.MUNICIPALITY_COL].unique())
+    # -------------------------------
+
     selected_municipio = st.selectbox(
         "Seleccione un Municipio:",
         ["Todos"] + municipios,
         key=f"municipio_select_{key_suffix}"
     )
 
+    # 2. Filtro de Estación (dinámico)
     if selected_municipio != "Todos":
         stations_filtered = gdf_stations[gdf_stations[Config.MUNICIPALITY_COL] == selected_municipio]
     else:
         stations_filtered = gdf_stations
 
     station_options = sorted(stations_filtered[Config.STATION_NAME_COL].unique())
+    
+    # --- CORRECCIÓN DE SEGURIDAD PARA ESTACIONES ---
+    if not station_options:
+         st.warning("No hay estaciones disponibles para esta selección.")
+         return None
+    # -----------------------------------------------
+
     selected_station = st.selectbox(
         "Seleccione una Estación:",
         station_options,
@@ -546,4 +567,5 @@ def display_drought_risk_tab(df_long, gdf_stations, **kwargs):
                     """)
             else:
                 st.warning("No hay suficientes datos históricos consecutivos para calcular el SPI.")
+
 
