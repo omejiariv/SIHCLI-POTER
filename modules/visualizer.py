@@ -252,3 +252,67 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_municipios, start_date,
             
             fig_contour.update_layout(title=f"Lluvia {selected_month}/{selected_year}", width=800, height=600)
             st.plotly_chart(fig_contour)
+
+def display_climate_forecast_tab(df_long, gdf_stations, **kwargs):
+    st.markdown("## 🔮 Pronósticos Climáticos")
+    
+    # Importar aquí para evitar errores circulares si forecasting falla
+    try:
+        from modules.forecasting import generate_prophet_forecast, get_weather_forecast
+    except ImportError:
+        st.error("El módulo de pronósticos no está disponible. Instale 'prophet' y 'openmeteo-requests'.")
+        return
+
+    col_sel, col_res = st.columns([1, 3])
+    
+    with col_sel:
+        selected_station = _get_common_filtering_ui(gdf_stations, key_suffix="forecast")
+        horizon = st.slider("Horizonte de Pronóstico (Meses):", 1, 24, 12)
+        
+    # Filtrar datos
+    df_station = df_long[df_long[Config.STATION_NAME_COL] == selected_station].copy()
+    
+    with col_res:
+        if df_station.empty:
+            st.warning("Sin datos para pronosticar.")
+            return
+
+        tab1, tab2 = st.tabs(["Pronóstico Estacional (Prophet)", "Pronóstico 7 Días"])
+        
+        with tab1:
+            with st.spinner("Calculando modelo Prophet..."):
+                model, forecast, metrics = generate_prophet_forecast(df_station, horizon)
+                
+                if forecast is not None:
+                    st.success(f"Modelo entrenado. RMSE: {metrics['RMSE']:.2f}")
+                    
+                    fig = go.Figure()
+                    # Datos Históricos
+                    fig.add_trace(go.Scatter(x=df_station[Config.DATE_COL], y=df_station[Config.PRECIPITATION_COL], name="Histórico"))
+                    # Pronóstico
+                    fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name="Pronóstico", line=dict(color='red')))
+                    # Intervalo de confianza
+                    fig.add_trace(go.Scatter(
+                        x=forecast['ds'], y=forecast['yhat_upper'], mode='lines',
+                        line=dict(width=0), showlegend=False
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=forecast['ds'], y=forecast['yhat_lower'], mode='lines',
+                        line=dict(width=0), fill='tonexty', fillcolor='rgba(255, 0, 0, 0.2)', showlegend=False
+                    ))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.error("Datos insuficientes para el modelo.")
+        
+        with tab2:
+            # Obtener coords
+            station_data = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == selected_station].iloc[0]
+            lat, lon = station_data[Config.LATITUDE_COL], station_data[Config.LONGITUDE_COL]
+            
+            weather_df = get_weather_forecast(lat, lon)
+            if weather_df is not None:
+                st.dataframe(weather_df)
+                st.line_chart(weather_df.set_index('date')['precipitation_sum'])
+            else:
+                st.warning("No se pudo obtener el pronóstico del tiempo.")
+
