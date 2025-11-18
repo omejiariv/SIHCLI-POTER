@@ -21,6 +21,8 @@ from modules.visualizer import (
     display_graphs_tab,
     display_advanced_maps_tab,
     display_climate_forecast_tab,
+    display_life_zones_tab,
+    display_drought_risk_tab,
 )
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
@@ -92,6 +94,7 @@ def main():
         "🌐 Mapas Avanzados",
         "🔮 Pronósticos",
         "🌿 Zonas de Vida",
+        "⚠️ Riesgo (SPI)",
         "📄 Reporte PDF"
     ])
 
@@ -138,10 +141,13 @@ def main():
     with tabs[5]:
         display_climate_forecast_tab(**display_args)
 
-    with tabs[6]: # Zonas de Vida
+    with tabs[6]:
         display_life_zones_tab(**display_args)
         
     with tabs[7]:
+        display_drought_risk_tab(**display_args)
+        
+    with tabs[8]:
         st.header("📄 Generar Reporte PDF")
         st.info("Genere un reporte ejecutivo descargable con los datos filtrados y las visualizaciones clave.")
         
@@ -179,6 +185,7 @@ def main():
 # --- PUNTO DE ENTRADA ---
 if __name__ == "__main__":
     main()
+
 
 
 
