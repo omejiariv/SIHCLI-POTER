@@ -64,6 +64,17 @@ def main():
      gdf_filtered, analysis_mode, selected_regions, selected_municipios, 
      selected_altitudes, year_range) = create_sidebar(gdf_stations, df_long)
 
+    # --- NUEVO: APLICAR COMPLETADO DE SERIES SI SE SOLICITÓ ---
+    if st.session_state.get('apply_interpolation', False):
+        with st.spinner("Completando series de tiempo..."):
+            # Aplicamos complete_series al dataframe filtrado
+            df_monthly_filtered = complete_series(df_monthly_filtered)
+            # Recalculamos el anual basado en los datos completados
+            df_anual_melted = df_monthly_filtered.groupby(
+                [Config.STATION_NAME_COL, Config.YEAR_COL]
+            )[Config.PRECIPITATION_COL].sum().reset_index()
+            st.toast("✅ Series completadas con interpolación")
+            
     # --- CORRECCIÓN CLAVE: CÁLCULO DE FECHAS ---
     # Calculamos las fechas de inicio y fin AQUI, justo después de obtener el rango del sidebar
     # y ANTES de crear el diccionario display_args. Esto soluciona el NameError.
@@ -159,3 +170,4 @@ def main():
 # --- PUNTO DE ENTRADA ---
 if __name__ == "__main__":
     main()
+
