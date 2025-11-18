@@ -470,4 +470,80 @@ def display_drought_risk_tab(df_long, gdf_stations, **kwargs):
             else:
                 st.warning("No hay suficientes datos históricos para calcular el SPI.")
 
+def display_drought_risk_tab(df_long, gdf_stations, **kwargs):
+    st.markdown("## ⚠️ Análisis de Riesgo (Sequía/Exceso)")
+    st.info("El Índice Estandarizado de Precipitación (SPI) permite identificar periodos de sequía (negativo) o exceso de humedad (positivo).")
+    
+    try:
+        from modules.analysis import calculate_spi
+    except ImportError:
+        st.error("Módulo de análisis no encontrado.")
+        return
+
+    col_sel, col_res = st.columns([1, 3])
+    
+    with col_sel:
+        # Reutilizamos el selector común
+        gdf_stations_all = kwargs.get('gdf_stations', pd.DataFrame())
+        selected_station = _get_common_filtering_ui(gdf_stations_all, key_suffix="risk")
+        
+        spi_window = st.selectbox(
+            "Ventana SPI (Meses):", 
+            [3, 6, 12, 24], 
+            index=2, 
+            help="SPI-3: Sequía meteorológica (corto plazo)\nSPI-12: Sequía hidrológica (largo plazo)"
+        )
+        
+    # Filtrar datos
+    df_station = df_long[df_long[Config.STATION_NAME_COL] == selected_station].copy()
+    
+    with col_res:
+        if df_station.empty:
+            st.warning("Sin datos para esta estación.")
+            return
+            
+        with st.spinner(f"Calculando SPI-{spi_window}..."):
+            df_spi = calculate_spi(df_station, window=spi_window)
+            
+            if 'spi' in df_spi.columns and not df_spi['spi'].dropna().empty:
+                # Gráfico de SPI con Plotly
+                fig_spi = go.Figure()
+                
+                # Barras positivas (Humedad - Azul)
+                df_pos = df_spi[df_spi['spi'] >= 0]
+                fig_spi.add_trace(go.Bar(
+                    x=df_pos[Config.DATE_COL], y=df_pos['spi'], 
+                    name="Húmedo", marker_color='blue', opacity=0.7
+                ))
+                
+                # Barras negativas (Sequía - Rojo)
+                df_neg = df_spi[df_spi['spi'] < 0]
+                fig_spi.add_trace(go.Bar(
+                    x=df_neg[Config.DATE_COL], y=df_neg['spi'], 
+                    name="Seco", marker_color='red', opacity=0.7
+                ))
+                
+                # Líneas de umbral
+                fig_spi.add_hline(y=-1.5, line_dash="dash", line_color="darkred", annotation_text="Sequía Severa")
+                fig_spi.add_hline(y=1.5, line_dash="dash", line_color="darkblue", annotation_text="Humedad Severa")
+                
+                fig_spi.update_layout(
+                    title=f"Índice SPI-{spi_window}: {selected_station}", 
+                    yaxis_title="Valor SPI (Desviaciones Estándar)",
+                    xaxis_title="Fecha",
+                    height=500
+                )
+                st.plotly_chart(fig_spi, use_container_width=True)
+                
+                with st.expander("¿Cómo interpretar el SPI?"):
+                    st.markdown("""
+                    * **> 2.0**: Extremadamente Húmedo
+                    * **1.5 a 1.99**: Muy Húmedo
+                    * **-0.99 a 0.99**: Normal
+                    * **-1.0 a -1.49**: Sequía Moderada
+                    * **-1.5 a -1.99**: Sequía Severa
+                    * **< -2.0**: Sequía Extrema
+                    """)
+            else:
+                st.warning("No hay suficientes datos históricos consecutivos para calcular el SPI.")
 
