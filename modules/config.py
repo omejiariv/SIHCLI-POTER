@@ -76,8 +76,7 @@ class Config:
     SOI_COL = 'soi'
     IOD_COL = 'iod'
 
-    # --- CORRECCIÓN DE SANGRÍA ---
-    # Esta función AHORA ESTÁ DENTRO de la clase Config
+    # --- Inicialización del Estado de Sesión ---
     @staticmethod
     def initialize_session_state():
         """
@@ -93,15 +92,12 @@ class Config:
             'unified_basin_gdf': None,
             'df_monthly_processed': pd.DataFrame(),
             
-            # --- INICIO DE BLOQUE MODIFICADO ---
-            # Claves antiguas (sarima_forecast, prophet_forecast) eliminadas.
-            # Nuevas claves para manejar múltiples regresores de pronóstico:
-            'forecasted_regressors_prophet': {}, # Almacenará pronósticos para Prophet, ej: {'ONI': df, 'SOI': df}
+            # --- Variables para Pronóstico ---
+            'forecasted_regressors_prophet': {}, # Almacenará pronósticos para Prophet
             'forecasted_regressors_sarima': {},  # Almacenará pronósticos para SARIMA
             'last_forecasted_index_name': None,  # Para mostrar el último gráfico de índice
             'last_forecasted_index_model': None, #
             'last_forecasted_index_data': None,  #
-            # --- FIN DE BLOQUE MODIFICADO ---
             
             'meses_numeros': list(range(1, 13)),
             'select_all_report_sections_checkbox': False,
