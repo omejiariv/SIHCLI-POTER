@@ -5,21 +5,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 from fpdf import FPDF
 from modules.utils import standardize_numeric_column
-
-# Importaciones de Módulos Propios
 from modules.config import Config
 
 # --- CORRECCIÓN DE IMPORTACIONES ---
-# Eliminamos create_folium_map y generate_station_popup_html porque ya no existen en visualizer.py
-# Importamos solo lo que podríamos necesitar o dejamos la importación limpia.
-# Si visualizer.py tiene funciones auxiliares útiles, las importaríamos aquí.
-# Por ahora, importamos create_enso_chart por si acaso se reutiliza.
+# Solo importamos lo que existe en el nuevo visualizer.py
+# create_folium_map YA NO EXISTE, por eso se eliminó de aquí.
 from modules.visualizer import create_enso_chart 
 
-# Reutilizando análisis si es necesario
 from modules.analysis import calculate_monthly_anomalies 
 
 # --- CLASE PDF PERSONALIZADA ---
@@ -30,7 +24,7 @@ class PDFReport(FPDF):
             try:
                 self.image(Config.LOGO_PATH, 10, 8, 33)
             except Exception:
-                pass # Si falla la imagen, no rompemos el reporte
+                pass 
                 
         self.set_font('Arial', 'B', 15)
         self.cell(80)  # Mover a la derecha
@@ -72,9 +66,16 @@ def generate_pdf_report(df_long, gdf_stations, analysis_results, **kwargs):
         pdf.chapter_title('1. Resumen General')
         
         n_estaciones = df_long[Config.STATION_NAME_COL].nunique()
-        fecha_min = df_long[Config.DATE_COL].min().strftime('%Y-%m-%d')
-        fecha_max = df_long[Config.DATE_COL].max().strftime('%Y-%m-%d')
-        total_precip = df_long[Config.PRECIPITATION_COL].sum()
+        
+        # Manejo seguro de fechas
+        if not df_long.empty:
+            fecha_min = df_long[Config.DATE_COL].min().strftime('%Y-%m-%d')
+            fecha_max = df_long[Config.DATE_COL].max().strftime('%Y-%m-%d')
+            total_precip = df_long[Config.PRECIPITATION_COL].sum()
+        else:
+            fecha_min = "N/A"
+            fecha_max = "N/A"
+            total_precip = 0
         
         resumen_texto = (
             f"Este reporte presenta un análisis de los datos hidrometeorológicos para el período "
@@ -84,27 +85,23 @@ def generate_pdf_report(df_long, gdf_stations, analysis_results, **kwargs):
         )
         pdf.chapter_body(resumen_texto)
         
-        # Sección 2: Estadísticas Básicas (Ejemplo)
+        # Sección 2: Estadísticas Básicas
         pdf.chapter_title('2. Estadísticas Descriptivas')
         
-        # Calcular promedios por estación
-        df_avg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        top_3_lluviosas = df_avg.sort_values(Config.PRECIPITATION_COL, ascending=False).head(3)
-        
-        stats_texto = "Las estaciones con mayor precipitación promedio mensual fueron:\n"
-        for idx, row in top_3_lluviosas.iterrows():
-            stats_texto += f"- {row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:.1f} mm/mes\n"
+        if not df_long.empty:
+            # Calcular promedios por estación
+            df_avg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+            top_3_lluviosas = df_avg.sort_values(Config.PRECIPITATION_COL, ascending=False).head(3)
+            
+            stats_texto = "Las estaciones con mayor precipitación promedio mensual fueron:\n"
+            for idx, row in top_3_lluviosas.iterrows():
+                stats_texto += f"- {row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:.1f} mm/mes\n"
+        else:
+            stats_texto = "No hay datos suficientes para generar estadísticas."
             
         pdf.chapter_body(stats_texto)
 
-        # Sección 3: Alertas (Si se pasaron en kwargs o analysis_results)
-        # Aquí podrías añadir lógica para listar alertas si las tuvieras pre-calculadas
-        
-        # Generar el archivo
-        # Nota: FPDF devuelve el string en 'latin-1' por defecto, a veces da problemas con tildes.
-        # En streamlit usamos output() con 'S' para string o bytes.
-        
-        # Opción segura para Streamlit: Guardar en tmp y leer bytes
+        # Guardar en temporal y retornar bytes
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             pdf.output(tmp_file.name)
