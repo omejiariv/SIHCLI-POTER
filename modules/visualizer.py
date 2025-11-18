@@ -7,13 +7,11 @@ import numpy as np
 import folium
 from streamlit_folium import st_folium
 from modules.config import Config
-import leafmap.foliumap as leafmap
 
 # --- CONSTANTES DE ESTILO ---
 COLOR_PRIMARY = "#1f77b4"
 COLOR_SECONDARY = "#ff7f0e"
 COLOR_ACCENT = "#2ca02c"
-COLOR_BACKGROUND = "#f0f2f6"
 
 # --- FUNCIONES AUXILIARES ---
 
@@ -50,7 +48,7 @@ def _get_common_filtering_ui(gdf_stations, key_suffix=""):
     return selected_station
 
 def create_enso_chart(df_enso_filtered):
-    """Crea el gráfico de índices ENSO (ONI, SOI)."""
+    """Crea el gráfico de índices ENSO (ONI)."""
     if df_enso_filtered is None or df_enso_filtered.empty:
         return go.Figure().update_layout(title="Datos ENSO no disponibles")
 
@@ -82,7 +80,7 @@ def display_welcome_tab(**kwargs):
 
 # --- PESTAÑA 2: ALERTAS ---
 def display_alerts_tab(df_long, gdf_stations, start_date, end_date, **kwargs):
-    st.markdown("## 🚨 Tablero de Alertas y Resumen Hidrometeorológico")
+    st.markdown("## 🚨 Tablero de Alertas")
     df_filtered = _filter_data_by_date(df_long, start_date, end_date)
     
     if df_filtered.empty:
@@ -101,7 +99,6 @@ def display_alerts_tab(df_long, gdf_stations, start_date, end_date, **kwargs):
     col4.metric("Estaciones", n_stations)
     
     st.markdown("---")
-    st.subheader("Monitoreo de Umbrales")
     threshold = st.slider("Umbral de Lluvia Mensual (mm):", 0, 1000, 300, 10)
     alerts_df = df_filtered[df_filtered[Config.PRECIPITATION_COL] > threshold].copy()
     
@@ -113,13 +110,13 @@ def display_alerts_tab(df_long, gdf_stations, start_date, end_date, **kwargs):
     else:
         st.success("Sin alertas para este umbral.")
 
-# --- PESTAÑA 3: MAPAS ---
+# --- PESTAÑA 3: MAPAS (CORREGIDO: USANDO FOLIUM PURO) ---
 def display_spatial_distribution_tab(df_long, gdf_stations, start_date, end_date, **kwargs):
     st.markdown("## 🗺️ Distribución Espacial")
     df_filtered = _filter_data_by_date(df_long, start_date, end_date)
     
     if df_filtered.empty:
-        st.warning("No hay datos.")
+        st.warning("No hay datos para mostrar.")
         return
 
     precip_per_station = df_filtered.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].sum().reset_index()
@@ -128,44 +125,52 @@ def display_spatial_distribution_tab(df_long, gdf_stations, start_date, end_date
     if Config.STATION_NAME_COL in gdf_stations.columns and Config.STATION_NAME_COL in precip_per_station.columns:
         gdf_map = gdf_stations.merge(precip_per_station, on=Config.STATION_NAME_COL, how='inner')
     else:
-        st.error(f"Error de columnas. Asegúrese de que '{Config.STATION_NAME_COL}' exista en ambos datasets.")
+        st.error("Error de columnas en los datos espaciales.")
         return
 
-    m = leafmap.Map(center=[6.2, -75.5], zoom=8, draw_control=False)
-    m.add_basemap("CartoDB.Positron")
+    # Crear Mapa Folium Base
+    m = folium.Map(location=[6.2, -75.5], zoom_start=8, tiles="CartoDB positron")
     
-    # Mapa de burbujas simple
+    max_val = gdf_map[Config.PRECIPITATION_COL].max()
+    
+    # Añadir marcadores
     for _, row in gdf_map.iterrows():
+        radius = 3 + (row[Config.PRECIPITATION_COL] / max_val) * 15
+        
         folium.CircleMarker(
             location=[row[Config.LATITUDE_COL], row[Config.LONGITUDE_COL]],
-            radius=5 + (row[Config.PRECIPITATION_COL] / gdf_map[Config.PRECIPITATION_COL].max()) * 20,
-            popup=f"{row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:,.0f} mm",
-            color=COLOR_PRIMARY, fill=True, fill_opacity=0.7
+            radius=radius,
+            tooltip=f"{row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:,.0f} mm",
+            color=COLOR_PRIMARY, 
+            fill=True, 
+            fill_color=COLOR_PRIMARY, 
+            fill_opacity=0.6
         ).add_to(m)
         
     st_folium(m, width=800, height=500)
 
-# --- PESTAÑA 4: GRÁFICOS (VERSIÓN CORREGIDA Y ROBUSTA) ---
+# --- PESTAÑA 4: GRÁFICOS ---
 def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analysis,
                        gdf_filtered, analysis_mode, selected_regions, selected_municipios,
                        selected_altitudes, **kwargs):
     
     st.header("📈 Análisis Gráfico")
     
-    # Obtenemos los datos originales completos para evitar problemas de merge previos
-    gdf_stations = kwargs.get('gdf_stations', pd.DataFrame())
+    # Datos completos originales
     df_long = kwargs.get('df_long', pd.DataFrame())
     
     col_sel_1, col_sel_2 = st.columns([1, 3])
     
     with col_sel_1:
-        # Selector local para esta pestaña
-        selected_station = _get_common_filtering_ui(gdf_stations, key_suffix="graphs")
+        # Usamos el DataFrame COMPLETO de estaciones para el selector (pasado en kwargs)
+        # Si no está disponible, usamos el filtrado, pero idealmente queremos todas las opciones.
+        gdf_stations_all = kwargs.get('gdf_stations', gdf_filtered)
+        selected_station = _get_common_filtering_ui(gdf_stations_all, key_suffix="graphs")
         
-    # Filtramos df_long directamente (esto evita el KeyError de merges fallidos)
+    # Filtrar df_long
     df_station = df_long[df_long[Config.STATION_NAME_COL] == selected_station].copy()
     
-    # Filtro de fechas (usando el estado de la sesión o defaults)
+    # Filtro de fechas
     year_range = st.session_state.get('year_range', (2000, 2024))
     start_date = pd.to_datetime(f"{year_range[0]}-01-01")
     end_date = pd.to_datetime(f"{year_range[1]}-12-31")
@@ -177,10 +182,9 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
     
     with col_sel_2:
         if df_station_filtered.empty:
-            st.warning("No hay datos para esta estación en el rango seleccionado.")
+            st.warning("No hay datos para esta estación.")
             return
             
-        # Gráfico de Serie de Tiempo
         fig_ts = px.line(
             df_station_filtered, 
             x=Config.DATE_COL, 
@@ -192,26 +196,11 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
         
     st.markdown("---")
     col_g2, col_g3 = st.columns(2)
-    
     with col_g2:
-        # Ciclo Anual (Boxplot)
-        fig_box = px.box(
-            df_station,
-            x=Config.MONTH_COL,
-            y=Config.PRECIPITATION_COL,
-            title=f"Ciclo Anual: {selected_station}",
-            color_discrete_sequence=[COLOR_SECONDARY]
-        )
+        fig_box = px.box(df_station, x=Config.MONTH_COL, y=Config.PRECIPITATION_COL, title="Ciclo Anual", color_discrete_sequence=[COLOR_SECONDARY])
         st.plotly_chart(fig_box, use_container_width=True)
-        
     with col_g3:
-        # Histograma
-        fig_hist = px.histogram(
-            df_station_filtered,
-            x=Config.PRECIPITATION_COL,
-            title=f"Distribución: {selected_station}",
-            color_discrete_sequence=[COLOR_ACCENT]
-        )
+        fig_hist = px.histogram(df_station_filtered, x=Config.PRECIPITATION_COL, title="Distribución", color_discrete_sequence=[COLOR_ACCENT])
         st.plotly_chart(fig_hist, use_container_width=True)
 
 # --- PESTAÑA 5: MAPAS AVANZADOS ---
@@ -233,14 +222,13 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_municipios, start_date,
             ]
             
             if df_month.empty:
-                st.error("Sin datos para la fecha.")
+                st.error("Sin datos.")
                 return
             
-            # Merge seguro para coordenadas
             if Config.STATION_NAME_COL in df_month.columns and Config.STATION_NAME_COL in gdf_stations.columns:
                 df_geo = df_month.merge(gdf_stations[[Config.STATION_NAME_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL]], on=Config.STATION_NAME_COL, how='inner')
             else:
-                st.error("Error de columnas en merge.")
+                st.error("Error de columnas.")
                 return
             
             if len(df_geo) < 3:
