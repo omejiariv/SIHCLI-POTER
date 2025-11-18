@@ -361,3 +361,63 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         # Leyenda
         st.markdown("#### Leyenda de Zonas")
         st.write(pd.DataFrame.from_dict(holdridge_zone_map, orient='index', columns=['Zona de Vida']))
+
+def display_life_zones_tab(df_long, gdf_stations, **kwargs):
+    st.markdown("## 🌿 Zonas de Vida (Holdridge)")
+    st.info("Clasificación bioclimática basada en la precipitación anual promedio y la altitud.")
+
+    try:
+        from modules.life_zones import calculate_life_zones_grid, holdridge_zone_map
+    except ImportError:
+        st.error("Módulo de Zonas de Vida no encontrado.")
+        return
+
+    if df_long.empty or gdf_stations.empty:
+        st.warning("Sin datos para calcular zonas de vida.")
+        return
+
+    # Calcular precipitación media anual por estación (para todo el histórico disponible)
+    # Primero sumamos por año para obtener el total anual
+    df_annual_sum = df_long.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+    # Luego promediamos esos totales anuales para obtener la media anual climática
+    df_mean_annual = df_annual_sum.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+
+    with st.spinner("Calculando mapa de zonas de vida..."):
+        grid_data, error = calculate_life_zones_grid(df_mean_annual, gdf_stations)
+        
+        if error:
+            st.error(f"Error al calcular zonas: {error}")
+            return
+            
+        GX, GY, grid_zones = grid_data
+        
+        # Mapa de calor discreto para las zonas
+        fig = go.Figure(data=go.Heatmap(
+            z=grid_zones,
+            x=GX[0],
+            y=GY[:, 0],
+            colorscale='Viridis',
+            colorbar=dict(title="Código Zona", tickmode="array", tickvals=list(holdridge_zone_map.keys()), ticktext=list(holdridge_zone_map.values()))
+        ))
+        
+        # Añadir estaciones como referencia
+        fig.add_trace(go.Scatter(
+            x=gdf_stations[Config.LONGITUDE_COL],
+            y=gdf_stations[Config.LATITUDE_COL],
+            mode='markers',
+            marker=dict(color='red', size=5, line=dict(width=1, color='black')),
+            text=gdf_stations[Config.STATION_NAME_COL],
+            name="Estaciones"
+        ))
+        
+        fig.update_layout(
+            title="Mapa Aproximado de Zonas de Vida (Holdridge)",
+            xaxis_title="Longitud", yaxis_title="Latitud",
+            height=600
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Leyenda explicativa
+        with st.expander("Ver Leyenda de Zonas de Vida"):
+            st.dataframe(pd.DataFrame.from_dict(holdridge_zone_map, orient='index', columns=['Zona de Vida']), use_container_width=True)
+
