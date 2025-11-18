@@ -19,20 +19,6 @@ from modules.visualizer import (
     display_spatial_distribution_tab,
     display_graphs_tab,
     display_advanced_maps_tab,
-    display_anomalies_tab,
-    display_drought_analysis_tab,
-    display_stats_tab,
-    display_correlation_tab,
-    display_enso_tab,
-    display_climate_forecast_tab,
-    display_trends_and_forecast_tab,
-    display_weekly_forecast_tab,
-    display_additional_climate_maps_tab,
-    display_satellite_imagery_tab,
-    display_land_cover_analysis_tab,
-    display_life_zones_tab,
-    display_climate_scenarios_tab,
-    display_station_table_tab
 )
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
@@ -560,6 +546,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
