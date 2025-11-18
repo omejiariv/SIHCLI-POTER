@@ -175,7 +175,7 @@ def load_and_process_all_data():
         sql_indices = "SELECT * FROM indices_climaticos"
         df_enso = pd.read_sql(sql_indices, engine)
         if not df_enso.empty:
-             df_enso[Config.DATE_COL] = pd.to_datetime(df_enso[Config.DATE_COL])
+             df_enso[Config.DATE_COL] = parse_spanish_dates(df_enso[Config.DATE_COL])
 
 
         # --- INICIO DE LÓGICA DE PROCESAMIENTO ---
@@ -249,3 +249,4 @@ def download_and_load_remote_dem(url):
         raise ValueError("La URL del servidor DEM no está configurada.")
     st.info(f"Simulación de descarga remota: {url}")
     return url
+
