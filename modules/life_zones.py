@@ -1,10 +1,6 @@
 # modules/life_zones.py
 import numpy as np
 import pandas as pd
-import rasterio
-from rasterio.warp import reproject, Resampling
-from rasterio.transform import Affine
-from rasterio.features import rasterize
 import streamlit as st
 from scipy.interpolate import griddata
 import plotly.graph_objects as go
@@ -78,7 +74,7 @@ def calculate_life_zones_grid(df_precip_mean, gdf_stations):
         df = df.dropna(subset=[Config.ALTITUDE_COL, Config.PRECIPITATION_COL])
         
         if len(df) < 4:
-            return None, "Datos insuficientes para interpolar zonas de vida."
+            return None, "Datos insuficientes para interpolar zonas de vida (mínimo 4 estaciones con altitud y precipitación)."
 
         # Crear Grilla
         grid_lon = np.linspace(df[Config.LONGITUDE_COL].min(), df[Config.LONGITUDE_COL].max(), 100)
@@ -93,7 +89,7 @@ def calculate_life_zones_grid(df_precip_mean, gdf_stations):
         grid_ppt = griddata(points, values_ppt, (GX, GY), method='linear')
         grid_alt = griddata(points, values_alt, (GX, GY), method='linear')
         
-        # Clasificar cada celda
+        # Clasificar cada celda vectorizada
         vectorized_classify = np.vectorize(classify_life_zone)
         grid_zones = vectorized_classify(grid_alt, grid_ppt)
         
