@@ -803,7 +803,7 @@ def display_spatial_distribution_tab(gdf_filtered, stations_for_analysis, df_anu
 def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analysis,
                        gdf_filtered, analysis_mode, selected_regions, selected_municipios,
                        selected_altitudes, **kwargs):
-    # (Esta función no necesita cambios, usa datos ya pasados)
+    
     st.header("Visualizaciones de Precipitación")
     
     gdf_stations = kwargs.get('gdf_stations', pd.DataFrame())
@@ -826,17 +826,46 @@ def display_graphs_tab(df_anual_melted, df_monthly_filtered, stations_for_analys
     
     year_range_val = st.session_state.get('year_range', (2000, 2020))
     year_min, year_max = year_range_val
+    
+    # 1. CREACIÓN ROBUSTA DE METADATA (Aquí se asegura la columna 'nom_est')
     metadata_cols = [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL, Config.ALTITUDE_COL]
-    gdf_metadata = gdf_filtered[metadata_cols].drop_duplicates(subset=[Config.STATION_NAME_COL]).copy()
+    
+    # Usamos gdf_filtered (que viene con las estaciones ya filtradas)
+    # ----------------------------------------------------------------------------------
+    # ¡LA CLAVE ESTÁ AQUÍ! USAR 'gdf_filtered' para obtener los metadatos correctos.
+    # Debemos garantizar que Config.STATION_NAME_COL esté en gdf_filtered.
+    # ----------------------------------------------------------------------------------
+    
+    # Aseguramos que la columna 'nom_est' exista en la lista de metadatos a pasar
+    valid_cols = [col for col in metadata_cols if col in gdf_filtered.columns]
+    
+    # Si la lista de columnas válidas está vacía o no incluye el nombre de la estación, ¡FALLA!
+    if Config.STATION_NAME_COL not in valid_cols:
+        st.error(f"Error Crítico: La columna '{Config.STATION_NAME_COL}' no existe en la tabla de estaciones filtrada. Imposible unir los datos.")
+        return
+        
+    gdf_metadata = gdf_filtered[valid_cols].drop_duplicates(subset=[Config.STATION_NAME_COL]).copy()
+    
+    # Procesamiento de metadatos (como en tu código original)
     if Config.ALTITUDE_COL in gdf_metadata.columns:
          gdf_metadata[Config.ALTITUDE_COL] = pd.to_numeric(gdf_metadata[Config.ALTITUDE_COL], errors='coerce').fillna(-9999).astype(int).astype(str)
     if Config.MUNICIPALITY_COL in gdf_metadata.columns:
         gdf_metadata[Config.MUNICIPALITY_COL] = gdf_metadata[Config.MUNICIPALITY_COL].astype(str).str.strip().replace('nan', 'Sin Dato')
     
-    cols_to_drop = [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL] if col != Config.STATION_NAME_COL]
+    
+    # 2. MERGE DE DATOS Y METADATOS
+    
+    # La columna a eliminar es solo Config.ALTITUDE_COL, Config.MUNICIPALITY_COL, etc.,
+    # pero NO Config.STATION_NAME_COL, ya que es la clave de unión.
+    cols_to_drop = [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL] if col in df_anual_melted.columns and col != Config.STATION_NAME_COL]
+    
     df_anual_pre_merge = df_anual_melted.drop(columns=cols_to_drop, errors='ignore')
+    # AHORA EL MERGE FUNCIONA porque gdf_metadata contiene Config.STATION_NAME_COL
     df_anual_rich = df_anual_pre_merge.merge(gdf_metadata, on=Config.STATION_NAME_COL, how='left')
-    df_monthly_pre_merge = df_monthly_filtered.drop(columns=cols_to_drop, errors='ignore')
+    
+    cols_to_drop_monthly = [col for col in [Config.MUNICIPALITY_COL, Config.ALTITUDE_COL] if col in df_monthly_filtered.columns and col != Config.STATION_NAME_COL]
+    
+    df_monthly_pre_merge = df_monthly_filtered.drop(columns=cols_to_drop_monthly, errors='ignore')
     df_monthly_rich = df_monthly_pre_merge.merge(gdf_metadata, on=Config.STATION_NAME_COL, how='left')
 
     tab_keys = [
@@ -5384,3 +5413,4 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
