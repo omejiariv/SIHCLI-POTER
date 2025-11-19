@@ -337,79 +337,75 @@ def display_stats_tab(**kwargs):
 def display_correlation_tab(**kwargs):
     st.subheader("🔗 Análisis de Correlación")
     
-    # Recuperar datos de forma segura
     df_monthly = kwargs.get('df_monthly_filtered')
     df_enso = kwargs.get('df_enso')
     
-    # Verificaciones básicas
     if df_monthly is None or df_monthly.empty:
-        st.warning("No hay datos de precipitación filtrados.")
+        st.warning("Faltan datos de precipitación.")
         return
     if df_enso is None or df_enso.empty:
-        st.warning("No hay datos de índices climáticos (ENSO) cargados.")
+        st.warning("Faltan datos ENSO.")
         return
 
-    st.markdown("##### Relación entre Lluvia Local y Fenómenos Globales (ENSO)")
+    st.markdown("Relación entre Lluvia Local y Fenómenos Globales (ENSO)")
     
     try:
-        # --- CORRECCIÓN CRÍTICA DE TIPOS DE DATOS ---
-        # 1. Forzamos la conversión a datetime en AMBOS dataframes para asegurar compatibilidad
-        # Usamos .copy() para no afectar los datos originales fuera de esta función
+        # --- PREPARACIÓN DE DATOS ROBUSTA ---
         ppt_data = df_monthly.copy()
         enso_data = df_enso.copy()
         
-        ppt_data[Config.DATE_COL] = pd.to_datetime(ppt_data[Config.DATE_COL])
-        enso_data[Config.DATE_COL] = pd.to_datetime(enso_data[Config.DATE_COL])
+        # 1. Asegurar fecha en Precipitación
+        ppt_data[Config.DATE_COL] = pd.to_datetime(ppt_data[Config.DATE_COL], errors='coerce')
 
-        # 2. Agrupar lluvia por fecha (promedio regional)
+        # 2. PARSEO INTELIGENTE DE FECHAS ENSO (Español -> Fecha)
+        # Si la fecha es "ene-70", "dic-23", etc.
+        def parse_spanish_date(x):
+            if isinstance(x, str):
+                x = x.lower().strip()
+                # Diccionario de traducción
+                replacements = {
+                    'ene': 'Jan', 'feb': 'Feb', 'mar': 'Mar', 'abr': 'Apr', 
+                    'may': 'May', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Aug', 
+                    'sep': 'Sep', 'oct': 'Oct', 'nov': 'Nov', 'dic': 'Dec'
+                }
+                for es, en in replacements.items():
+                    if es in x:
+                        x = x.replace(es, en)
+                        return pd.to_datetime(x, format='%b-%y', errors='coerce')
+            # Si ya es fecha o formato estándar
+            return pd.to_datetime(x, errors='coerce')
+
+        # Aplicar parseo solo si es necesario (si la columna es objeto/string)
+        if enso_data[Config.DATE_COL].dtype == 'object':
+            enso_data[Config.DATE_COL] = enso_data[Config.DATE_COL].apply(parse_spanish_date)
+        else:
+            enso_data[Config.DATE_COL] = pd.to_datetime(enso_data[Config.DATE_COL], errors='coerce')
+
+        # Eliminar fechas inválidas tras la conversión
+        ppt_data = ppt_data.dropna(subset=[Config.DATE_COL])
+        enso_data = enso_data.dropna(subset=[Config.DATE_COL])
+
+        # 3. Agrupar y Unir
         regional_ppt = ppt_data.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        
-        # 3. Realizar el cruce (Merge) ahora que ambos son datetime
         merged = pd.merge(regional_ppt, enso_data, on=Config.DATE_COL, how='inner')
         
-        if len(merged) > 12: # Necesitamos al menos un año de datos coincidentes
+        if len(merged) > 12:
             col1, col2 = st.columns([2, 1])
-            
             with col1:
-                # Scatter plot con línea de tendencia
                 fig = px.scatter(
-                    merged, 
-                    x=Config.ENSO_ONI_COL, 
-                    y=Config.PRECIPITATION_COL,
-                    trendline="ols", # Línea de regresión
-                    title="Correlación: Índice ONI vs. Lluvia Regional",
-                    labels={
-                        Config.ENSO_ONI_COL: "Índice ONI (Temp. Superficial del Mar)", 
-                        Config.PRECIPITATION_COL: "Precipitación Mensual (mm)"
-                    },
-                    opacity=0.6
+                    merged, x=Config.ENSO_ONI_COL, y=Config.PRECIPITATION_COL, trendline="ols",
+                    title="Correlación Lluvia vs. ONI", opacity=0.6
                 )
                 st.plotly_chart(fig, use_container_width=True)
-                
             with col2:
-                st.markdown("#### Estadísticas")
-                # Calcular correlación de Pearson
                 corr = merged[Config.ENSO_ONI_COL].corr(merged[Config.PRECIPITATION_COL])
-                
-                st.metric("Coeficiente de Correlación (Pearson)", f"{corr:.2f}")
-                
-                # Interpretación automática
-                if abs(corr) < 0.3:
-                    st.info("📉 Correlación DÉBIL o inexistente.")
-                elif abs(corr) < 0.6:
-                    st.warning("😐 Correlación MODERADA.")
-                else:
-                    st.success("🔥 Correlación FUERTE.")
-                    
-                st.markdown(f"**Datos analizados:** {len(merged)} meses coincidentes.")
-                
-                with st.expander("Ver datos unidos"):
-                    st.dataframe(merged.head(20), use_container_width=True)
+                st.metric("Coeficiente Pearson", f"{corr:.2f}")
+                if abs(corr) > 0.5: st.success("Correlación Fuerte")
+                elif abs(corr) > 0.3: st.info("Correlación Moderada")
+                else: st.warning("Sin correlación clara")
         else:
-            st.warning(f"No hay suficientes datos coincidentes en el tiempo. (Encontrados: {len(merged)} meses)")
-            st.write("Rango Fechas Lluvia:", regional_ppt[Config.DATE_COL].min().date(), "a", regional_ppt[Config.DATE_COL].max().date())
-            st.write("Rango Fechas ENSO:", enso_data[Config.DATE_COL].min().date(), "a", enso_data[Config.DATE_COL].max().date())
-
+            st.warning(f"Datos insuficientes para correlación ({len(merged)} meses coincidentes).")
+            
     except Exception as e:
         st.error(f"Error calculando correlación: {e}")
         
@@ -432,6 +428,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
