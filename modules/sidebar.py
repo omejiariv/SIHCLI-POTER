@@ -1,112 +1,97 @@
-# modules/sidebar.py
 import streamlit as st
 from modules.config import Config
+import pandas as pd
 
 def create_sidebar(gdf_stations, df_long):
-    """
-    Crea la barra lateral con los filtros y devuelve las selecciones.
-    Retorna 9 valores para coincidir con app.py.
-    """
     with st.sidebar:
-        # --- 1. LOGO ARREGLADO (Ancho controlado) ---
-        if hasattr(Config, 'LOGO_PATH'):
-            try:
-                # Usamos width=150 en lugar de use_column_width para que no sea gigante
-                st.image(Config.LOGO_PATH, width=150) 
-            except:
-                pass
+        st.title("🎛️ Panel de Control")
         
-        st.title("Panel de Control")
-        
-        # --- 2. SECCIÓN DE PREPROCESAMIENTO (REACTIVADA) ---
-        st.subheader("🛠️ Preprocesamiento")
+        # 1. Optimización de Interpolación
+        st.markdown("### ⚙️ Procesamiento")
         run_complete_series = st.checkbox(
-            "Completar Series Faltantes (Interpolación)", 
+            "Interpolación de Datos", 
             value=False,
-            help="Rellena huecos en los datos mensuales usando interpolación lineal."
+            help="⚠️ Activar esto puede hacer la app lenta si hay muchas estaciones."
         )
         
-        st.markdown("---")
-        st.subheader("📍 Filtros de Estaciones")
+        # Guardar estado en session_state para no perderlo
+        if run_complete_series != st.session_state.get('apply_interpolation'):
+            st.session_state['apply_interpolation'] = run_complete_series
+            st.rerun() # Recargar solo si cambia
+
+        st.divider()
+
+        # 2. Filtros en Cascada (Optimizados)
+        st.markdown("### 📍 Filtros de Ubicación")
         
-        # --- Filtro 1: Región ---
-        regiones = sorted(gdf_stations[Config.REGION_COL].unique())
-        selected_regions = st.multiselect("Región(es):", regiones, default=regiones)
+        # Región
+        all_regions = sorted(gdf_stations[Config.REGION_COL].unique())
+        selected_regions = st.multiselect("Región:", all_regions, default=all_regions[:1]) # Default solo 1 para velocidad
         
+        # Filtrar municipios basado en región
         if selected_regions:
-            gdf_filtered = gdf_stations[gdf_stations[Config.REGION_COL].isin(selected_regions)]
+            mask_region = gdf_stations[Config.REGION_COL].isin(selected_regions)
+            filtered_munis = sorted(gdf_stations[mask_region][Config.MUNICIPALITY_COL].unique())
         else:
-            gdf_filtered = gdf_stations
-
-        # --- Filtro 2: Municipio ---
-        municipios = sorted(gdf_filtered[Config.MUNICIPALITY_COL].unique())
-        selected_municipios = st.multiselect("Municipio(s):", municipios, default=municipios)
+            filtered_munis = []
+            
+        selected_municipios = st.multiselect("Municipio:", filtered_munis)
         
+        # Filtrar estaciones basado en municipio
         if selected_municipios:
-            gdf_filtered = gdf_filtered[gdf_filtered[Config.MUNICIPALITY_COL].isin(selected_municipios)]
-
-        selected_altitudes = [] 
+            mask_final = gdf_stations[Config.MUNICIPALITY_COL].isin(selected_municipios)
+        elif selected_regions:
+            mask_final = gdf_stations[Config.REGION_COL].isin(selected_regions)
+        else:
+            mask_final = [True] * len(gdf_stations)
+            
+        available_stations = sorted(gdf_stations[mask_final][Config.STATION_NAME_COL].unique())
         
-        # --- Selección de Estaciones ---
-        estaciones_disponibles = sorted(gdf_filtered[Config.STATION_NAME_COL].unique())
-        default_stations = estaciones_disponibles[:5] if len(estaciones_disponibles) > 0 else []
+        # LIMITAR selección por defecto para evitar crash
+        default_stations = available_stations[:3] if len(available_stations) > 0 else []
         
         stations_for_analysis = st.multiselect(
-            "Estaciones para Análisis:", 
-            estaciones_disponibles,
+            f"Estaciones ({len(available_stations)} disp.):", 
+            available_stations,
             default=default_stations
         )
+        
+        if len(stations_for_analysis) > 20:
+            st.warning("⚠️ Más de 20 estaciones seleccionadas. El rendimiento puede disminuir.")
 
-        st.markdown("---")
-        st.subheader("📅 Periodo de Análisis")
-        
-        min_year = int(df_long[Config.YEAR_COL].min())
-        max_year = int(df_long[Config.YEAR_COL].max())
-        
-        year_range = st.slider(
-            "Rango de Años:",
-            min_value=min_year,
-            max_value=max_year,
-            value=(min_year, max_year)
-        )
+        st.divider()
 
-        st.markdown("---")
-        analysis_mode = st.selectbox("Modo de Análisis:", ["Histórico Completo", "Comparativo ENSO"])
+        # 3. Filtro de Tiempo
+        st.markdown("### 📅 Periodo")
+        min_y = int(df_long[Config.YEAR_COL].min())
+        max_y = int(df_long[Config.YEAR_COL].max())
+        year_range = st.slider("Años:", min_y, max_y, (max_y-10, max_y))
 
-        # --- Lógica de Filtrado ---
-        if stations_for_analysis:
-            df_filtered_stations = df_long[df_long[Config.STATION_NAME_COL].isin(stations_for_analysis)]
-        else:
-            df_filtered_stations = df_long 
+        # Lógica de filtrado de DataFrames
+        gdf_filtered = gdf_stations[gdf_stations[Config.STATION_NAME_COL].isin(stations_for_analysis)]
+        
+        # Filtrar datos mensuales (lo pesado)
+        # Optimizamos usando .loc y el índice si es posible, o mascara booleana simple
+        mask_time = (df_long[Config.YEAR_COL] >= year_range[0]) & (df_long[Config.YEAR_COL] <= year_range[1])
+        mask_station = df_long[Config.STATION_NAME_COL].isin(stations_for_analysis)
+        df_monthly_filtered = df_long.loc[mask_time & mask_station]
 
-        df_monthly_filtered = df_filtered_stations[
-            (df_filtered_stations[Config.YEAR_COL] >= year_range[0]) &
-            (df_filtered_stations[Config.YEAR_COL] <= year_range[1])
-        ]
-        
-        # --- APLICAR PREPROCESAMIENTO SI SE SELECCIONÓ ---
-        # Aquí está el truco: Si el usuario marcó el checkbox, llamamos a la función de procesado
-        # Nota: Para aplicar esto realmente, necesitaríamos importar complete_series aquí o devolver el flag.
-        # Para mantener la estructura de 9 valores simple, vamos a devolver el flag "run_complete_series"
-        # "escondido" o usaremos st.session_state.
-        
-        if run_complete_series:
-             st.session_state['apply_interpolation'] = True
-        else:
-             st.session_state['apply_interpolation'] = False
-        
+        # Agrupar anual
         df_anual_melted = df_monthly_filtered.groupby(
             [Config.STATION_NAME_COL, Config.YEAR_COL]
         )[Config.PRECIPITATION_COL].sum().reset_index()
 
+        analysis_mode = "Histórico" # Placeholder para compatibilidad
+        selected_altitudes = []
+
         return (
-            stations_for_analysis, 
-            df_anual_melted, 
-            df_monthly_filtered, 
-            gdf_filtered, 
-            analysis_mode, 
-            selected_regions, 
-            selected_municipios, 
-            selected_altitudes, 
-            year_range 
+            stations_for_analysis,
+            df_anual_melted,
+            df_monthly_filtered,
+            gdf_filtered,
+            analysis_mode,
+            selected_regions,
+            selected_municipios,
+            selected_altitudes,
+            year_range
         )
