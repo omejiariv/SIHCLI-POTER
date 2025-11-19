@@ -11,6 +11,8 @@ from modules.config import Config
 import pymannkendall as mk
 from statsmodels.tsa.seasonal import seasonal_decompose
 from prophet import Prophet
+from scipy import stats
+from scipy.interpolate import griddata
 
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
@@ -231,7 +233,107 @@ def display_satellite_imagery_tab(gdf_filtered):
 # --- Placeholders para el resto de pestañas ---
 
 def display_advanced_maps_tab(**kwargs):
-    st.info("Módulo de Mapas Avanzados.")
+    st.subheader("🌍 Mapas Avanzados (Interpolación)")
+    st.markdown("Generación de superficies continuas de precipitación a partir de datos puntuales.")
+
+    # Recuperar datos
+    df_long = kwargs.get('df_long')
+    gdf_stations = kwargs.get('gdf_stations')
+
+    if df_long is None or gdf_stations is None or gdf_stations.empty:
+        st.warning("Faltan datos para interpolar.")
+        return
+
+    # 1. Controles
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        years = sorted(df_long[Config.YEAR_COL].unique(), reverse=True)
+        sel_year = st.selectbox("Año:", years, index=0)
+    with col2:
+        sel_month = st.selectbox("Mes:", range(1, 13), index=0)
+    with col3:
+        method = st.selectbox("Método:", ["Lineal (Rápido)", "Cúbico (Suave)"])
+        interp_method = 'linear' if "Lineal" in method else 'cubic'
+
+    # 2. Filtrar datos para ese momento específico
+    # Obtenemos los datos del mes y año seleccionados
+    mask_time = (df_long[Config.YEAR_COL] == sel_year) & (df_long[Config.MONTH_COL] == sel_month)
+    df_slice = df_long[mask_time]
+    
+    if df_slice.empty:
+        st.warning("No hay registros de lluvia para esa fecha.")
+        return
+
+    # 3. Unir con coordenadas (Lat/Lon)
+    # Usamos gdf_stations que ya tiene 'latitude' y 'longitude' gracias al data_processor
+    df_map = pd.merge(
+        df_slice, 
+        gdf_stations[[Config.STATION_NAME_COL, 'latitude', 'longitude']], 
+        on=Config.STATION_NAME_COL, 
+        how='inner'
+    ).dropna(subset=['latitude', 'longitude', Config.PRECIPITATION_COL])
+
+    if len(df_map) < 4:
+        st.warning(f"Se necesitan al menos 4 estaciones con datos para interpolar (Hay {len(df_map)}).")
+        return
+
+    with st.spinner("Calculando superficie de lluvia..."):
+        try:
+            # 4. Crear Grilla
+            # Definimos los límites basados en los datos + un margen
+            x_min, x_max = df_map['longitude'].min(), df_map['longitude'].max()
+            y_min, y_max = df_map['latitude'].min(), df_map['latitude'].max()
+            
+            # Margen del 10%
+            pad_x = (x_max - x_min) * 0.1
+            pad_y = (y_max - y_min) * 0.1
+            
+            # Crear malla de 100x100 puntos
+            grid_x, grid_y = np.mgrid[
+                (x_min-pad_x):(x_max+pad_x):100j, 
+                (y_min-pad_y):(y_max+pad_y):100j
+            ]
+            
+            # 5. Interpolar (scipy.griddata)
+            points = df_map[['longitude', 'latitude']].values
+            values = df_map[Config.PRECIPITATION_COL].values
+            
+            grid_z = griddata(points, values, (grid_x, grid_y), method=interp_method)
+            
+            # 6. Visualizar (Contour Plot)
+            fig = go.Figure(data=go.Contour(
+                z=grid_z.T, # Transpuesta para alinear con x/y en Plotly
+                x=np.linspace(x_min-pad_x, x_max+pad_x, 100),
+                y=np.linspace(y_min-pad_y, y_max+pad_y, 100),
+                colorscale='Viridis',
+                colorbar=dict(title='Lluvia (mm)'),
+                contours=dict(
+                    coloring='heatmap',
+                    showlabels=True,
+                    labelfont=dict(size=10, color='white')
+                )
+            ))
+            
+            # Añadir puntos de estaciones reales
+            fig.add_trace(go.Scatter(
+                x=df_map['longitude'], y=df_map['latitude'],
+                mode='markers+text',
+                marker=dict(color='red', size=5, line=dict(width=1, color='black')),
+                text=df_map[Config.PRECIPITATION_COL].astype(int),
+                textposition="top center",
+                name="Estaciones"
+            ))
+            
+            fig.update_layout(
+                title=f"Isoyetas de Precipitación - {sel_month}/{sel_year}",
+                xaxis_title="Longitud", 
+                yaxis_title="Latitud",
+                height=600
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Error en la interpolación: {e}")
 
 def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático (Índices)")
@@ -526,8 +628,91 @@ def display_enso_tab(**kwargs):
 def display_life_zones_tab(**kwargs):
     st.info("Módulo de Zonas de Vida.")
 
-def display_drought_analysis_tab(**kwargs):
-    st.info("Módulo de Sequía.")
+def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
+    st.subheader("🏜️ Análisis de Sequía (Índice SPI)")
+    st.info("El Índice Estandarizado de Precipitación (SPI) cuantifica el déficit o exceso de lluvia para diferentes escalas de tiempo.")
+
+    if df_long is None or df_long.empty:
+        st.warning("No hay datos para calcular el SPI.")
+        return
+
+    # 1. Configuración
+    col1, col2 = st.columns(2)
+    with col1:
+        # Filtramos estaciones disponibles
+        stations = sorted(df_long[Config.STATION_NAME_COL].unique())
+        selected_station = st.selectbox("Seleccionar Estación:", stations, key="spi_station_sel")
+    with col2:
+        scale = st.selectbox("Escala de Tiempo (Meses):", [3, 6, 12, 24], index=1, 
+                             help="3=Corto plazo (agrícola), 12=Largo plazo (hidrológico)")
+
+    if selected_station:
+        # 2. Preparar datos
+        df_station = df_long[df_long[Config.STATION_NAME_COL] == selected_station].sort_values(Config.DATE_COL).copy()
+        df_station.set_index(Config.DATE_COL, inplace=True)
+        
+        # Resamplear para asegurar frecuencia mensual continua (rellenar huecos con NaN es necesario para SPI)
+        ts = df_station[Config.PRECIPITATION_COL].resample('MS').sum()
+        
+        # 3. Cálculo del SPI (Algoritmo Gamma)
+        # Ventana móvil de suma
+        rolling_sum = ts.rolling(window=scale, center=False).sum()
+        
+        # Ajuste a distribución Gamma y transformación a Normal (Z-score)
+        # (Simplificado para robustez: si hay ceros, se manejan aparte)
+        valid_data = rolling_sum.dropna()
+        
+        if len(valid_data) > 30: # Se recomienda mínimo 30 datos
+            try:
+                # Fit Gamma
+                fit_alpha, fit_loc, fit_beta = stats.gamma.fit(valid_data[valid_data > 0])
+                
+                # Calcular CDF
+                cdf = stats.gamma.cdf(valid_data, fit_alpha, loc=fit_loc, scale=fit_beta)
+                
+                # Transformar a Z-score (Inversa de la Normal)
+                spi = stats.norm.ppf(cdf)
+                
+                # Crear DataFrame de resultados
+                df_spi = pd.DataFrame({'SPI': spi}, index=valid_data.index)
+                
+                # 4. Visualización
+                df_spi['Color'] = np.where(df_spi['SPI'] >= 0, 'blue', 'red')
+                
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=df_spi.index, y=df_spi['SPI'],
+                    marker_color=df_spi['Color'],
+                    name='SPI'
+                ))
+                # Umbrales oficiales
+                fig.add_hline(y=-1.5, line_dash="dash", line_color="darkred", annotation_text="Sequía Severa")
+                fig.add_hline(y=-2.0, line_dash="dash", line_color="black", annotation_text="Sequía Extrema")
+                fig.add_hline(y=1.5, line_dash="dash", line_color="darkblue", annotation_text="Humedad Severa")
+                
+                fig.update_layout(
+                    title=f"Evolución del SPI-{scale} en {selected_station}",
+                    yaxis_title="Índice SPI (Desviaciones Estándar)",
+                    height=500
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Mostrar estado actual
+                last_val = df_spi.iloc[-1]['SPI']
+                last_date = df_spi.index[-1].strftime('%Y-%m')
+                
+                status = "Normal"
+                if last_val <= -2.0: status = "SEQUÍA EXTREMA 💀"
+                elif last_val <= -1.5: status = "SEQUÍA SEVERA ⚠️"
+                elif last_val <= -1.0: status = "Sequía Moderada"
+                elif last_val >= 1.5: status = "Exceso de Humedad 💧"
+                
+                st.info(f"**Estado en {last_date}:** {status} (SPI = {last_val:.2f})")
+                
+            except Exception as e:
+                st.error(f"Error matemático calculando SPI: {e}")
+        else:
+            st.warning(f"Datos insuficientes para calcular SPI-{scale} (se requieren min 30 meses de datos consecutivos).")
 
 def display_climate_scenarios_tab(**kwargs):
     st.info("Módulo de Escenarios.")
@@ -537,6 +722,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
