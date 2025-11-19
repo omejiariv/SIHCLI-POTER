@@ -22,8 +22,11 @@ from modules.visualizer import (
     display_advanced_maps_tab,
     display_climate_forecast_tab,
     display_life_zones_tab,
-    display_drought_risk_tab,
+    display_drought_analysis_tab,
+    display_stats_tab,
+    display_enso_tab
 )
+
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
 from modules.analysis import calculate_monthly_anomalies, calculate_basin_stats
@@ -185,6 +188,7 @@ def main():
 # --- PUNTO DE ENTRADA ---
 if __name__ == "__main__":
     main()
+
 
 
 
