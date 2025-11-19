@@ -218,120 +218,12 @@ def display_drought_analysis_tab(**kwargs):
 def display_climate_scenarios_tab(**kwargs):
     st.info("🚧 Escenarios de Cambio Climático en construcción.")
 
-def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
-    st.subheader("🌦️ Pronóstico a 7 Días (Open-Meteo)")
-    
-    if not stations_for_analysis:
-        st.warning("Seleccione una estación en el panel lateral para ver su pronóstico.")
-        return
-
-    # Selector de estación dentro de la pestaña
-    selected_station = st.selectbox("Ver pronóstico para:", stations_for_analysis, key="weekly_station_sel")
-    
-    if selected_station and gdf_filtered is not None:
-        station_data = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == selected_station]
-        
-        if not station_data.empty:
-            # Obtener coordenadas de manera robusta
-            try:
-                # Intentar obtener de columnas lat/lon si existen
-                if 'latitude' in station_data.columns:
-                    lat = station_data.iloc[0]['latitude']
-                    lon = station_data.iloc[0]['longitude']
-                else:
-                    # Fallback a geometría
-                    lat = station_data.iloc[0].geometry.y
-                    lon = station_data.iloc[0].geometry.x
-                
-                # Llamar a la API
-                df_forecast = get_weather_forecast_simple(lat, lon)
-                
-                if not df_forecast.empty:
-                    # Mostrar métricas de hoy
-                    today = df_forecast.iloc[0]
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Hoy: Máxima", f"{today['Temp. Máx (°C)']}°C")
-                    c2.metric("Hoy: Mínima", f"{today['Temp. Mín (°C)']}°C")
-                    c3.metric("Lluvia Esperada", f"{today['Lluvia (mm)']} mm")
-                    
-                    # Gráfico
-                    st.markdown("#### Tendencia Semanal")
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_forecast['Fecha'], y=df_forecast['Temp. Máx (°C)'], name='Máxima', line=dict(color='red')))
-                    fig.add_trace(go.Scatter(x=df_forecast['Fecha'], y=df_forecast['Temp. Mín (°C)'], name='Mínima', line=dict(color='blue')))
-                    fig.add_bar(x=df_forecast['Fecha'], y=df_forecast['Lluvia (mm)'], name='Lluvia', yaxis='y2', opacity=0.3)
-                    
-                    fig.update_layout(
-                        yaxis=dict(title="Temperatura (°C)"),
-                        yaxis2=dict(title="Lluvia (mm)", overlaying='y', side='right'),
-                        hovermode="x unified"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Tabla
-                    st.dataframe(df_forecast, use_container_width=True)
-            except Exception as e:
-                st.error(f"No se pudieron obtener coordenadas para {selected_station}: {e}")
-        else:
-            st.warning("Datos de ubicación de la estación no encontrados.")
-
-def display_satellite_imagery_tab(gdf_filtered):
-    st.subheader("🛰️ Imágenes Satelitales (WMS)")
-    st.info("Visualizador de capas satelitales en tiempo casi real (GOES/NoAA).")
-    
-    # Opciones de capas WMS
-    wms_options = {
-        "Infrarrojo (GOES-East)": "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?",
-        "Vapor de Agua (GOES-East)": "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east08.cgi?",
-        "Visible (GOES-East)": "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east01.cgi?"
-    }
-    
-    layer_select = st.selectbox("Seleccionar Capa:", list(wms_options.keys()))
-    wms_url = wms_options[layer_select]
-    
-    try:
-        # Mapa centrado en Colombia
-        m = folium.Map(location=[4.5, -74.0], zoom_start=5)
-        
-        # Añadir capa WMS
-        folium.raster_layers.WmsTileLayer(
-            url=wms_url,
-            layers='xc04' if 'Infrarrojo' in layer_select else ('xc08' if 'Vapor' in layer_select else 'xc01'),
-            fmt='image/png',
-            name=layer_select,
-            attr='IEM/GOES',
-            transparent=True,
-            overlay=True
-        ).add_to(m)
-        
-        # Añadir estaciones como referencia (puntos simples)
-        if gdf_filtered is not None and not gdf_filtered.empty:
-             # Usar lat/lon seguros
-            lat_col = 'latitude' if 'latitude' in gdf_filtered.columns else None
-            lon_col = 'longitude' if 'longitude' in gdf_filtered.columns else None
-            
-            if lat_col and lon_col:
-                for _, row in gdf_filtered.iterrows():
-                    folium.CircleMarker(
-                        location=[row[lat_col], row[lon_col]],
-                        radius=3,
-                        color='red',
-                        fill=True
-                    ).add_to(m)
-        
-        st_folium(m, height=600, width="100%")
-        
-    except Exception as e:
-        st.error(f"Error cargando el mapa satelital: {e}")
-
-def display_station_table_tab(**kwargs):
-    st.info("Tabla Detallada.")
-
-def display_land_cover_analysis_tab(**kwargs):
-    st.info("Coberturas.")
-
+# 1. Función auxiliar para el pronóstico (La que mencionaste que faltaba)
 def get_weather_forecast_simple(lat, lon):
-    """Obtiene pronóstico simple de Open-Meteo (Integrado para evitar errores de importación)"""
+    """
+    Obtiene pronóstico simple de Open-Meteo.
+    Devuelve un DataFrame limpio listo para graficar.
+    """
     try:
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
@@ -344,6 +236,10 @@ def get_weather_forecast_simple(lat, lon):
         data = response.json()
         
         daily = data.get('daily', {})
+        # Crear DataFrame manual para evitar errores de dependencia
+        if not daily:
+            return pd.DataFrame()
+
         df = pd.DataFrame({
             'Fecha': daily.get('time', []),
             'Temp. Máx (°C)': daily.get('temperature_2m_max', []),
@@ -354,3 +250,117 @@ def get_weather_forecast_simple(lat, lon):
     except Exception as e:
         st.error(f"Error conectando a Open-Meteo: {e}")
         return pd.DataFrame()
+
+# 2. Función de Pronóstico Semanal (CORREGIDA para aceptar argumentos)
+def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
+    st.subheader("🌦️ Pronóstico a 7 Días (Open-Meteo)")
+    
+    if not stations_for_analysis:
+        st.warning("Seleccione una estación en el panel lateral para ver su pronóstico.")
+        return
+
+    # Selector local
+    selected_station = st.selectbox("Ver pronóstico para:", stations_for_analysis, key="weekly_station_sel")
+    
+    if selected_station and gdf_filtered is not None:
+        # Filtrar la estación seleccionada
+        station_data = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == selected_station]
+        
+        if not station_data.empty:
+            try:
+                # Obtener lat/lon de forma segura (soporta columnas o geometría)
+                if 'latitude' in station_data.columns:
+                    lat = station_data.iloc[0]['latitude']
+                    lon = station_data.iloc[0]['longitude']
+                else:
+                    lat = station_data.iloc[0].geometry.y
+                    lon = station_data.iloc[0].geometry.x
+                
+                # Llamar a la API
+                df_forecast = get_weather_forecast_simple(lat, lon)
+                
+                if not df_forecast.empty:
+                    # Métricas de hoy
+                    today = df_forecast.iloc[0]
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Hoy: Máxima", f"{today['Temp. Máx (°C)']}°C")
+                    c2.metric("Hoy: Mínima", f"{today['Temp. Mín (°C)']}°C")
+                    c3.metric("Lluvia Esperada", f"{today['Lluvia (mm)']} mm")
+                    
+                    # Gráfico combinado
+                    st.markdown("#### Tendencia Semanal")
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=df_forecast['Fecha'], y=df_forecast['Temp. Máx (°C)'], name='Máxima', line=dict(color='red')))
+                    fig.add_trace(go.Scatter(x=df_forecast['Fecha'], y=df_forecast['Temp. Mín (°C)'], name='Mínima', line=dict(color='blue')))
+                    fig.add_bar(x=df_forecast['Fecha'], y=df_forecast['Lluvia (mm)'], name='Lluvia', yaxis='y2', opacity=0.3, marker_color='lightblue')
+                    
+                    fig.update_layout(
+                        yaxis=dict(title="Temperatura (°C)"),
+                        yaxis2=dict(title="Lluvia (mm)", overlaying='y', side='right'),
+                        hovermode="x unified",
+                        height=400
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Tabla de datos
+                    with st.expander("Ver datos detallados"):
+                        st.dataframe(df_forecast, use_container_width=True)
+            except Exception as e:
+                st.error(f"No se pudieron obtener coordenadas o datos para {selected_station}: {e}")
+        else:
+            st.warning("Datos de ubicación de la estación no encontrados.")
+
+# 3. Función de Satélite (CORREGIDA para aceptar argumentos)
+def display_satellite_imagery_tab(gdf_filtered):
+    st.subheader("🛰️ Imágenes Satelitales (WMS)")
+    st.info("Visualizador de capas satelitales en tiempo casi real (Fuente: IEM/GOES).")
+    
+    # Opciones de capas
+    wms_options = {
+        "Infrarrojo (GOES-East)": "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?",
+        "Vapor de Agua (GOES-East)": "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east08.cgi?",
+        "Visible (GOES-East)": "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east01.cgi?"
+    }
+    
+    layer_select = st.selectbox("Seleccionar Capa:", list(wms_options.keys()))
+    wms_url = wms_options[layer_select]
+    
+    try:
+        # Mapa base centrado en Colombia
+        m = folium.Map(location=[4.5, -74.0], zoom_start=5)
+        
+        # Capa WMS
+        folium.raster_layers.WmsTileLayer(
+            url=wms_url,
+            layers='xc04' if 'Infrarrojo' in layer_select else ('xc08' if 'Vapor' in layer_select else 'xc01'),
+            fmt='image/png',
+            name=layer_select,
+            attr='IEM/GOES',
+            transparent=True,
+            overlay=True
+        ).add_to(m)
+        
+        # Estaciones (Puntos de referencia)
+        if gdf_filtered is not None and not gdf_filtered.empty:
+            # Intentar usar columnas lat/lon optimizadas si existen
+            if 'latitude' in gdf_filtered.columns:
+                # Muestrear si son muchas para no saturar
+                data_to_plot = gdf_filtered.sample(min(len(gdf_filtered), 100))
+                for _, row in data_to_plot.iterrows():
+                    folium.CircleMarker(
+                        location=[row['latitude'], row['longitude']],
+                        radius=2,
+                        color='red',
+                        fill=True
+                    ).add_to(m)
+        
+        st_folium(m, height=600, width=700)
+        
+    except Exception as e:
+        st.error(f"Error cargando el mapa satelital: {e}")
+
+def display_land_cover_analysis_tab(**kwargs):
+    st.info("🚧 Análisis de Cobertura en construcción (requiere raster local).")
+
+def display_station_table_tab(**kwargs):
+    st.info("Tabla Detallada.")
