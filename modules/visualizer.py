@@ -9,6 +9,63 @@ from modules.config import Config
 import pandas as pd
 import numpy as np
 
+def _get_common_filtering_ui(gdf_stations, key_suffix=""):
+    """
+    Crea la interfaz común para filtrar por Municipio -> Estación de forma robusta.
+    Maneja casos donde faltan columnas o datos.
+    """
+    st.markdown("#### Filtros de Selección")
+    
+    # --- 1. VERIFICACIÓN DE SEGURIDAD (Tu corrección) ---
+    if gdf_stations is None or gdf_stations.empty:
+        st.warning("No hay datos de estaciones cargados.")
+        return None
+        
+    # Verificar si existe la columna de municipio
+    if Config.MUNICIPALITY_COL not in gdf_stations.columns:
+        st.error(f"Columna '{Config.MUNICIPALITY_COL}' no encontrada. Columnas disponibles: {gdf_stations.columns.tolist()}")
+        return None
+
+    # --- 2. LÓGICA DE SELECCIÓN ---
+    # Obtener lista de municipios ordenados, manejando posibles nulos
+    try:
+        municipios = sorted(gdf_stations[Config.MUNICIPALITY_COL].dropna().unique())
+    except Exception as e:
+        st.warning(f"Error al ordenar municipios: {e}")
+        municipios = []
+
+    selected_municipio = st.selectbox(
+        "Seleccione un Municipio:",
+        ["Todos"] + municipios,
+        key=f"municipio_select_{key_suffix}"
+    )
+
+    # Filtrar estaciones según municipio
+    if selected_municipio != "Todos":
+        stations_filtered = gdf_stations[gdf_stations[Config.MUNICIPALITY_COL] == selected_municipio]
+    else:
+        stations_filtered = gdf_stations
+
+    # Verificar columna de nombre de estación
+    if Config.STATION_NAME_COL not in stations_filtered.columns:
+         st.error(f"Columna '{Config.STATION_NAME_COL}' no encontrada.")
+         return None
+
+    # Selector de Estación
+    station_options = sorted(stations_filtered[Config.STATION_NAME_COL].unique())
+    
+    if not station_options:
+        st.warning("No hay estaciones disponibles para esta selección.")
+        return None
+
+    selected_station = st.selectbox(
+        "Seleccione una Estación:",
+        station_options,
+        key=f"station_select_{key_suffix}"
+    )
+    
+    return selected_station
+
 def _limit_markers_gdf(gdf, max_markers=500):
     """
     Devuelve una copia reducida del GeoDataFrame con como máximo max_markers filas.
@@ -5417,4 +5474,5 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
