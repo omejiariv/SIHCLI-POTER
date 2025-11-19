@@ -300,10 +300,16 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
     
     # --- FUNCIÓN INTERNA DE INTERPOLACIÓN ---
     def run_interpolation(df_data, method, grid_bounds, grid_res=100):
+        # Importar aquí para asegurar disponibilidad
+        from scipy.interpolate import griddata, Rbf
+        
         minx, maxx, miny, maxy = grid_bounds
+        # Crear grilla
         grid_x, grid_y = np.mgrid[minx:maxx:complex(grid_res), miny:maxy:complex(grid_res)]
+        
         points = df_data[['longitude', 'latitude']].values
         values = df_data[Config.PRECIPITATION_COL].values
+        
         try:
             if "Spline" in method:
                 grid_z = griddata(points, values, (grid_x, grid_y), method='cubic')
@@ -315,14 +321,17 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             return grid_x, grid_y, grid_z
         except Exception: return None, None, None
 
-    # --- MODO 1: REGIONAL ---
+    # -------------------------------------------------------------------------
+    # MODO 1: REGIONAL (COMPARATIVO)
+    # -------------------------------------------------------------------------
     if mode == "Regional (Comparativo)":
         c1, c2 = st.columns(2)
         with c1:
-            range1 = st.slider("Período 1:", int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max()), (1980, 1990), key="p1")
+            min_y, max_y = int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max())
+            range1 = st.slider("Período 1:", min_y, max_y, (1980, 1990), key="p1")
             method1 = st.selectbox("Método 1:", ["IDW (Lineal)", "Spline (Cúbico)", "Kriging (Simulado)"], key="m1")
         with c2:
-            range2 = st.slider("Período 2:", int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max()), (1991, 2000), key="p2")
+            range2 = st.slider("Período 2:", min_y, max_y, (1991, 2000), key="p2")
             method2 = st.selectbox("Método 2:", ["IDW (Lineal)", "Spline (Cúbico)", "Kriging (Simulado)"], key="m2")
             
         if st.button("Generar Comparación"):
@@ -336,18 +345,34 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     col.warning("Datos insuficientes.")
                     return
                 
-                pad = 0.1
+                # Calcular Bounds locales para el gráfico (Zoom correcto)
+                pad = 0.05
                 bounds = [df_map.longitude.min()-pad, df_map.longitude.max()+pad, df_map.latitude.min()-pad, df_map.latitude.max()+pad]
+                
                 gx, gy, gz = run_interpolation(df_map, meth, bounds)
                 if gz is not None:
-                    fig = go.Figure(data=go.Contour(z=gz.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis', colorbar=dict(title='mm/año')))
+                    fig = go.Figure(data=go.Contour(
+                        z=gz.T, x=gx[:,0], y=gy[0,:], 
+                        colorscale='Viridis', colorbar=dict(title='mm/año'),
+                        contours=dict(coloring='heatmap', showlabels=True)
+                    ))
                     fig.add_trace(go.Scatter(x=df_map.longitude, y=df_map.latitude, mode='markers', marker=dict(color='red', size=5)))
-                    fig.update_layout(title=f"{meth} ({rng[0]}-{rng[1]})", height=400, margin=dict(l=0,r=0,t=40,b=0))
+                    
+                    # Forzar ejes para evitar zoom lejano
+                    fig.update_layout(
+                        title=f"{meth} ({rng[0]}-{rng[1]})", 
+                        height=400, 
+                        margin=dict(l=0,r=0,t=40,b=0),
+                        xaxis_range=[bounds[0], bounds[1]],
+                        yaxis_range=[bounds[2], bounds[3]]
+                    )
                     col.plotly_chart(fig, use_container_width=True)
             plot_map(range1, method1, c1)
             plot_map(range2, method2, c2)
 
-    # --- MODO 2: POR CUENCA ---
+    # -------------------------------------------------------------------------
+    # MODO 2: POR CUENCA (CORREGIDO ZOOM Y CAUDAL L/S)
+    # -------------------------------------------------------------------------
     else:
         if gdf_subcuencas.empty:
             st.warning("No hay capa de subcuencas.")
@@ -378,16 +403,17 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         target_ids = stations_in[Config.STATION_NAME_COL].unique()
                         mask = (df_long[Config.STATION_NAME_COL].isin(target_ids)) & \
                                (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
-                        df_subset = df_long[mask].copy()
                         
-                        # Promedio Anual Real
-                        df_annual_sums = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+                        df_annual_sums = df_long[mask].groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
                         df_points = df_annual_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-                        
                         df_map_data = pd.merge(df_points, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
 
                         if len(df_map_data) >= 3:
-                            bounds = buffer.bounds
+                            # CORRECCIÓN DE BOUNDS PARA ZOOM CORRECTO
+                            # Usamos los límites del buffer para centrar, no de todo el mundo
+                            b = buffer.bounds # (minx, miny, maxx, maxy)
+                            bounds = [b[0], b[2], b[1], b[3]] # Reordenar para función interna: minx, maxx, miny, maxy
+                            
                             gx, gy, gz = run_interpolation(df_map_data, meth, bounds)
                             
                             ppt_media = np.nanmean(gz) if gz is not None else df_map_data[Config.PRECIPITATION_COL].mean()
@@ -399,8 +425,8 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             st.session_state['basin_results'] = {
                                 'ready': True, 'gx': gx, 'gy': gy, 'gz': gz, 'df': df_map_data,
                                 'morph': morph, 'bal': bal, 'geom': gdf_union, 'buffer': buffer,
-                                'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}", 'method': meth,
-                                'bounds': [bounds[0], bounds[2], bounds[1], bounds[3]] # minx, maxx, miny, maxy
+                                'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}",
+                                'bounds': bounds # Guardamos los límites correctos
                             }
                         else: st.error("Insuficientes estaciones (<3) en radio de 50km.")
                     else: st.error("No hay estaciones cercanas.")
@@ -408,13 +434,9 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             # --- RENDERIZADO ---
             res = st.session_state.get('basin_results')
             if res and res.get('ready'):
-                # BLINDAJE CONTRA KEYERROR
-                if 'bounds' not in res: 
-                    st.warning("Datos antiguos en memoria. Presione 'Analizar' de nuevo."); return
-
                 st.success(f"Análisis Hidrológico **{res.get('periodo')}** completado.")
 
-                # 1. Mapa Interpolado
+                # 1. Mapa Interpolado (CORREGIDO ZOOM)
                 fig = go.Figure(data=go.Contour(
                     z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:],
                     colorscale='Viridis', colorbar=dict(title='mm/año'), contours=dict(coloring='heatmap', showlabels=True)
@@ -430,18 +452,33 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             x, y = p.exterior.xy
                             fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='white', width=3), showlegend=False))
                 except: pass
-                fig.update_layout(height=600, title="Superficie de Lluvia (mm/año)")
+                
+                # Fijar rango de ejes para zoom correcto
+                fig.update_layout(
+                    height=600, 
+                    title="Superficie de Lluvia (mm/año)",
+                    xaxis_range=[res['bounds'][0], res['bounds'][1]],
+                    yaxis_range=[res['bounds'][2], res['bounds'][3]]
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
                 # 2. Datos
                 st.markdown("---")
                 b = res['bal']
                 st.markdown(f"#### 💧 Balance Hídrico Estimado ({res['names']})")
+                
+                # CÁLCULO CAUDAL EN L/S
+                # Q(mm/año) * Area(km2) * 1000 / (365*24*3600) * 1000 = L/s
+                # Q(m3/año) / 31536000 * 1000
+                q_m3_ano = b['Q_m3_año']
+                q_ls = (q_m3_ano * 1000) / (365 * 24 * 3600)
+                
                 cols = st.columns(5)
                 cols[0].metric("Precipitación Media", f"{b['P']:.0f} mm/año")
                 cols[1].metric("Altitud Media", f"{b['Alt']:.0f} m.s.n.m")
                 cols[2].metric("ET Media", f"{b['ET']:.0f} mm/año")
                 cols[3].metric("Escorrentía (Q)", f"{max(0, b['Q']):.0f} mm/año")
+                cols[4].metric("Caudal Medio", f"{q_ls:.0f} l/s") # <--- NUEVO
                 
                 st.info(f"**Volumen de escorrentía anual estimado:** {b['Vol']:.2f} millones de m³ sobre un área de {b['Area']:.2f} km².")
                 
@@ -455,20 +492,15 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 cm[4].metric("Alt Mín", f"{m['alt_min_m']:.0f} m")
                 cm[5].metric("Pendiente", f"{m['pendiente_prom']:.1f} %")
 
-                # 3. MAPA DE CONTEXTO
+                # 3. Mapa Contexto
                 st.markdown("---")
                 st.subheader("📍 Contexto Espacial (Cuenca + Radio 50km)")
-                
-                # Usar bounds seguros
                 minx, maxx, miny, maxy = res['bounds']
                 map_c = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=9, tiles="CartoDB positron")
-                
                 folium.GeoJson(res['geom'], name="Cuenca", style_function=lambda x: {'color':'blue', 'weight':3}).add_to(map_c)
                 folium.GeoJson(res['buffer'], name="Radio 50km", style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False}).add_to(map_c)
-                
                 for _, r in res['df'].iterrows():
                     folium.CircleMarker([r.latitude, r.longitude], radius=3, color='red', fill=True, tooltip=f"{r[Config.STATION_NAME_COL]}: {r[Config.PRECIPITATION_COL]:.0f}").add_to(map_c)
-                
                 st_folium(map_c, height=500, width="100%")
         else:
             st.info("Seleccione cuencas.")
@@ -995,6 +1027,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
