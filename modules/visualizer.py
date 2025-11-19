@@ -2287,7 +2287,7 @@ def display_advanced_maps_tab(gdf_filtered, stations_for_analysis, df_anual_melt
     
 # --- Fin de la función display_advanced_maps_tab ---
             
-def display_drought_risk_tab(df_long, df_monthly_filtered, stations_for_analysis,
+def display_drought_analysis_tab(df_long, df_monthly_filtered, stations_for_analysis,
                              df_anual_melted, gdf_filtered, analysis_mode, selected_regions,
                              selected_municipios, selected_altitudes, **kwargs):
     
@@ -5474,5 +5474,6 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
