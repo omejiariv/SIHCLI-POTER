@@ -44,18 +44,22 @@ def load_and_process_all_data():
         df_est_raw['geometry'] = df_est_raw['wkt'].apply(parse_geom)
         gdf_stations = gpd.GeoDataFrame(df_est_raw, geometry='geometry', crs="EPSG:4326")
 
-        # Limpieza de textos (Quitar guiones y espacios extra vistos en la imagen)
-        # Ej: "Antioquia -" -> "Antioquia"
+        # Limpieza de textos (Quitar guiones y espacios extra)
         for col in ['municipio', 'depto_region', 'nom_est']:
-            gdf_stations[col] = gdf_stations[col].astype(str).str.replace(r'\s*-\s*$', '', regex=True).str.strip()
+            if col in gdf_stations.columns:
+                gdf_stations[col] = gdf_stations[col].astype(str).str.replace(r'\s*-\s*$', '', regex=True).str.strip()
 
-        # Mapeo a columnas estándar del sistema
+        # Mapeo a columnas estándar (CRÍTICO: Esto asegura que 'depto_region' exista)
         gdf_stations = gdf_stations.rename(columns={
             'nom_est': Config.STATION_NAME_COL,
             'alt_est': Config.ALTITUDE_COL,
             'municipio': Config.MUNICIPALITY_COL,
-            'depto_region': Config.REGION_COL
+            'depto_region': Config.REGION_COL  # <--- ESTA LÍNEA ES LA CLAVE
         })
+
+        # Asegurar que las columnas existan si el rename falló (Fallback)
+        if Config.REGION_COL not in gdf_stations.columns:
+             gdf_stations[Config.REGION_COL] = "Desconocido"
 
         # Extraer Lat/Lon para mapas rápidos
         gdf_stations = gdf_stations.dropna(subset=['geometry'])
@@ -139,3 +143,4 @@ def complete_series(df):
     df[Config.PRECIPITATION_COL] = df.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL]\
         .transform(lambda x: x.interpolate(method='linear', limit_direction='both'))
     return df
+
