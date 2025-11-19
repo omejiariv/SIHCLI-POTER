@@ -94,7 +94,22 @@ def display_alerts_tab(df_long, **kwargs):
 def display_spatial_distribution_tab(gdf_filtered, **kwargs):
     st.subheader("Distribución Espacial")
     if gdf_filtered is not None and not gdf_filtered.empty:
-        st.map(gdf_filtered)
+        # --- CORRECCIÓN ROBUSTA DE COORDENADAS ---
+        # Creamos una copia para no afectar los datos originales
+        map_data = gdf_filtered.copy()
+        
+        # Si faltan lat/lon pero existe geometry, las extraemos
+        if 'geometry' in map_data.columns:
+            # Streamlit necesita nombres específicos (lat/lon, latitude/longitude)
+            map_data['latitude'] = map_data.geometry.y
+            map_data['longitude'] = map_data.geometry.x
+        
+        try:
+            # st.map usará automáticamente 'latitude' y 'longitude'
+            st.map(map_data)
+        except Exception as e:
+            st.error(f"Error al renderizar el mapa: {e}")
+            st.write("Columnas disponibles:", map_data.columns.tolist())
     else:
         st.warning("No hay estaciones seleccionadas.")
 
