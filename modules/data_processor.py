@@ -6,147 +6,136 @@ from sqlalchemy import create_engine
 from shapely import wkt
 from modules.config import Config
 
-@st.cache_data(show_spinner="Cargando datos desde la Base de Datos...", ttl=600)
+@st.cache_data(show_spinner="Procesando datos hidrometeorológicos...", ttl=600)
 def load_and_process_all_data():
     """
-    Carga datos convirtiendo la geometría de PostGIS a Texto (WKT)
-    para asegurar que Streamlit pueda leer las coordenadas sin errores binarios.
+    Carga optimizada basada en la estructura real de Supabase.
+    Realiza el cruce (JOIN) entre IDs y Nombres para que los gráficos funcionen.
     """
+    # Inicializar
     gdf_stations = None
-    gdf_municipios = None
+    gdf_municipios = pd.DataFrame()
+    gdf_subcuencas = pd.DataFrame()
     df_long = None
     df_enso = None
-    gdf_subcuencas = None
 
     try:
         if "DATABASE_URL" not in st.secrets:
-            st.error("Falta 'DATABASE_URL' en los secretos de Streamlit.")
+            st.error("Falta DATABASE_URL en secrets.")
             return None, None, None, None, None
 
-        DATABASE_URL = st.secrets["DATABASE_URL"]
-        engine = create_engine(DATABASE_URL)
+        engine = create_engine(st.secrets["DATABASE_URL"])
 
-        # ---------------------------------------------------------
-        # 1. CARGAR ESTACIONES (Estrategia WKT)
-        # ---------------------------------------------------------
-        try:
-            # Usamos ST_AsText para que la BD nos de "POINT(-75.5 6.2)" en vez de binario ilegible
-            sql_estaciones = """
-            SELECT 
-                id_estacion, 
-                nom_est, 
-                alt_est, 
-                municipio, 
-                depto_region, 
-                ST_AsText(geom) as wkt_geom 
-            FROM estaciones
-            """
-            
-            # Leemos como DataFrame normal primero
-            df_temp = pd.read_sql(sql_estaciones, engine)
-            
-            # Convertimos la columna de texto WKT a geometría real de Python
-            if 'wkt_geom' in df_temp.columns:
-                # Función segura para parsear
-                def parse_wkt(x):
-                    try:
-                        return wkt.loads(x) if x else None
-                    except:
-                        return None
+        # ------------------------------------------------------------
+        # 1. CARGAR ESTACIONES (Tabla 'estaciones')
+        # ------------------------------------------------------------
+        # Usamos ST_AsText para evitar errores binarios con la geometría
+        sql_est = """
+        SELECT id_estacion, nom_est, alt_est, municipio, depto_region, ST_AsText(geom) as wkt 
+        FROM estaciones
+        """
+        df_est_raw = pd.read_sql(sql_est, engine)
 
-                df_temp['geometry'] = df_temp['wkt_geom'].apply(parse_wkt)
-                
-                # Convertir a GeoDataFrame
-                gdf_stations = gpd.GeoDataFrame(df_temp, geometry='geometry', crs="EPSG:4326")
-            else:
-                gdf_stations = df_temp
+        # Parsear geometría WKT a objetos reales
+        def parse_geom(x):
+            try: return wkt.loads(x) if x else None
+            except: return None
+        
+        df_est_raw['geometry'] = df_est_raw['wkt'].apply(parse_geom)
+        gdf_stations = gpd.GeoDataFrame(df_est_raw, geometry='geometry', crs="EPSG:4326")
 
-            # --- NORMALIZACIÓN ---
-            cols_map = {
-                'id_estacion': Config.STATION_NAME_COL, 
-                'nom_est': Config.STATION_NAME_COL, # Prioridad
-                'alt_est': Config.ALTITUDE_COL,
-                'municipio': Config.MUNICIPALITY_COL,
-                'depto_region': Config.REGION_COL
-            }
-            gdf_stations = gdf_stations.rename(columns=cols_map)
+        # Limpieza de textos (Quitar guiones y espacios extra vistos en la imagen)
+        # Ej: "Antioquia -" -> "Antioquia"
+        for col in ['municipio', 'depto_region', 'nom_est']:
+            gdf_stations[col] = gdf_stations[col].astype(str).str.replace(r'\s*-\s*$', '', regex=True).str.strip()
 
-            # Asegurar nombre de estación (Fallback)
-            if Config.STATION_NAME_COL not in gdf_stations.columns:
-                 if 'nombre' in gdf_stations.columns:
-                     gdf_stations = gdf_stations.rename(columns={'nombre': Config.STATION_NAME_COL})
+        # Mapeo a columnas estándar del sistema
+        gdf_stations = gdf_stations.rename(columns={
+            'nom_est': Config.STATION_NAME_COL,
+            'alt_est': Config.ALTITUDE_COL,
+            'municipio': Config.MUNICIPALITY_COL,
+            'depto_region': Config.REGION_COL
+        })
 
-            # Limpiar duplicados de columnas
-            gdf_stations = gdf_stations.loc[:, ~gdf_stations.columns.duplicated()]
+        # Extraer Lat/Lon para mapas rápidos
+        gdf_stations = gdf_stations.dropna(subset=['geometry'])
+        gdf_stations['latitude'] = gdf_stations.geometry.y
+        gdf_stations['longitude'] = gdf_stations.geometry.x
 
-            # EXTRAER LAT/LON (Para st.map)
-            if 'geometry' in gdf_stations.columns:
-                # Eliminar geometrías nulas antes de extraer coordenadas
-                gdf_stations = gdf_stations.dropna(subset=['geometry'])
-                gdf_stations['latitude'] = gdf_stations.geometry.y
-                gdf_stations['longitude'] = gdf_stations.geometry.x
-                
-            # Limpiar espacios en nombres
-            if Config.STATION_NAME_COL in gdf_stations.columns:
-                gdf_stations[Config.STATION_NAME_COL] = gdf_stations[Config.STATION_NAME_COL].astype(str).str.strip()
+        # ------------------------------------------------------------
+        # 2. CARGAR PRECIPITACIÓN (Tabla 'precipitacion_mensual')
+        # ------------------------------------------------------------
+        # OJO: Esta tabla suele tener IDs, no nombres. Hacemos el MERGE aquí.
+        sql_ppt = "SELECT id_estacion_fk, fecha, valor FROM precipitacion_mensual"
+        df_ppt_raw = pd.read_sql(sql_ppt, engine)
 
-        except Exception as e:
-            st.error(f"Error cargando estaciones: {e}")
-            gdf_stations = pd.DataFrame()
+        # Convertir fecha
+        df_ppt_raw[Config.DATE_COL] = pd.to_datetime(df_ppt_raw['fecha'])
 
-        # ---------------------------------------------------------
-        # 2. CARGAR OTRAS TABLAS
-        # ---------------------------------------------------------
-        # Municipios (Solo placeholder para evitar error)
-        gdf_municipios = pd.DataFrame() 
-        gdf_subcuencas = pd.DataFrame()
+        # CRUCE MAESTRO: Unir Ppt con Nombres de Estación usando el ID
+        # Asumimos que 'id_estacion_fk' en ppt coincide con 'id_estacion' en estaciones
+        df_merged = pd.merge(
+            df_ppt_raw,
+            gdf_stations[['id_estacion', Config.STATION_NAME_COL]],
+            left_on='id_estacion_fk',
+            right_on='id_estacion',
+            how='inner' # Solo mantener datos de estaciones que existen
+        )
 
-        # ---------------------------------------------------------
-        # 3. CARGAR PRECIPITACIÓN
-        # ---------------------------------------------------------
-        try:
-            sql_ppt = "SELECT * FROM precipitacion_mensual"
-            df_long = pd.read_sql(sql_ppt, engine)
-            
-            ppt_renames = {
-                'id_estacion_fk': Config.STATION_NAME_COL,
-                'fecha': Config.DATE_COL,
-                'valor': Config.PRECIPITATION_COL,
-                'precipitation': Config.PRECIPITATION_COL
-            }
-            df_long = df_long.rename(columns=ppt_renames)
-            df_long = df_long.loc[:, ~df_long.columns.duplicated()]
-            
-            if Config.STATION_NAME_COL in df_long.columns:
-                df_long[Config.STATION_NAME_COL] = df_long[Config.STATION_NAME_COL].astype(str).str.strip()
+        # Preparar df_long final
+        df_long = df_merged.rename(columns={'valor': Config.PRECIPITATION_COL})
+        df_long[Config.YEAR_COL] = df_long[Config.DATE_COL].dt.year
+        df_long[Config.MONTH_COL] = df_long[Config.DATE_COL].dt.month
+        
+        # Limpiar columnas sobrantes
+        df_long = df_long[[Config.DATE_COL, Config.STATION_NAME_COL, Config.PRECIPITATION_COL, Config.YEAR_COL, Config.MONTH_COL]]
 
-            df_long[Config.DATE_COL] = pd.to_datetime(df_long[Config.DATE_COL])
-            df_long[Config.YEAR_COL] = df_long[Config.DATE_COL].dt.year
-            df_long[Config.MONTH_COL] = df_long[Config.DATE_COL].dt.month
-        except Exception:
-            df_long = pd.DataFrame()
+        # ------------------------------------------------------------
+        # 3. CARGAR GEOMETRÍAS (Tabla 'geometrias')
+        # ------------------------------------------------------------
+        # Cargamos todo y filtramos en pandas para evitar múltiples queries lentos
+        sql_geo = "SELECT nombre, tipo_geometria, ST_AsText(geom) as wkt FROM geometrias"
+        df_geo_raw = pd.read_sql(sql_geo, engine)
+        df_geo_raw['geometry'] = df_geo_raw['wkt'].apply(parse_geom)
+        gdf_all_geoms = gpd.GeoDataFrame(df_geo_raw, geometry='geometry', crs="EPSG:4326")
 
-        # ---------------------------------------------------------
+        # Filtrar por tipo (según tu imagen, tienes 'predio', buscamos 'municipio' o 'subcuenca')
+        if 'tipo_geometria' in gdf_all_geoms.columns:
+            gdf_municipios = gdf_all_geoms[gdf_all_geoms['tipo_geometria'] == 'municipio']
+            gdf_subcuencas = gdf_all_geoms[gdf_all_geoms['tipo_geometria'].isin(['subcuenca', 'cuenca'])]
+
+        # ------------------------------------------------------------
         # 4. CARGAR ENSO
-        # ---------------------------------------------------------
+        # ------------------------------------------------------------
         try:
-            sql_enso = "SELECT * FROM indices_climaticos"
-            df_enso = pd.read_sql(sql_enso, engine)
-            if not df_enso.empty and Config.DATE_COL in df_enso.columns:
-                df_enso[Config.DATE_COL] = pd.to_datetime(df_enso[Config.DATE_COL])
-            elif not df_enso.empty and 'fecha' in df_enso.columns:
-                 df_enso[Config.DATE_COL] = pd.to_datetime(df_enso['fecha'])
+            df_enso = pd.read_sql("SELECT * FROM indices_climaticos", engine)
+            # Intentar normalizar columnas
+            cols_enso = [c.lower() for c in df_enso.columns]
+            df_enso.columns = cols_enso
             
-            if 'oni' in df_enso.columns: 
+            if 'fecha' in df_enso.columns:
+                df_enso[Config.DATE_COL] = pd.to_datetime(df_enso['fecha'])
+            
+            if 'oni' in df_enso.columns:
                 df_enso = df_enso.rename(columns={'oni': Config.ENSO_ONI_COL})
+            elif 'anomalia_oni' in df_enso.columns:
+                df_enso = df_enso.rename(columns={'anomalia_oni': Config.ENSO_ONI_COL})
+
         except:
-             df_enso = pd.DataFrame()
+            df_enso = pd.DataFrame()
 
         return gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas
 
     except Exception as e:
-        st.error(f"Error crítico conectando a la Base de Datos: {e}")
-        return None, None, None, None, None
+        st.error(f"Error de conexión a BD: {e}")
+        # Retornar vacíos para no romper la app
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def complete_series(df):
+    """Interpolación simple para rellenar huecos"""
+    if df is None or df.empty: return df
+    df = df.sort_values(Config.DATE_COL)
+    # Interpolación lineal por grupo (estación)
+    df[Config.PRECIPITATION_COL] = df.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL]\
+        .transform(lambda x: x.interpolate(method='linear', limit_direction='both'))
     return df
