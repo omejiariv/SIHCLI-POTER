@@ -82,15 +82,28 @@ def display_alerts_tab(df_long, **kwargs):
 
 def display_spatial_distribution_tab(gdf_filtered, **kwargs):
     st.subheader("🗺️ Distribución Espacial")
+    
     if gdf_filtered is not None and not gdf_filtered.empty:
-        # Intentar usar lat/lon explícitas si existen, sino geometry
+        # 1. Crear copia para no afectar datos originales
         map_data = gdf_filtered.copy()
+        
+        # 2. Asegurar columnas lat/lon desde geometry si faltan
         if 'latitude' not in map_data.columns and 'geometry' in map_data.columns:
             map_data['latitude'] = map_data.geometry.y
             map_data['longitude'] = map_data.geometry.x
+            
+        # 3. LIMPIEZA CRÍTICA: Eliminar filas donde lat o lon sean NaN/Null
+        # Esto soluciona el StreamlitAPIException
+        map_data = map_data.dropna(subset=['latitude', 'longitude'])
         
-        # Mapa simple de Streamlit (muy robusto)
-        st.map(map_data, size=20, color='#0000FF')
+        if not map_data.empty:
+            # 4. Mostrar mapa simple y robusto
+            try:
+                st.map(map_data, size=20, color='#0000FF')
+            except Exception as e:
+                st.error(f"Error renderizando mapa: {e}")
+        else:
+            st.warning("Las estaciones seleccionadas no tienen coordenadas válidas (geometría nula).")
     else:
         st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
 
@@ -203,3 +216,4 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
