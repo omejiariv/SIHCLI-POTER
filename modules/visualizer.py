@@ -1,13 +1,73 @@
 # modules/visualizer.py
 
+from streamlit_folium import st_folium
+
+import streamlit as st
+import pandas as pd
+import base64
+import geopandas as gpd
+import altair as alt
+import folium
+from prophet import Prophet
+from prophet.plot import plot_plotly
+from rasterstats import zonal_stats
+from folium.plugins import MarkerCluster, MiniMap
+from folium.raster_layers import WmsTileLayer
+from streamlit_folium import folium_static
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
+import os
+import branca.colormap as cm
+import matplotlib.pyplot as plt
+import pymannkendall as mk
+from scipy import stats
+
+import io
+from datetime import datetime, timedelta, date
+import requests
+import traceback
+import openmeteo_requests
+import rasterio
+from rasterio.transform import from_origin
+from rasterio.mask import mask
+from scipy.interpolate import griddata
+import gstools as gs
+import pyproj
+from rasterio.warp import reproject, Resampling
+
+#--- Importaciones de Módulos Propios ---
+from modules.config import Config
+from modules.openmeteo_api import get_historical_climate_average
+from modules.analysis import (
+    calculate_morphometry, calculate_hypsometric_curve,
+    calculate_hydrological_balance,
+    calculate_all_station_trends,
+    calculate_spi, calculate_spei, calculate_monthly_anomalies,
+    calculate_percentiles_and_extremes, analyze_events,
+    calculate_climatological_anomalies,
+    calculate_basin_stats # Asegurar que esta esté importada
+)
+from modules.utils import add_folium_download_button
+from modules.interpolation import (
+    create_interpolation_surface, 
+    perform_loocv_for_all_methods,
+    # create_kriging_by_basin, # Comentado si no se usa
+    # interpolate_idw # Comentado si no se usa
+)
+from modules.forecasting import (
+    generate_sarima_forecast, generate_prophet_forecast,
+    get_decomposition_results, create_acf_chart, create_pacf_chart,
+    auto_arima_search, get_weather_forecast
+)
+from modules.data_processor import complete_series
+from modules.life_zones import generate_life_zone_map, holdridge_int_to_name_simplified
+
 import json
 import tempfile
 from datetime import date
 from pandas.tseries.offsets import DateOffset
-
-from modules.config import Config
-import pandas as pd
-import numpy as np
 
 def _get_common_filtering_ui(gdf_stations, key_suffix=""):
     """
@@ -194,10 +254,6 @@ def add_stations_layer(m, stations_gdf, popup_fields=None, max_markers=1000, clu
             pass
         return m
 
-# [CORRECCIÓN] Importar calculate_hypsometric_curve
-from modules.analysis import calculate_hypsometric_curve 
-import plotly.graph_objects as go # Asegurar importación
-import os # Asegurar importación
 
 # -- Reemplazar/ajustar create_hypsometric_figure_and_data para limitar datos pesados --
 def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader, max_pixels=200000):
@@ -267,69 +323,6 @@ def create_hypsometric_figure_and_data(basin_gdf, dem_file_uploader, max_pixels=
                 os.remove(dem_path)
         except Exception:
             pass
-
-import streamlit as st
-import pandas as pd
-import base64
-import geopandas as gpd
-import altair as alt
-import folium
-from prophet import Prophet
-from prophet.plot import plot_plotly
-from rasterstats import zonal_stats
-from folium.plugins import MarkerCluster, MiniMap
-from folium.raster_layers import WmsTileLayer
-from streamlit_folium import folium_static
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import numpy as np
-import os
-import branca.colormap as cm
-import matplotlib.pyplot as plt
-import pymannkendall as mk
-from scipy import stats
-
-import io
-from datetime import datetime, timedelta, date
-import requests
-import traceback
-import openmeteo_requests
-import rasterio
-from rasterio.transform import from_origin
-from rasterio.mask import mask
-from scipy.interpolate import griddata
-import gstools as gs
-import pyproj
-from rasterio.warp import reproject, Resampling
-
-#--- Importaciones de Módulos Propios ---
-from modules.config import Config
-from modules.openmeteo_api import get_historical_climate_average
-from modules.analysis import (
-    calculate_morphometry, calculate_hypsometric_curve,
-    calculate_hydrological_balance,
-    calculate_all_station_trends,
-    calculate_spi, calculate_spei, calculate_monthly_anomalies,
-    calculate_percentiles_and_extremes, analyze_events,
-    calculate_climatological_anomalies,
-    calculate_basin_stats # Asegurar que esta esté importada
-)
-from modules.utils import add_folium_download_button
-from modules.interpolation import (
-    create_interpolation_surface, 
-    perform_loocv_for_all_methods,
-    # create_kriging_by_basin, # Comentado si no se usa
-    # interpolate_idw # Comentado si no se usa
-)
-from modules.forecasting import (
-    generate_sarima_forecast, generate_prophet_forecast,
-    get_decomposition_results, create_acf_chart, create_pacf_chart,
-    auto_arima_search, get_weather_forecast
-)
-from modules.data_processor import complete_series
-from modules.life_zones import generate_life_zone_map, holdridge_int_to_name_simplified
-
 
 # --- DEFINICIÓN DE display_filter_summary ---
 def display_filter_summary(total_stations_count, selected_stations_count, year_range,
@@ -634,9 +627,8 @@ def create_folium_map(location, zoom, base_map_config, overlays_config, fit_boun
 # MAIN TAB DISPLAY FUNCTIONS
 
 def display_welcome_tab():
-    # (Esta función no necesita cambios)
-    st.header("Bienvenido al Sistema de Información de Lluvias y Clima")
-    st.markdown("""
+    st.markdown(f"# {Config.APP_TITLE}")
+    st.info("Bienvenido al sistema SIHCLI-POTER.")
 <style>
 @import url('https://fonts.googleapis.com/css?family=Playfair+Display:wght@700&display=swap');
 .quote { font-family: 'Playfair Display', serif; font-weight: 700; font-size: 22px; text-align:
@@ -5474,6 +5466,7 @@ def display_climate_forecast_tab(**kwargs):
             2.  Se genera una extrapolación estadística (pronóstico) para el horizonte de tiempo seleccionado.
             3.  Este pronóstico se guarda y puede ser seleccionado como regresor externo en las pestañas "Pronóstico SARIMA" y "Pronóstico Prophet".
             """)
+
 
 
 
