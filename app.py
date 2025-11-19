@@ -24,7 +24,7 @@ from modules.visualizer import (
     display_welcome_tab,
     display_alerts_tab,
     display_spatial_distribution_tab,
-    display_graphs_tab(**display_args)
+    display_graphs_tab(**display_args),
     display_advanced_maps_tab,
     display_climate_forecast_tab,     # Pronóstico de índices (ONI/SOI)
     display_trends_and_forecast_tab,  # SARIMA/Prophet para precipitación
@@ -210,6 +210,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
