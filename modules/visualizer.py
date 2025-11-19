@@ -23,54 +23,42 @@ def get_weather_forecast_simple(lat, lon):
     try:
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
-            "latitude": lat,
-            "longitude": lon,
+            "latitude": lat, "longitude": lon,
             "daily": ["temperature_2m_max", "temperature_2m_min", "precipitation_sum"],
             "timezone": "auto"
         }
         response = requests.get(url, params=params, timeout=5)
-        data = response.json()
-        daily = data.get('daily', {})
-        if not daily: return pd.DataFrame()
+        data = response.json().get('daily', {})
+        if not data: return pd.DataFrame()
         return pd.DataFrame({
-            'Fecha': daily.get('time', []),
-            'Temp. Máx (°C)': daily.get('temperature_2m_max', []),
-            'Temp. Mín (°C)': daily.get('temperature_2m_min', []),
-            'Lluvia (mm)': daily.get('precipitation_sum', [])
+            'Fecha': data.get('time', []),
+            'Temp. Máx (°C)': data.get('temperature_2m_max', []),
+            'Temp. Mín (°C)': data.get('temperature_2m_min', []),
+            'Lluvia (mm)': data.get('precipitation_sum', [])
         })
     except: return pd.DataFrame()
-
+        
 def create_enso_chart(enso_data):
-    """Crea el gráfico de Anomalía ONI (ENSO)."""
     if enso_data is None or enso_data.empty or Config.ENSO_ONI_COL not in enso_data.columns:
         return go.Figure().update_layout(title="Datos ENSO no disponibles", height=300)
 
     data = enso_data.copy().sort_values(Config.DATE_COL).dropna(subset=[Config.ENSO_ONI_COL])
-    
-    conditions = [data[Config.ENSO_ONI_COL] >= 0.5, data[Config.ENSO_ONI_COL] <= -0.5]
-    colors = ['red', 'blue']
-    data['color'] = np.select(conditions, colors, default='gray')
+    data['color'] = np.where(data[Config.ENSO_ONI_COL] >= 0.5, 'red', np.where(data[Config.ENSO_ONI_COL] <= -0.5, 'blue', 'gray'))
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=data[Config.DATE_COL], y=data[Config.ENSO_ONI_COL],
-        marker_color=data['color'], name="Anomalía ONI"
-    ))
+    fig.add_trace(go.Bar(x=data[Config.DATE_COL], y=data[Config.ENSO_ONI_COL], marker_color=data['color'], name="ONI"))
     fig.add_hline(y=0.5, line_dash="dash", line_color="red")
     fig.add_hline(y=-0.5, line_dash="dash", line_color="blue")
     fig.update_layout(title="Índice Oceánico El Niño (ONI)", height=400)
     return fig
-
+    
 # 1. FUNCIONES AUXILIARES DE PARSEO Y DATOS
 # -----------------------------------------------------------------------------
 
 def parse_spanish_date(x):
-    """
-    Convierte fechas en formato texto español (ej: 'ene-70', 'ago-23') a datetime.
-    """
+    """Convierte fechas texto español a datetime."""
     if isinstance(x, str):
         x = x.lower().strip()
-        # Mapa de traducción
         trans = {
             'ene': 'Jan', 'feb': 'Feb', 'mar': 'Mar', 'abr': 'Apr',
             'may': 'May', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Aug',
@@ -79,11 +67,9 @@ def parse_spanish_date(x):
         for es, en in trans.items():
             if es in x:
                 x = x.replace(es, en)
-                break # Solo reemplazamos el mes
-        try:
-            return pd.to_datetime(x, format='%b-%y')
-        except:
-            return pd.to_datetime(x, errors='coerce')
+                break
+        try: return pd.to_datetime(x, format='%b-%y')
+        except: return pd.to_datetime(x, errors='coerce')
     return pd.to_datetime(x, errors='coerce')
 
 # -----------------------------------------------------------------------------
@@ -105,7 +91,7 @@ def display_alerts_tab(df_long, **kwargs):
             st.dataframe(alertas.sort_values(Config.PRECIPITATION_COL, ascending=False).head(50), use_container_width=True)
     else:
         st.warning("No hay datos para alertas.")
-
+        
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
     st.subheader("🗺️ Distribución Espacial y Capas")
     
@@ -116,7 +102,6 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
         
         with col_ctrl:
             st.markdown("#### Capas")
-            # Controles de capas
             show_munis = st.checkbox("Municipios", value=True)
             show_cuencas = st.checkbox("Subcuencas", value=False)
             show_predios = st.checkbox("Predios", value=False)
@@ -125,35 +110,51 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
         with col_map:
             # Centrar el mapa
             if gdf_filtered is not None and not gdf_filtered.empty:
-                lat_center = gdf_filtered.geometry.y.mean()
-                lon_center = gdf_filtered.geometry.x.mean()
+                # Filtrar nulos para el centro
+                valid_locs = gdf_filtered.dropna(subset=['latitude', 'longitude'])
+                if not valid_locs.empty:
+                    lat_center = valid_locs['latitude'].mean()
+                    lon_center = valid_locs['longitude'].mean()
+                else:
+                    lat_center, lon_center = 6.2, -75.5
             else:
-                lat_center, lon_center = 6.2, -75.5 # Medellín por defecto
+                lat_center, lon_center = 6.2, -75.5
 
             m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=base_map)
 
-            # --- CAPAS GEOMÉTRICAS (Optimizadas) ---
-            # Simplificamos la geometría un poco para evitar "Bad Message Format" si son muy pesadas
+            # --- CAPAS GEOMÉTRICAS (CORREGIDO) ---
+            # Simplificamos la geometría preservando el DataFrame y sus columnas
             try:
                 if show_munis and not gdf_municipios.empty:
+                    # Copia para no alterar original
+                    munis_sim = gdf_municipios.copy()
+                    # Simplificar geometría en su lugar
+                    munis_sim['geometry'] = munis_sim['geometry'].simplify(tolerance=0.001)
+                    
                     folium.GeoJson(
-                        gdf_municipios[['geometry', 'nombre']].simplify(tolerance=0.001), # Simplificar
+                        munis_sim, 
                         name="Municipios",
                         style_function=lambda x: {'color': 'gray', 'weight': 1, 'fillOpacity': 0.05},
                         tooltip=folium.GeoJsonTooltip(fields=['nombre'])
                     ).add_to(m)
 
                 if show_cuencas and not gdf_subcuencas.empty:
+                    cuencas_sim = gdf_subcuencas.copy()
+                    cuencas_sim['geometry'] = cuencas_sim['geometry'].simplify(tolerance=0.001)
+                    
                     folium.GeoJson(
-                        gdf_subcuencas[['geometry', 'nombre']].simplify(tolerance=0.001),
+                        cuencas_sim, 
                         name="Subcuencas",
                         style_function=lambda x: {'color': 'blue', 'weight': 2, 'fillOpacity': 0.0},
                         tooltip=folium.GeoJsonTooltip(fields=['nombre'])
                     ).add_to(m)
                     
                 if show_predios and gdf_predios is not None and not gdf_predios.empty:
+                    predios_sim = gdf_predios.copy()
+                    predios_sim['geometry'] = predios_sim['geometry'].simplify(tolerance=0.0001)
+                    
                     folium.GeoJson(
-                        gdf_predios[['geometry', 'nombre']].simplify(tolerance=0.0001), # Menos tolerancia para predios
+                        predios_sim, 
                         name="Predios",
                         style_function=lambda x: {'color': 'orange', 'weight': 2, 'fillOpacity': 0.2},
                         tooltip=folium.GeoJsonTooltip(fields=['nombre'])
@@ -161,18 +162,18 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             except Exception as e:
                 st.warning(f"Algunas capas geométricas no se pudieron cargar: {e}")
 
-            # --- ESTACIONES (Marcadores Ligeros) ---
+            # --- ESTACIONES ---
             if gdf_filtered is not None and not gdf_filtered.empty:
                 marker_cluster = MarkerCluster().add_to(m)
-                # Iterar sobre datos limpios (sin geometría compleja)
-                for _, row in gdf_filtered.iterrows():
-                    try:
-                        folium.Marker(
-                            location=[row.geometry.y, row.geometry.x],
-                            tooltip=f"{row[Config.STATION_NAME_COL]}",
-                            icon=folium.Icon(color="green", icon="cloud")
-                        ).add_to(marker_cluster)
-                    except: pass
+                # Filtrar nulos antes de iterar
+                stations_to_plot = gdf_filtered.dropna(subset=['latitude', 'longitude'])
+                
+                for _, row in stations_to_plot.iterrows():
+                    folium.Marker(
+                        location=[row['latitude'], row['longitude']],
+                        tooltip=f"{row[Config.STATION_NAME_COL]}",
+                        icon=folium.Icon(color="green", icon="cloud")
+                    ).add_to(marker_cluster)
 
             folium.LayerControl().add_to(m)
             st_folium(m, width="100%", height=600)
@@ -187,53 +188,18 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             st.info("Seleccione estaciones para ver disponibilidad.")
             
 def display_graphs_tab(df_monthly_filtered, stations_for_analysis, **kwargs):
-    st.subheader("📈 Análisis Gráfico Detallado")
-    
-    if df_monthly_filtered is None or df_monthly_filtered.empty:
-        st.info("Seleccione estaciones y un rango de fechas con datos para visualizar gráficos.")
-        return
-
-    # Pestañas internas para organizar
-    tab1, tab2, tab3 = st.tabs(["Serie Temporal", "Comparativa Mensual", "Mapa de Calor"])
-    
-    with tab1:
-        # Gráfico de Líneas (Serie de Tiempo)
-        fig_line = px.line(
-            df_monthly_filtered, 
-            x=Config.DATE_COL, 
-            y=Config.PRECIPITATION_COL,
-            color=Config.STATION_NAME_COL,
-            title="Evolución de la Precipitación Mensual (mm)",
-            labels={Config.PRECIPITATION_COL: "Lluvia (mm)", Config.DATE_COL: "Fecha"}
-        )
-        fig_line.update_layout(hovermode="x unified", height=500)
-        st.plotly_chart(fig_line, use_container_width=True)
-    
-    with tab2:
-        # Boxplot (Distribución por Mes)
-        fig_box = px.box(
-            df_monthly_filtered,
-            x=Config.MONTH_COL,
-            y=Config.PRECIPITATION_COL,
-            color=Config.STATION_NAME_COL,
-            title="Distribución de Lluvias por Mes (Ciclo Anual)",
-            labels={Config.MONTH_COL: "Mes (1=Ene, 12=Dic)", Config.PRECIPITATION_COL: "Lluvia (mm)"}
-        )
-        st.plotly_chart(fig_box, use_container_width=True)
-
-    with tab3:
-        # Heatmap (Intensidad)
-        fig_heat = px.density_heatmap(
-            df_monthly_filtered,
-            x=Config.DATE_COL,
-            y=Config.STATION_NAME_COL,
-            z=Config.PRECIPITATION_COL,
-            histfunc="avg",
-            title="Mapa de Calor de Intensidad de Lluvia",
-            color_continuous_scale="Viridis"
-        )
-        st.plotly_chart(fig_heat, use_container_width=True)
-
+    st.subheader("📈 Análisis Gráfico")
+    if df_monthly_filtered is not None and not df_monthly_filtered.empty:
+        tab1, tab2 = st.tabs(["Serie de Tiempo", "Mapa de Calor"])
+        with tab1:
+            fig = px.line(df_monthly_filtered, x=Config.DATE_COL, y=Config.PRECIPITATION_COL, color=Config.STATION_NAME_COL)
+            st.plotly_chart(fig, use_container_width=True)
+        with tab2:
+            fig_heat = px.density_heatmap(df_monthly_filtered, x=Config.DATE_COL, y=Config.STATION_NAME_COL, z=Config.PRECIPITATION_COL, histfunc="avg")
+            st.plotly_chart(fig_heat, use_container_width=True)
+    else:
+        st.info("Sin datos para graficar.")
+        
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     """Muestra el pronóstico semanal para una estación seleccionada."""
     st.subheader("🌦️ Pronóstico a 7 Días (Open-Meteo)")
@@ -919,6 +885,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
