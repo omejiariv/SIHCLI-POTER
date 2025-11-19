@@ -14,7 +14,6 @@ from modules.config import Config
 # -----------------------------------------------------------------------------
 
 def get_weather_forecast_simple(lat, lon):
-    """Obtiene pronóstico simple de Open-Meteo para evitar errores de importación."""
     try:
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
@@ -25,19 +24,15 @@ def get_weather_forecast_simple(lat, lon):
         }
         response = requests.get(url, params=params, timeout=5)
         data = response.json()
-        
         daily = data.get('daily', {})
         if not daily: return pd.DataFrame()
-
-        df = pd.DataFrame({
+        return pd.DataFrame({
             'Fecha': daily.get('time', []),
             'Temp. Máx (°C)': daily.get('temperature_2m_max', []),
             'Temp. Mín (°C)': daily.get('temperature_2m_min', []),
             'Lluvia (mm)': daily.get('precipitation_sum', [])
         })
-        return df
-    except Exception:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 def create_enso_chart(enso_data):
     """Crea el gráfico de Anomalía ONI (ENSO)."""
@@ -60,6 +55,31 @@ def create_enso_chart(enso_data):
     fig.update_layout(title="Índice Oceánico El Niño (ONI)", height=400)
     return fig
 
+# 1. FUNCIONES AUXILIARES DE PARSEO Y DATOS
+# -----------------------------------------------------------------------------
+
+def parse_spanish_date(x):
+    """
+    Convierte fechas en formato texto español (ej: 'ene-70', 'ago-23') a datetime.
+    """
+    if isinstance(x, str):
+        x = x.lower().strip()
+        # Mapa de traducción
+        trans = {
+            'ene': 'Jan', 'feb': 'Feb', 'mar': 'Mar', 'abr': 'Apr',
+            'may': 'May', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Aug',
+            'sep': 'Sep', 'oct': 'Oct', 'nov': 'Nov', 'dic': 'Dec'
+        }
+        for es, en in trans.items():
+            if es in x:
+                x = x.replace(es, en)
+                break # Solo reemplazamos el mes
+        try:
+            return pd.to_datetime(x, format='%b-%y')
+        except:
+            return pd.to_datetime(x, errors='coerce')
+    return pd.to_datetime(x, errors='coerce')
+
 # -----------------------------------------------------------------------------
 # 2. FUNCIONES PRINCIPALES DE VISUALIZACIÓN
 # -----------------------------------------------------------------------------
@@ -76,36 +96,28 @@ def display_alerts_tab(df_long, **kwargs):
         alertas = df_long[df_long[Config.PRECIPITATION_COL] > umbral]
         st.metric("Eventos Extremos Detectados", len(alertas))
         if not alertas.empty:
-            st.dataframe(alertas.sort_values(Config.PRECIPITATION_COL, ascending=False).head(10), use_container_width=True)
+            st.dataframe(alertas.sort_values(Config.PRECIPITATION_COL, ascending=False).head(50), use_container_width=True)
     else:
-        st.warning("No hay datos cargados para analizar alertas.")
+        st.warning("No hay datos para alertas.")
 
 def display_spatial_distribution_tab(gdf_filtered, **kwargs):
     st.subheader("🗺️ Distribución Espacial")
-    
     if gdf_filtered is not None and not gdf_filtered.empty:
-        # 1. Crear copia para no afectar datos originales
         map_data = gdf_filtered.copy()
-        
-        # 2. Asegurar columnas lat/lon desde geometry si faltan
+        # Asegurar columnas lat/lon
         if 'latitude' not in map_data.columns and 'geometry' in map_data.columns:
             map_data['latitude'] = map_data.geometry.y
             map_data['longitude'] = map_data.geometry.x
-            
-        # 3. LIMPIEZA CRÍTICA: Eliminar filas donde lat o lon sean NaN/Null
-        # Esto soluciona el StreamlitAPIException
+        
+        # Filtrar nulos para evitar el error de StreamlitAPIException
         map_data = map_data.dropna(subset=['latitude', 'longitude'])
         
         if not map_data.empty:
-            # 4. Mostrar mapa simple y robusto
-            try:
-                st.map(map_data, size=20, color='#0000FF')
-            except Exception as e:
-                st.error(f"Error renderizando mapa: {e}")
+            st.map(map_data, size=20, color='#0000FF')
         else:
-            st.warning("Las estaciones seleccionadas no tienen coordenadas válidas (geometría nula).")
+            st.warning("Las estaciones seleccionadas no tienen coordenadas válidas.")
     else:
-        st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
+        st.warning("No hay estaciones seleccionadas.")
 
 def display_graphs_tab(df_monthly_filtered, stations_for_analysis, **kwargs):
     st.subheader("📈 Análisis Gráfico Detallado")
@@ -336,7 +348,6 @@ def display_stats_tab(**kwargs):
 
 def display_correlation_tab(**kwargs):
     st.subheader("🔗 Análisis de Correlación")
-    
     df_monthly = kwargs.get('df_monthly_filtered')
     df_enso = kwargs.get('df_enso')
     
@@ -347,72 +358,71 @@ def display_correlation_tab(**kwargs):
         st.warning("Faltan datos ENSO.")
         return
 
-    st.markdown("Relación entre Lluvia Local y Fenómenos Globales (ENSO)")
-    
     try:
-        # --- PREPARACIÓN DE DATOS ROBUSTA ---
+        # Copias para no alterar originales
         ppt_data = df_monthly.copy()
         enso_data = df_enso.copy()
         
-        # 1. Asegurar fecha en Precipitación
+        # 1. Normalizar Fechas (CRÍTICO)
         ppt_data[Config.DATE_COL] = pd.to_datetime(ppt_data[Config.DATE_COL], errors='coerce')
-
-        # 2. PARSEO INTELIGENTE DE FECHAS ENSO (Español -> Fecha)
-        # Si la fecha es "ene-70", "dic-23", etc.
-        def parse_spanish_date(x):
-            if isinstance(x, str):
-                x = x.lower().strip()
-                # Diccionario de traducción
-                replacements = {
-                    'ene': 'Jan', 'feb': 'Feb', 'mar': 'Mar', 'abr': 'Apr', 
-                    'may': 'May', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Aug', 
-                    'sep': 'Sep', 'oct': 'Oct', 'nov': 'Nov', 'dic': 'Dec'
-                }
-                for es, en in replacements.items():
-                    if es in x:
-                        x = x.replace(es, en)
-                        return pd.to_datetime(x, format='%b-%y', errors='coerce')
-            # Si ya es fecha o formato estándar
-            return pd.to_datetime(x, errors='coerce')
-
-        # Aplicar parseo solo si es necesario (si la columna es objeto/string)
+        
+        # Parseo inteligente para ENSO (soporta 'ene-70')
         if enso_data[Config.DATE_COL].dtype == 'object':
-            enso_data[Config.DATE_COL] = enso_data[Config.DATE_COL].apply(parse_spanish_date)
+            enso_data[Config.DATE_COL] = enso_data[Config.DATE_COL].astype(str).apply(parse_spanish_date)
         else:
             enso_data[Config.DATE_COL] = pd.to_datetime(enso_data[Config.DATE_COL], errors='coerce')
-
-        # Eliminar fechas inválidas tras la conversión
+            
+        # Eliminar fechas inválidas
         ppt_data = ppt_data.dropna(subset=[Config.DATE_COL])
         enso_data = enso_data.dropna(subset=[Config.DATE_COL])
 
-        # 3. Agrupar y Unir
+        # 2. Agrupar y Unir
         regional_ppt = ppt_data.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+        
+        # El merge ahora funcionará porque ambas son datetime64[ns]
         merged = pd.merge(regional_ppt, enso_data, on=Config.DATE_COL, how='inner')
         
         if len(merged) > 12:
             col1, col2 = st.columns([2, 1])
             with col1:
-                fig = px.scatter(
-                    merged, x=Config.ENSO_ONI_COL, y=Config.PRECIPITATION_COL, trendline="ols",
-                    title="Correlación Lluvia vs. ONI", opacity=0.6
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                if Config.ENSO_ONI_COL in merged.columns:
+                    fig = px.scatter(
+                        merged, x=Config.ENSO_ONI_COL, y=Config.PRECIPITATION_COL, trendline="ols",
+                        title="Lluvia vs. ONI", opacity=0.6
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("Columna ONI no encontrada en datos unidos.")
             with col2:
-                corr = merged[Config.ENSO_ONI_COL].corr(merged[Config.PRECIPITATION_COL])
-                st.metric("Coeficiente Pearson", f"{corr:.2f}")
-                if abs(corr) > 0.5: st.success("Correlación Fuerte")
-                elif abs(corr) > 0.3: st.info("Correlación Moderada")
-                else: st.warning("Sin correlación clara")
+                if Config.ENSO_ONI_COL in merged.columns:
+                    corr = merged[Config.ENSO_ONI_COL].corr(merged[Config.PRECIPITATION_COL])
+                    st.metric("Correlación Pearson", f"{corr:.2f}")
         else:
-            st.warning(f"Datos insuficientes para correlación ({len(merged)} meses coincidentes).")
-            
+            st.warning(f"Datos insuficientes tras la unión ({len(merged)} meses). Verifique rangos de fecha.")
+
     except Exception as e:
-        st.error(f"Error calculando correlación: {e}")
+        st.error(f"Error en correlación: {e}")
         
-def display_enso_tab(df_enso, **kwargs):
-    st.subheader("Fenómeno ENSO")
-    if df_enso is not None:
-        st.plotly_chart(create_enso_chart(df_enso), use_container_width=True)
+def display_enso_tab(**kwargs):
+    st.subheader("🌊 Fenómeno ENSO")
+    df_enso = kwargs.get('df_enso')
+    
+    if df_enso is not None and not df_enso.empty:
+        # Aplicar el mismo parseo seguro
+        data = df_enso.copy()
+        if data[Config.DATE_COL].dtype == 'object':
+            data[Config.DATE_COL] = data[Config.DATE_COL].astype(str).apply(parse_spanish_date)
+        else:
+            data[Config.DATE_COL] = pd.to_datetime(data[Config.DATE_COL], errors='coerce')
+            
+        data = data.dropna(subset=[Config.DATE_COL]).sort_values(Config.DATE_COL)
+        
+        if Config.ENSO_ONI_COL in data.columns:
+            st.plotly_chart(create_enso_chart(data), use_container_width=True)
+        else:
+            st.warning("Columna ONI no encontrada.")
+    else:
+        st.info("No hay datos ENSO cargados.")
 
 def display_life_zones_tab(**kwargs):
     st.info("Módulo de Zonas de Vida.")
@@ -428,6 +438,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
