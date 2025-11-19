@@ -8,6 +8,9 @@ import requests
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from modules.config import Config
+import pymannkendall as mk
+from statsmodels.tsa.seasonal import seasonal_decompose
+from prophet import Prophet
 
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
@@ -260,52 +263,90 @@ def display_climate_forecast_tab(**kwargs):
         st.warning(f"La columna {index_col} no se encuentra en los datos.")
 
 def display_trends_and_forecast_tab(**kwargs):
-    # Recuperamos los datos del kwargs para no depender de argumentos posicionales
-    df_anual = kwargs.get('df_anual_melted')
-    stations = kwargs.get('stations_for_analysis')
-
-    st.subheader("📉 Análisis de Tendencias (Mann-Kendall)")
+    st.subheader("📉 Tendencias y Pronósticos")
     
-    if df_anual is None or df_anual.empty:
-        st.warning("No hay datos anuales suficientes para calcular tendencias.")
+    df_monthly = kwargs.get('df_monthly_filtered')
+    stations = kwargs.get('stations_for_analysis')
+    
+    if not stations:
+        st.warning("Seleccione estaciones.")
         return
 
-    st.info("Este módulo calcula si la lluvia está aumentando o disminuyendo estadísticamente a lo largo de los años.")
-
-    # Selección de estación para análisis detallado
-    selected_station = st.selectbox("Analizar Tendencia de:", stations, key="trend_station_sel")
+    # Selector interno
+    selected_station = st.selectbox("Seleccionar Estación para Análisis:", stations, key="trend_station_main")
     
     if selected_station:
-        station_data = df_anual[df_anual[Config.STATION_NAME_COL] == selected_station].sort_values(Config.YEAR_COL)
+        # Filtrar datos de la estación
+        station_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == selected_station].copy()
+        station_data = station_data.sort_values(Config.DATE_COL).set_index(Config.DATE_COL)
         
-        if len(station_data) < 5:
-            st.warning("Se necesitan al menos 5 años de datos para calcular una tendencia confiable.")
-        else:
-            # Regresión Lineal Simple (Visual)
-            fig = px.scatter(
-                station_data, 
-                x=Config.YEAR_COL, 
-                y=Config.PRECIPITATION_COL, 
-                trendline="ols",
-                title=f"Tendencia de Precipitación Anual - {selected_station}",
-                labels={Config.PRECIPITATION_COL: "Precipitación Total Anual (mm)"}
-            )
+        # Llenar huecos mínimos para que las series de tiempo funcionen
+        ts = station_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear')
+
+        tab_trend, tab_prophet = st.tabs(["Tendencia (Mann-Kendall)", "Pronóstico (Prophet)"])
+
+        with tab_trend:
+            if len(ts) > 24:
+                try:
+                    # Test de Mann-Kendall
+                    result = mk.original_test(ts)
+                    trend = result.trend
+                    slope = result.slope
+                    p_value = result.p
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Tendencia Detectada", "Creciente 📈" if slope > 0 else "Decreciente 📉")
+                    c2.metric("Pendiente (Sen's Slope)", f"{slope:.3f} mm/mes")
+                    c3.metric("Significancia (p-value)", f"{p_value:.4f}", delta="Significativo" if p_value < 0.05 else "No Sig.")
+
+                    # Gráfico de descomposición estacional
+                    decomp = seasonal_decompose(ts, model='additive', period=12)
+                    fig_trend = go.Figure()
+                    fig_trend.add_trace(go.Scatter(x=ts.index, y=decomp.trend, mode='lines', name='Tendencia', line=dict(color='red', width=2)))
+                    fig_trend.add_trace(go.Scatter(x=ts.index, y=ts, mode='lines', name='Observado', opacity=0.3))
+                    fig_trend.update_layout(title="Descomposición de Tendencia")
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error en cálculo de tendencia: {e}")
+            else:
+                st.warning("Se necesitan al menos 24 meses de datos para calcular tendencias.")
+
+        with tab_prophet:
+            st.markdown("##### Pronóstico Automático (Prophet)")
+            horizon = st.slider("Meses a pronosticar:", 6, 36, 12)
             
-            # Obtener resultados de la regresión
-            results = px.get_trendline_results(fig)
-            model = results.px_fit_results.iloc[0]
-            slope = model.params[1]
-            p_value = model.pvalues[1]
-            
-            # Interpretación automática
-            trend_desc = "AUMENTO" if slope > 0 else "DISMINUCIÓN"
-            significance = "Significativo" if p_value < 0.05 else "No Significativo"
-            
-            c1, c2 = st.columns(2)
-            c1.metric("Tasa de Cambio Estimada", f"{slope:.2f} mm/año", delta=trend_desc)
-            c2.metric("Confianza Estadística", significance, help="P-value < 0.05 indica alta certeza")
-            
-            st.plotly_chart(fig, use_container_width=True)
+            if st.button("Generar Pronóstico"):
+                with st.spinner("Entrenando modelo inteligente..."):
+                    try:
+                        # Preparar datos para Prophet (ds, y)
+                        df_prophet = ts.reset_index().rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
+                        
+                        m = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+                        m.fit(df_prophet)
+                        
+                        future = m.make_future_dataframe(periods=horizon, freq='MS')
+                        forecast = m.predict(future)
+                        
+                        # Graficar
+                        fig_fc = go.Figure()
+                        # Histórico
+                        fig_fc.add_trace(go.Scatter(x=df_prophet['ds'], y=df_prophet['y'], name='Histórico', opacity=0.4))
+                        # Pronóstico
+                        fc_data = forecast.iloc[-horizon:]
+                        fig_fc.add_trace(go.Scatter(x=fc_data['ds'], y=fc_data['yhat'], name='Pronóstico', line=dict(color='green', width=2)))
+                        # Banda de confianza
+                        fig_fc.add_trace(go.Scatter(
+                            x=pd.concat([fc_data['ds'], fc_data['ds'][::-1]]),
+                            y=pd.concat([fc_data['yhat_upper'], fc_data['yhat_lower'][::-1]]),
+                            fill='toself', fillcolor='rgba(0,255,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
+                            name='Intervalo de Confianza'
+                        ))
+                        
+                        fig_fc.update_layout(title=f"Pronóstico a {horizon} meses - {selected_station}")
+                        st.plotly_chart(fig_fc, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"Error en Prophet: {e}")
 
 def display_anomalies_tab(df_monthly_filtered, df_long, **kwargs):
     st.subheader("⚠️ Análisis de Anomalías")
@@ -344,7 +385,65 @@ def display_anomalies_tab(df_monthly_filtered, df_long, **kwargs):
     st.plotly_chart(fig, use_container_width=True)
 
 def display_stats_tab(**kwargs):
-    st.info("Módulo de Estadísticas.")
+    st.subheader("📊 Estadísticas Hidrológicas Detalladas")
+    
+    # Recuperar datos
+    df_monthly = kwargs.get('df_monthly_filtered')
+    df_anual = kwargs.get('df_anual_melted')
+    
+    if df_monthly is None or df_monthly.empty:
+        st.warning("No hay datos para calcular estadísticas.")
+        return
+
+    tab1, tab2 = st.tabs(["Resumen General", "Matriz de Disponibilidad"])
+
+    with tab1:
+        # 1. Tabla de Resumen Estadístico
+        st.markdown("##### Estadísticas Descriptivas por Estación")
+        
+        # Agrupar por estación
+        stats_df = df_monthly.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].describe()
+        
+        # Añadir suma total histórica
+        sum_total = df_monthly.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].sum()
+        stats_df['Total Histórico (mm)'] = sum_total
+        
+        # Formatear
+        st.dataframe(stats_df.style.format("{:.1f}"), use_container_width=True)
+        
+        # 2. Descargar
+        st.download_button(
+            "📥 Descargar Estadísticas (CSV)",
+            stats_df.to_csv().encode('utf-8'),
+            "estadisticas_precipitacion.csv",
+            "text/csv"
+        )
+
+    with tab2:
+        st.markdown("##### Disponibilidad de Datos (Mapa de Calor)")
+        st.info("Muestra qué meses tienen datos registrados. Útil para identificar huecos.")
+        
+        # Crear matriz: Filas=Años, Columnas=Meses, Valor=Conteo
+        # Pivotear datos
+        try:
+            matrix = df_monthly.pivot_table(
+                index=df_monthly[Config.DATE_COL].dt.year,
+                columns=df_monthly[Config.DATE_COL].dt.month,
+                values=Config.PRECIPITATION_COL,
+                aggfunc='count'
+            ).fillna(0)
+            
+            fig_matrix = px.imshow(
+                matrix,
+                labels=dict(x="Mes", y="Año", color="Registros"),
+                x=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+                title="Matriz de Densidad de Datos (Registros por Mes)",
+                color_continuous_scale="Greens"
+            )
+            fig_matrix.update_layout(height=600)
+            st.plotly_chart(fig_matrix, use_container_width=True)
+        except Exception as e:
+            st.warning(f"No se pudo generar la matriz de disponibilidad: {e}")
 
 def display_correlation_tab(**kwargs):
     st.subheader("🔗 Análisis de Correlación")
@@ -438,6 +537,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
