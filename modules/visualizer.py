@@ -9,7 +9,7 @@ from streamlit_folium import st_folium
 from modules.config import Config
 
 # -----------------------------------------------------------------------------
-# 1. FUNCIONES DE GRÁFICOS (Requeridas por reporter.py y otros)
+# 1. FUNCIONES DE GRÁFICOS
 # -----------------------------------------------------------------------------
 
 def create_enso_chart(enso_data):
@@ -72,7 +72,6 @@ def create_anomaly_chart(df_plot):
 
 def display_welcome_tab():
     st.header(f"Bienvenido a {Config.APP_TITLE}")
-    # CSS Limpio y corregido
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css?family=Playfair+Display:wght@700&display=swap');
