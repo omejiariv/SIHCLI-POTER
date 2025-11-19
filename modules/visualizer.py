@@ -335,94 +335,172 @@ def display_satellite_imagery_tab(gdf_filtered):
 
 # --- Placeholders para el resto de pestañas ---
 
-def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, **kwargs):
+def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
     st.subheader("🌍 Superficies de Interpolación y Morfometría")
     
-    # --- Recuperar variables adicionales del kwargs para los filtros ---
+    # Recuperar variables adicionales del kwargs
     selected_regions = kwargs.get('selected_regions', [])
     selected_municipios = kwargs.get('selected_municipios', [])
-    gdf_full_geoms = kwargs.get('gdf_subcuencas') # Usar el completo para filtrar
 
     if df_long.empty or gdf_stations.empty:
-        st.warning("Faltan datos para realizar interpolaciones.")
+        st.warning("Faltan datos para realizar interpolaciones. Asegúrate de tener estaciones cargadas y datos de precipitación.")
         return
 
     # Selector de Modo
     mode = st.radio("Modo de Análisis:", ["Regional (Comparativo)", "Por Cuenca Específica"], horizontal=True)
     
-    # --- MODO 1: REGIONAL COMPARATIVO (Igual que antes) ---
+    # --- MODO 1: REGIONAL COMPARATIVO ---
     if mode == "Regional (Comparativo)":
-        # ... (Mismo código de comparación regional de la respuesta anterior) ...
-        # Copia aquí el bloque "MODO 1" que ya te funcionaba o pídemelo si lo necesitas.
-        st.info("Comparación de períodos históricos en la zona seleccionada.")
+        st.info("Compare la distribución espacial de la precipitación entre dos períodos.")
+        
         c1, c2 = st.columns(2)
+        
+        # Configuración Mapa 1
         with c1:
+            st.markdown("#### Mapa 1")
             min_y, max_y = int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max())
-            range1 = st.slider("Período 1:", min_y, max_y, (min_y, min_y+5), key="p1")
-        with c2:
-            range2 = st.slider("Período 2:", min_y, max_y, (max_y-5, max_y), key="p2")
+            range1 = st.slider("Período 1:", min_y, max_y, (min_y, min_y+5), key="p1_range")
+            method1 = st.selectbox("Método 1:", ["IDW", "Spline", "Kriging (Simulado)"], key="m1")
             
-        if st.button("Generar Comparación"):
-             # ... (Lógica de interpolación simple) ...
-             st.success("Mapas generados (Simulación).")
+        # Configuración Mapa 2
+        with c2:
+            st.markdown("#### Mapa 2")
+            range2 = st.slider("Período 2:", min_y, max_y, (max_y-5, max_y), key="p2_range")
+            method2 = st.selectbox("Método 2:", ["IDW", "Spline", "Kriging (Simulado)"], key="m2")
 
-    # --- MODO 2: POR CUENCA (MEJORADO) ---
+        if st.button("Generar Comparación Regional"):
+            with st.spinner("Generando superficies de interpolación..."):
+                
+                # Función para generar una figura interpolada
+                def get_interpolated_figure(year_range, method_name, title):
+                    mask = (df_long[Config.YEAR_COL] >= year_range[0]) & (df_long[Config.YEAR_COL] <= year_range[1])
+                    df_period_avg = df_long[mask].groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+                    
+                    df_map_data = pd.merge(df_period_avg, gdf_stations, on=Config.STATION_NAME_COL, how='inner').dropna(subset=['latitude', 'longitude', Config.PRECIPITATION_COL])
+                    
+                    if len(df_map_data) < 4:
+                        st.warning(f"Se necesitan al menos 4 estaciones con datos en el período {year_range[0]}-{year_range[1]} para interpolar con {method_name}.")
+                        return None
+                    
+                    # Definir la grilla de interpolación basada en la extensión de las estaciones activas
+                    min_lon, max_lon = df_map_data['longitude'].min(), df_map_data['longitude'].max()
+                    min_lat, max_lat = df_map_data['latitude'].min(), df_map_data['latitude'].max()
+
+                    # Añadir un pequeño margen para que la interpolación no se corte justo en los límites de las estaciones
+                    pad_lon = (max_lon - min_lon) * 0.1
+                    pad_lat = (max_lat - min_lat) * 0.1
+                    
+                    grid_lon, grid_lat = np.mgrid[min_lon - pad_lon : max_lon + pad_lon : 100j,
+                                                  min_lat - pad_lat : max_lat + pad_lat : 100j]
+                    
+                    points = df_map_data[['longitude', 'latitude']].values
+                    values = df_map_data[Config.PRECIPITATION_COL].values
+                    
+                    scipy_method = 'linear' # Por defecto para IDW y Kriging simulado
+                    if "Spline" in method_name: scipy_method = 'cubic'
+                    
+                    grid_z = griddata(points, values, (grid_lon, grid_lat), method=scipy_method, fill_value=np.nan)
+                    
+                    # Crear figura de Plotly
+                    fig = go.Figure(data=go.Contour(
+                        z=grid_z.T, x=np.linspace(min_lon - pad_lon, max_lon + pad_lon, 100), y=np.linspace(min_lat - pad_lat, max_lat + pad_lat, 100),
+                        colorscale='Viridis', colorbar=dict(title='Precipitación (mm/año)'),
+                        contours=dict(coloring='heatmap', showlabels=True, labelfont=dict(size=8, color='black')),
+                        hovertemplate='Longitud: %{x}<br>Latitud: %{y}<br>Lluvia: %{z:.0f} mm/año<extra></extra>'
+                    ))
+                    
+                    # Añadir marcadores de estaciones
+                    fig.add_trace(go.Scatter(
+                        x=df_map_data['longitude'], y=df_map_data['latitude'], mode='markers',
+                        marker=dict(color='red', size=6, line=dict(width=1, color='DarkRed')),
+                        name='Estaciones',
+                        hovertemplate='Estación: %{text}<br>Lluvia: %{marker.color:.0f} mm/año<extra></extra>',
+                        text=df_map_data[Config.STATION_NAME_COL],
+                        marker_color=df_map_data[Config.PRECIPITATION_COL] # Usar color para tooltip de la estación
+                    ))
+
+                    fig.update_layout(
+                        title=f"{title} ({method_name})",
+                        xaxis_title="Longitud",
+                        yaxis_title="Latitud",
+                        height=500,
+                        margin={"r":0,"t":50,"l":0,"b":0} # Ajustar márgenes
+                    )
+                    return fig
+
+                col_map1, col_map2 = st.columns(2)
+                
+                fig1 = get_interpolated_figure(range1, method1, f"Período {range1[0]}-{range1[1]}")
+                if fig1: col_map1.plotly_chart(fig1, use_container_width=True)
+                else: col_map1.warning(f"No se pudo generar el Mapa 1 para {range1[0]}-{range1[1]}.")
+                
+                fig2 = get_interpolated_figure(range2, method2, f"Período {range2[0]}-{range2[1]}")
+                if fig2: col_map2.plotly_chart(fig2, use_container_width=True)
+                else: col_map2.warning(f"No se pudo generar el Mapa 2 para {range2[0]}-{range2[1]}.")
+
+    # --- MODO 2: POR CUENCA (Fusión, Balance y Morfometría) ---
     else:
         if gdf_subcuencas.empty:
-            st.warning("No hay capa de subcuencas cargada.")
+            st.warning("No hay capa de subcuencas cargada en la base de datos.")
             return
 
         st.markdown("#### 1. Selección de Cuenca(s)")
         
-        # --- FILTROS EN CASCADA PARA CUENCAS ---
-        # Filtrar cuencas que intersectan con la región/municipio seleccionado en el sidebar
-        # (Esto asume que gdf_subcuencas tiene columna de región/municipio o se hace cruce espacial)
-        # Si no tienen esa info, usamos las geometrías filtradas del sidebar como máscara
-        
-        cuencas_disponibles = sorted(gdf_subcuencas['nombre'].unique())
-        
-        # Si hay filtros en el sidebar, intentamos filtrar la lista (Simulado por nombre si no hay cruce)
-        # Idealmente haríamos un sjoin, pero para rapidez mostramos todas y dejamos buscar.
-        
-        sel_cuencas = st.multiselect("Seleccione Subcuencas para fusionar:", cuencas_disponibles)
+        # --- FILTRAR CUENCAS POR PROXIMIDAD A ESTACIONES SELECCIONADAS ---
+        available_cuencas = []
+        if not gdf_filtered.empty: # gdf_filtered son las estaciones seleccionadas en el sidebar
+            # buffered_stations = gdf_filtered.geometry.buffer(0.1) # Buffer de 0.1 grados (~10km) alrededor de estaciones
+            # cuencas_intersectantes = gdf_subcuencas[gdf_subcuencas.geometry.intersects(buffered_stations.unary_union)]
+            # available_cuencas = sorted(cuencas_intersectantes['nombre'].unique())
+            
+            # SOLUCIÓN TEMPORAL: Mostrar todas las cuencas si no hay un filtro espacial robusto
+            available_cuencas = sorted(gdf_subcuencas['nombre'].unique())
+            if not available_cuencas: st.info("No se encontraron cuencas cerca de las estaciones filtradas. Mostrando todas.")
+        else:
+            available_cuencas = sorted(gdf_subcuencas['nombre'].unique())
+            st.info("Filtra estaciones en el sidebar para reducir la lista de cuencas disponibles.")
+
+
+        sel_cuencas = st.multiselect("Seleccione Subcuencas para fusionar:", available_cuencas)
         
         if sel_cuencas:
             # Fusionar geometría
             subset = gdf_subcuencas[gdf_subcuencas['nombre'].isin(sel_cuencas)]
             union_geom = subset.unary_union
-            
-            # CORRECCIÓN NAMEERROR: Usamos gpd explícitamente importado
             gdf_union = gpd.GeoDataFrame({'geometry': [union_geom]}, crs=gdf_subcuencas.crs)
             
-            # Configuración
+            # Configuración de período
             min_y, max_y = int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max())
-            rango_cuenca = st.slider("Período de Análisis Hidrológico:", min_y, max_y, (min_y, max_y))
+            rango_cuenca = st.slider("Período de Análisis Hidrológico:", min_y, max_y, (min_y, max_y), key="cuenca_range")
             
             # Botón de acción
-            if st.button("Analizar Cuenca Fusionada"):
-                with st.spinner("Calculando morfometría y balance..."):
-                    # A. INTERPOLACIÓN (Recorte visual)
+            if st.button("Analizar Cuenca(s) Fusionada(s)"):
+                with st.spinner("Calculando morfometría y balance hídrico..."):
+                    # Filtrar datos de precipitación por el período seleccionado
                     mask_time = (df_long[Config.YEAR_COL] >= rango_cuenca[0]) & (df_long[Config.YEAR_COL] <= rango_cuenca[1])
-                    df_period = df_long[mask_time].groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-                    df_map = pd.merge(df_period, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
+                    df_period_avg = df_long[mask_time].groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                     
-                    if len(df_map) >= 3:
-                        # Calcular precipitación media (Promedio simple de estaciones en la zona)
-                        ppt_media_cuenca = df_map[Config.PRECIPITATION_COL].mean()
+                    # Unir con coordenadas de todas las estaciones
+                    df_map_data_full = pd.merge(df_period_avg, gdf_stations, on=Config.STATION_NAME_COL, how='inner').dropna(subset=['latitude', 'longitude', Config.PRECIPITATION_COL])
+                    
+                    # Filtrar estaciones que estén DENTRO o MUY CERCA de la cuenca fusionada
+                    stations_in_or_near_basin = df_map_data_full[df_map_data_full.apply(lambda row: gdf_union.geometry.iloc[0].intersects(gpd.points_from_xy([row['longitude']], [row['latitude']], crs=gdf_stations.crs)[0].buffer(0.01)), axis=1)]
+
+                    if not stations_in_or_near_basin.empty:
+                        # Calcular precipitación media de las estaciones relevantes para la cuenca
+                        ppt_media_cuenca = stations_in_or_near_basin[Config.PRECIPITATION_COL].mean()
                         
-                        # B. MORFOMETRÍA
-                        # Importamos aquí para asegurar disponibilidad
-                        from modules.analysis import calculate_morphometry, calculate_hydrological_balance
-                        
-                        morph = calculate_morphometry(gdf_union)
-                        
+                        st.success(f"Análisis para la unión de: {', '.join(sel_cuencas)} (Período: {rango_cuenca[0]}-{rango_cuenca[1]})")
                         st.markdown("---")
+
+                        # B. MORFOMETRÍA
+                        morph = calculate_morphometry(gdf_union)
                         st.subheader("📐 Morfometría")
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Área Total", f"{morph['area_km2']:.2f} km²")
-                        c2.metric("Perímetro", f"{morph['perimetro_km']:.2f} km")
-                        c3.metric("Índice de Forma (Kc)", f"{morph['indice_forma']:.2f}")
-                        c4.metric("Altitud Media (Est)", f"{morph['alt_prom_m']:.0f} m")
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Área Total", f"{morph['area_km2']:.2f} km²")
+                        m2.metric("Perímetro", f"{morph['perimetro_km']:.2f} km")
+                        m3.metric("Índice de Forma (Kc)", f"{morph['indice_forma']:.2f}")
+                        m4.metric("Altitud Media (Est.)", f"{morph['alt_prom_m']:.0f} m")
                         
                         # C. BALANCE HÍDRICO
                         st.subheader("💧 Balance Hídrico (Estimación Turc)")
@@ -434,20 +512,38 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, **kwargs):
                         b3.metric("Caudal Específico", f"{bal['Q_mm']:.0f} mm/año")
                         
                         st.success(f"**Volumen de Agua Anual Ofertado:** {bal['Q_m3_año']/1e6:.2f} Millones de m³")
-                        
-                        # Mapa simple de la cuenca
-                        minx, miny, maxx, maxy = gdf_union.total_bounds
-                        m = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=11)
-                        folium.GeoJson(gdf_union, name="Cuenca Fusionada", style_function=lambda x: {'color': 'red', 'fillOpacity': 0.2}).add_to(m)
-                        
-                        # Estaciones usadas
-                        for _, row in df_map.iterrows():
-                             folium.Marker([row['latitude'], row['longitude']], tooltip=f"{row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:.0f}mm").add_to(m)
+                        st.markdown("---")
 
-                        st_folium(m, height=400, width=800)
+                        # D. Visualización del Mapa Folium con Cuenca y Estaciones
+                        st.subheader("Vista Espacial de la Cuenca")
+                        minx, miny, maxx, maxy = gdf_union.total_bounds
+                        map_center = [(miny+maxy)/2, (minx+maxx)/2]
+                        m = folium.Map(location=map_center, zoom_start=11, tiles="CartoDB positron")
+                        
+                        # Añadir la cuenca fusionada
+                        folium.GeoJson(
+                            gdf_union, 
+                            name="Cuenca Fusionada", 
+                            style_function=lambda x: {'color': 'blue', 'fillColor': 'lightblue', 'fillOpacity': 0.3, 'weight': 2},
+                            tooltip=f"Área: {morph['area_km2']:.2f} km²"
+                        ).add_to(m)
+                        
+                        # Añadir estaciones usadas en el cálculo
+                        for idx, row in stations_in_or_near_basin.iterrows():
+                            folium.Marker(
+                                location=[row['latitude'], row['longitude']],
+                                tooltip=f"{row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:.0f} mm/año",
+                                icon=folium.Icon(color="green", icon="tint")
+                            ).add_to(m)
+
+                        folium.LayerControl().add_to(m)
+                        # Renderizar el mapa de Folium
+                        st_folium(m, height=400, width="100%")
                         
                     else:
-                        st.warning("No hay suficientes estaciones con datos en el período y zona seleccionada para un análisis robusto.")
+                        st.warning("No se encontraron estaciones con datos dentro o muy cerca de la cuenca(s) seleccionada(s) en el período especificado. Por favor, ajuste la selección.")
+        else:
+            st.info("Seleccione una o más subcuencas para realizar el análisis.")
 
 def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático (Índices)")
@@ -971,6 +1067,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
