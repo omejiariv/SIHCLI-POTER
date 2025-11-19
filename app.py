@@ -10,7 +10,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Ignorar advertencias
+# Ignorar advertencias de librerías
 warnings.filterwarnings('ignore')
 
 # --- Importaciones de Módulos Propios ---
@@ -19,31 +19,31 @@ from modules.data_processor import load_and_process_all_data, complete_series
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
 
-# Importamos TODAS las funciones disponibles en el nuevo visualizer.py
+# Importamos TODAS las funciones de visualización
 from modules.visualizer import (
     display_welcome_tab,
     display_alerts_tab,
     display_spatial_distribution_tab,
-    display_graphs_tab(**display_args),
+    display_graphs_tab,
     display_advanced_maps_tab,
-    display_climate_forecast_tab,     # Pronóstico de índices (ONI/SOI)
-    display_trends_and_forecast_tab,  # SARIMA/Prophet para precipitación
-    display_anomalies_tab,            # Nuevo: Análisis de Anomalías
-    display_stats_tab,                # Nuevo: Estadísticas detalladas
-    display_correlation_tab,          # Nuevo: Correlaciones
-    display_enso_tab,                 # Nuevo: Análisis ENSO detallado
+    display_climate_forecast_tab,
+    display_trends_and_forecast_tab,
+    display_anomalies_tab,
+    display_stats_tab,
+    display_correlation_tab,
+    display_enso_tab,
     display_life_zones_tab,
-    display_drought_analysis_tab,     # Nuevo nombre (antes risk_tab)
-    display_climate_scenarios_tab,    # Nuevo: Escenarios Cambio Climático
-    display_station_table_tab,        # Tabla detallada
-    display_weekly_forecast_tab,      # Pronóstico 7 días OpenMeteo
-    display_satellite_imagery_tab,    # WMS Satelital
-    display_land_cover_analysis_tab   # Coberturas
+    display_drought_analysis_tab,
+    display_climate_scenarios_tab,
+    display_station_table_tab,
+    display_weekly_forecast_tab,
+    display_satellite_imagery_tab,
+    display_land_cover_analysis_tab
 )
 
 # --- FUNCIÓN PRINCIPAL ---
 def main():
-    # CSS Personalizado
+    # Estilos CSS Personalizados
     st.markdown("""
     <style>
         .main .block-container {padding-top: 2rem; padding-bottom: 2rem;}
@@ -54,65 +54,97 @@ def main():
             color: white;
             border-radius: 5px;
         }
+        /* Ajuste para pestañas */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 2px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            white-space: pre-wrap;
+            background-color: #f0f2f6;
+            border-radius: 4px 4px 0 0;
+            padding-top: 10px;
+            padding-bottom: 10px;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #ffffff;
+            border-bottom: 2px solid #1f77b4;
+        }
     </style>
     """, unsafe_allow_html=True)
 
-    # 1. Cargar Datos
+    # ---------------------------------------------------------
+    # 1. CARGAR DATOS (Backend)
+    # ---------------------------------------------------------
+    # Ahora recibimos 6 valores (incluyendo predios)
     gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
 
     if gdf_stations is None or df_long is None:
-        st.error("⚠️ Error Fatal: No se pudieron cargar los datos. Verifica la conexión a BD.")
+        st.error("⚠️ Error Fatal: No se pudieron cargar los datos. Verifica la conexión a la Base de Datos.")
         st.stop()
 
-    # 2. Sidebar y Filtros
+    # ---------------------------------------------------------
+    # 2. BARRA LATERAL Y FILTROS
+    # ---------------------------------------------------------
     (stations_for_analysis, df_anual_melted, df_monthly_filtered,
      gdf_filtered, analysis_mode, selected_regions, selected_municipios,
      selected_altitudes, year_range) = create_sidebar(gdf_stations, df_long)
 
-    # Lógica de interpolación (si se activó en sidebar)
+    # Lógica de interpolación (si se activó el checkbox en sidebar)
     if st.session_state.get('apply_interpolation', False):
-        with st.spinner("Completando series de tiempo..."):
+        with st.spinner("🔄 Completando series de tiempo (Interpolación)..."):
             df_monthly_filtered = complete_series(df_monthly_filtered)
-            # Recalcular anual con datos completados
+            # Recalcular anual con datos completados para consistencia
             df_anual_melted = df_monthly_filtered.groupby(
                 [Config.STATION_NAME_COL, Config.YEAR_COL]
             )[Config.PRECIPITATION_COL].sum().reset_index()
-            st.toast("✅ Series completadas con interpolación")
+            st.toast("✅ Series completadas correctamente")
 
-    # Calcular fechas para filtros internos
-    start_date = pd.to_datetime(f"{year_range[0]}-01-01")
-    end_date = pd.to_datetime(f"{year_range[1]}-12-31")
+    # Calcular fechas exactas para procesos internos
+    try:
+        start_date = pd.to_datetime(f"{year_range[0]}-01-01")
+        end_date = pd.to_datetime(f"{year_range[1]}-12-31")
+    except:
+        start_date, end_date = None, None
 
-    # 3. Diccionario de Argumentos (Para pasar a las funciones limpiamente)
+    # ---------------------------------------------------------
+    # 3. DICCIONARIO DE ARGUMENTOS (Contexto)
+    # ---------------------------------------------------------
+    # Empaquetamos todo para pasarlo limpio a las funciones
     display_args = {
-        "df_long": df_long,
-        "gdf_stations": gdf_stations,
+        "df_long": df_long,             # Histórico completo (para referencia)
+        "gdf_stations": gdf_stations,   # Metadatos de estaciones
         "gdf_municipios": gdf_municipios,
         "gdf_subcuencas": gdf_subcuencas,
-        "gdf_predios": gdf_predios,
-        "df_enso": df_enso,
-        "df_enso": df_enso,
+        "gdf_predios": gdf_predios,     # Nueva capa de predios
+        "df_enso": df_enso,             # Índices climáticos
+        
+        # Datos Filtrados (Selección del usuario)
         "stations_for_analysis": stations_for_analysis,
         "gdf_filtered": gdf_filtered,
+        "df_anual_melted": df_anual_melted,         # Para gráficos anuales
+        "df_monthly_filtered": df_monthly_filtered, # Para gráficos mensuales
+        
+        # Parámetros de Filtro
         "analysis_mode": analysis_mode,
         "selected_regions": selected_regions,
         "selected_municipios": selected_municipios,
         "selected_altitudes": selected_altitudes,
-        "df_anual_melted": df_anual_melted,
-        "df_monthly_filtered": df_monthly_filtered,
+        "year_range": year_range,
         "start_date": start_date,
-        "end_date": end_date,
-        "year_range": year_range
+        "end_date": end_date
     }
 
-    # 4. Definición de Pestañas (Estructura Completa)
+    # ---------------------------------------------------------
+    # 4. DEFINICIÓN DE PESTAÑAS
+    # ---------------------------------------------------------
     tab_titles = [
         "🏠 Bienvenida", 
         "🚨 Alertas", 
         "🗺️ Distribución", 
         "📈 Gráficos", 
         "📊 Estadísticas",
-        "📉 Tendencias y Pronósticos",
+        "📉 Tendencias",
         "⚠️ Anomalías",
         "🔗 Correlación",
         "🌊 ENSO",
@@ -120,23 +152,26 @@ def main():
         "🌍 Mapas Avanzados",
         "🌱 Zonas de Vida",
         "🌡️ Cambio Climático",
-        "🛰️ Satélite/Clima",
+        "🛰️ Tiempo Real",
         "📄 Reporte"
     ]
     
     tabs = st.tabs(tab_titles)
 
-    # 5. Renderizado de Pestañas
-    with tabs[0]:
+    # ---------------------------------------------------------
+    # 5. RENDERIZADO DE MÓDULOS
+    # ---------------------------------------------------------
+    
+    with tabs[0]: # Bienvenida
         display_welcome_tab()
     
-    with tabs[1]:
+    with tabs[1]: # Alertas
         display_alerts_tab(**display_args)
 
-    with tabs[2]:
+    with tabs[2]: # Mapa Distribución
         display_spatial_distribution_tab(**display_args)
 
-    with tabs[3]:
+    with tabs[3]: # Gráficos
         display_graphs_tab(**display_args)
 
     with tabs[4]: # Estadísticas
@@ -144,10 +179,10 @@ def main():
         st.markdown("---")
         display_station_table_tab(**display_args)
 
-    with tabs[5]: # Tendencias y Pronósticos (SARIMA/Prophet)
+    with tabs[5]: # Tendencias y Pronósticos
         display_trends_and_forecast_tab(**display_args)
         st.markdown("---")
-        display_climate_forecast_tab(**display_args) # Pronóstico de índices
+        display_climate_forecast_tab(**display_args)
 
     with tabs[6]: # Anomalías
         display_anomalies_tab(**display_args)
@@ -158,27 +193,25 @@ def main():
     with tabs[8]: # ENSO
         display_enso_tab(**display_args)
 
-    with tabs[9]: # Sequía / Análisis de Riesgo
-        # Esta función es la que daba error. Ahora debe existir en visualizer.py
+    with tabs[9]: # Sequía
         display_drought_analysis_tab(**display_args)
 
-    with tabs[10]: # Mapas Avanzados (Interpolación, Morfometría)
+    with tabs[10]: # Mapas Avanzados (Interpolación)
         display_advanced_maps_tab(**display_args)
 
     with tabs[11]: # Zonas de Vida
         display_life_zones_tab(**display_args)
-        # Opcional: Agregar cobertura si tienes el raster
-        # display_land_cover_analysis_tab(**display_args)
+        # display_land_cover_analysis_tab(**display_args) # Opcional si hay raster
 
-    with tabs[12]: # Escenarios Cambio Climático
+    with tabs[12]: # Escenarios
         display_climate_scenarios_tab(**display_args)
 
-    with tabs[13]: # Satélite y Pronóstico Semanal
+    with tabs[13]: # Tiempo Real (Satélite/Pronóstico)
         st.subheader("Herramientas de Tiempo Real")
-        subtab1, subtab2 = st.tabs(["Pronóstico 7 Días (OpenMeteo)", "Imágenes Satelitales"])
-        with subtab1:
+        sub1, sub2 = st.tabs(["Pronóstico 7 Días", "Satélite"])
+        with sub1:
             display_weekly_forecast_tab(stations_for_analysis, gdf_filtered)
-        with subtab2:
+        with sub2:
             display_satellite_imagery_tab(gdf_filtered)
 
     with tabs[14]: # Reporte PDF
@@ -189,7 +222,7 @@ def main():
                 with st.spinner("Generando PDF..."):
                     analysis_results = {
                         "n_estaciones": len(stations_for_analysis),
-                        "rango_fechas": f"{start_date.date()} a {end_date.date()}",
+                        "rango_fechas": f"{year_range[0]} - {year_range[1]}",
                         "modo_analisis": analysis_mode
                     }
                     pdf_bytes = generate_pdf_report(
@@ -198,7 +231,7 @@ def main():
                         analysis_results=analysis_results
                     )
                     if pdf_bytes:
-                        st.success("¡Reporte listo!")
+                        st.success("¡Reporte generado!")
                         st.download_button(
                             label="📥 Descargar PDF",
                             data=pdf_bytes,
@@ -206,11 +239,7 @@ def main():
                             mime="application/pdf"
                         )
                     else:
-                        st.error("Error generando el reporte.")
+                        st.error("No se pudo generar el reporte.")
 
 if __name__ == "__main__":
     main()
-
-
-
-
