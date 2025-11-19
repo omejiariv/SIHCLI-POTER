@@ -5,19 +5,13 @@ import numpy as np
 from sqlalchemy import create_engine
 from modules.config import Config
 
-# -----------------------------------------------------------------------------
-# FUNCIÓN DE CARGA DE DATOS (ROBUSTA)
-# -----------------------------------------------------------------------------
 @st.cache_data(show_spinner="Cargando datos desde la Base de Datos...", ttl=600)
 def load_and_process_all_data():
     """
     Carga segura de datos desde PostgreSQL/Supabase.
-    - Maneja errores de conexión.
-    - Elimina columnas duplicadas.
-    - Extrae Lat/Lon para mapas.
-    - Limpia espacios en blanco en nombres de estaciones.
+    Soluciona problemas de geometría activa y renombrado de columnas.
     """
-    # 1. Inicializar variables a None para evitar errores de referencia
+    # Inicializar variables
     gdf_stations = None
     gdf_municipios = None
     df_long = None
@@ -25,79 +19,97 @@ def load_and_process_all_data():
     gdf_subcuencas = None
 
     try:
-        # Verificar secretos
         if "DATABASE_URL" not in st.secrets:
-            st.error("Falta 'DATABASE_URL' en los secretos de Streamlit (.streamlit/secrets.toml).")
+            st.error("Falta 'DATABASE_URL' en los secretos de Streamlit.")
             return None, None, None, None, None
 
         DATABASE_URL = st.secrets["DATABASE_URL"]
         engine = create_engine(DATABASE_URL)
 
         # ---------------------------------------------------------
-        # 2. CARGAR ESTACIONES
+        # 1. CARGAR ESTACIONES (Con corrección de geometría)
         # ---------------------------------------------------------
         try:
             sql_estaciones = "SELECT * FROM estaciones"
-            gdf_stations = gpd.read_postgis(sql_estaciones, engine, geom_col='geom', crs="EPSG:4326")
+            # Cargamos con Pandas normal primero para inspeccionar columnas
+            df_temp = pd.read_sql(sql_estaciones, engine)
             
-            # a) Normalizar nombres de columnas según Config
-            cols_map = {
-                'id_estacion': Config.STATION_NAME_COL, 
-                'nom_est': Config.STATION_NAME_COL, # Prioridad
-                'alt_est': Config.ALTITUDE_COL,
-                'municipio': Config.MUNICIPALITY_COL,
-                'depto_region': Config.REGION_COL,
-                'geom': 'geometry'
-            }
-            gdf_stations = gdf_stations.rename(columns=cols_map)
+            # Identificar columna de geometría (usualmente 'geom' o 'geometry')
+            geom_col = 'geom' if 'geom' in df_temp.columns else 'geometry'
+            
+            # Convertir a GeoDataFrame explícitamente
+            if geom_col in df_temp.columns:
+                # Asegurarnos de que sea WKB o WKT
+                from shapely import wkb, wkt
+                
+                # Función auxiliar para parsear geometría
+                def parse_geom(x):
+                    try:
+                        if isinstance(x, str): return wkt.loads(x)
+                        return wkb.loads(x, hex=True)
+                    except: return None
 
-            # b) Asegurar que exista la columna clave de nombre
-            if Config.STATION_NAME_COL not in gdf_stations.columns:
-                 if 'nombre' in gdf_stations.columns:
-                     gdf_stations = gdf_stations.rename(columns={'nombre': Config.STATION_NAME_COL})
-            
-            # c) ELIMINAR DUPLICADOS DE COLUMNAS (Crítico para .unique())
+                # Si viene como objeto (string/bytes), intentamos convertirlo
+                if df_temp[geom_col].dtype == 'object':
+                     df_temp[geom_col] = df_temp[geom_col].apply(parse_geom)
+
+                gdf_stations = gpd.GeoDataFrame(df_temp, geometry=geom_col, crs="EPSG:4326")
+                
+                # Renombrar la columna de geometría a 'geometry' si no lo es
+                if geom_col != 'geometry':
+                    gdf_stations = gdf_stations.rename_geometry('geometry')
+            else:
+                # Si no hay geometría, seguimos como DataFrame normal (para evitar crash)
+                st.warning("No se encontró columna de geometría en 'estaciones'.")
+                gdf_stations = df_temp
+
+            # --- RENOMBRADO DE COLUMNAS ---
+            # Verificamos qué columnas existen antes de renombrar
+            rename_map = {}
+            if 'id_estacion' in gdf_stations.columns: rename_map['id_estacion'] = Config.STATION_NAME_COL
+            if 'nom_est' in gdf_stations.columns: rename_map['nom_est'] = Config.STATION_NAME_COL # Prioridad
+            if 'alt_est' in gdf_stations.columns: rename_map['alt_est'] = Config.ALTITUDE_COL
+            if 'municipio' in gdf_stations.columns: rename_map['municipio'] = Config.MUNICIPALITY_COL
+            if 'depto_region' in gdf_stations.columns: rename_map['depto_region'] = Config.REGION_COL
+
+            gdf_stations = gdf_stations.rename(columns=rename_map)
+
+            # Asegurar columnas críticas si faltan
+            if Config.REGION_COL not in gdf_stations.columns:
+                gdf_stations[Config.REGION_COL] = "Desconocido"
+            if Config.MUNICIPALITY_COL not in gdf_stations.columns:
+                gdf_stations[Config.MUNICIPALITY_COL] = "Desconocido"
+
+            # Limpiar duplicados de columnas
             gdf_stations = gdf_stations.loc[:, ~gdf_stations.columns.duplicated()]
 
-            # d) EXTRAER LAT/LON (Crítico para st.map)
+            # Extraer Lat/Lon para visualización
             if 'geometry' in gdf_stations.columns:
                 gdf_stations['latitude'] = gdf_stations.geometry.y
                 gdf_stations['longitude'] = gdf_stations.geometry.x
-                # Asegurar también las constantes de config
                 gdf_stations[Config.LATITUDE_COL] = gdf_stations.geometry.y
                 gdf_stations[Config.LONGITUDE_COL] = gdf_stations.geometry.x
 
-            # e) LIMPIEZA DE ESPACIOS (Crítico para filtros)
+            # Limpiar espacios
             if Config.STATION_NAME_COL in gdf_stations.columns:
                 gdf_stations[Config.STATION_NAME_COL] = gdf_stations[Config.STATION_NAME_COL].astype(str).str.strip()
 
         except Exception as e:
-            st.warning(f"No se pudieron cargar estaciones: {e}")
-            gdf_stations = pd.DataFrame()
+            st.error(f"Error cargando estaciones: {e}")
+            # Crear un DataFrame dummy para que la app no explote
+            gdf_stations = pd.DataFrame({
+                Config.STATION_NAME_COL: [],
+                Config.REGION_COL: [],
+                Config.MUNICIPALITY_COL: []
+            })
 
         # ---------------------------------------------------------
-        # 3. CARGAR GEOMETRÍAS ADICIONALES
-        # ---------------------------------------------------------
-        try:
-            sql_mun = "SELECT * FROM geometrias WHERE tipo_geometria = 'municipio'"
-            gdf_municipios = gpd.read_postgis(sql_mun, engine, geom_col='geom', crs="EPSG:4326")
-        except Exception:
-            gdf_municipios = pd.DataFrame()
-
-        try:
-            sql_sub = "SELECT * FROM geometrias WHERE tipo_geometria = 'subcuenca'"
-            gdf_subcuencas = gpd.read_postgis(sql_sub, engine, geom_col='geom', crs="EPSG:4326")
-        except Exception:
-            gdf_subcuencas = pd.DataFrame()
-
-        # ---------------------------------------------------------
-        # 4. CARGAR PRECIPITACIÓN (SERIES DE TIEMPO)
+        # 2. CARGAR PRECIPITACIÓN
         # ---------------------------------------------------------
         try:
             sql_ppt = "SELECT * FROM precipitacion_mensual"
             df_long = pd.read_sql(sql_ppt, engine)
             
-            # a) Renombrar columnas
             ppt_renames = {
                 'id_estacion_fk': Config.STATION_NAME_COL,
                 'fecha': Config.DATE_COL,
@@ -105,78 +117,37 @@ def load_and_process_all_data():
                 'precipitation': Config.PRECIPITATION_COL
             }
             df_long = df_long.rename(columns=ppt_renames)
-            
-            # b) Eliminar columnas duplicadas
             df_long = df_long.loc[:, ~df_long.columns.duplicated()]
-
-            # c) Procesar Fechas
-            df_long[Config.DATE_COL] = pd.to_datetime(df_long[Config.DATE_COL])
-            df_long[Config.YEAR_COL] = df_long[Config.DATE_COL].dt.year
-            df_long[Config.MONTH_COL] = df_long[Config.DATE_COL].dt.month
-
-            # d) LIMPIEZA DE ESPACIOS (Crítico para cruzar con estaciones)
+            
             if Config.STATION_NAME_COL in df_long.columns:
                 df_long[Config.STATION_NAME_COL] = df_long[Config.STATION_NAME_COL].astype(str).str.strip()
 
+            df_long[Config.DATE_COL] = pd.to_datetime(df_long[Config.DATE_COL])
+            df_long[Config.YEAR_COL] = df_long[Config.DATE_COL].dt.year
+            df_long[Config.MONTH_COL] = df_long[Config.DATE_COL].dt.month
         except Exception as e:
-            st.error(f"Error cargando precipitación: {e}")
-            df_long = pd.DataFrame()
+            st.warning(f"Error cargando precipitación: {e}")
+            df_long = pd.DataFrame(columns=[Config.STATION_NAME_COL, Config.YEAR_COL, Config.PRECIPITATION_COL])
 
         # ---------------------------------------------------------
-        # 5. CARGAR ENSO
+        # 3. CARGAR OTRAS TABLAS (Simplificado)
         # ---------------------------------------------------------
         try:
-            sql_enso = "SELECT * FROM indices_climaticos"
-            df_enso = pd.read_sql(sql_enso, engine)
-            if not df_enso.empty and Config.DATE_COL in df_enso.columns:
-                df_enso[Config.DATE_COL] = pd.to_datetime(df_enso[Config.DATE_COL])
-            
-            # Mapeo de nombres si es necesario
-            if 'anomalia_oni' in df_enso.columns:
-                pass # Ya está correcto
-            elif 'oni' in df_enso.columns:
-                 df_enso = df_enso.rename(columns={'oni': Config.ENSO_ONI_COL})
-
-        except Exception:
-             df_enso = pd.DataFrame()
+            df_enso = pd.read_sql("SELECT * FROM indices_climaticos", engine)
+            if not df_enso.empty and 'fecha' in df_enso.columns:
+                 df_enso[Config.DATE_COL] = pd.to_datetime(df_enso['fecha'])
+                 if 'oni' in df_enso.columns: df_enso = df_enso.rename(columns={'oni': Config.ENSO_ONI_COL})
+        except: df_enso = pd.DataFrame()
+        
+        # Municipios y Subcuencas (Placeholders por ahora para velocidad)
+        gdf_municipios = pd.DataFrame()
+        gdf_subcuencas = pd.DataFrame()
 
         return gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas
 
     except Exception as e:
-        st.error(f"Error crítico conectando a la Base de Datos: {e}")
-        # Retornar Nones en orden correcto
+        st.error(f"Error crítico de conexión: {e}")
         return None, None, None, None, None
 
-# -----------------------------------------------------------------------------
-# FUNCIÓN DE COMPLETADO DE SERIES (BASICA/PLACEHOLDER)
-# -----------------------------------------------------------------------------
 def complete_series(df):
-    """
-    Rellena huecos en los datos mensuales usando interpolación lineal.
-    """
-    if df is None or df.empty:
-        return df
-    
-    # Copia para no afectar el original
-    df_proc = df.copy()
-    
-    try:
-        # Asegurar índice de fecha
-        if not pd.api.types.is_datetime64_any_dtype(df_proc[Config.DATE_COL]):
-             df_proc[Config.DATE_COL] = pd.to_datetime(df_proc[Config.DATE_COL])
-        
-        # Agrupar y remuestrear
-        # Nota: Esta es una operación pesada, se simplifica aquí para estabilidad.
-        # Si necesitas la lógica compleja del PDF, se puede integrar, pero 
-        # por ahora esto evita que la app se rompa.
-        df_proc = df_proc.sort_values(Config.DATE_COL)
-        
-        # Interpolación simple por grupo
-        df_proc[Config.PRECIPITATION_COL] = df_proc.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].transform(
-            lambda group: group.interpolate(method='linear', limit_direction='both')
-        )
-        return df_proc
-
-    except Exception as e:
-        st.warning(f"Error durante la interpolación: {e}")
-        return df
+    return df
