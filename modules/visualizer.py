@@ -13,6 +13,7 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 from prophet import Prophet
 from scipy import stats
 from scipy.interpolate import griddata
+from modules.analysis import estimate_temperature, calculate_water_balance_turc, classify_holdridge_point
 
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
@@ -626,7 +627,44 @@ def display_enso_tab(**kwargs):
         st.info("No hay datos ENSO cargados.")
 
 def display_life_zones_tab(**kwargs):
-    st.info("Módulo de Zonas de Vida.")
+    st.subheader("🌱 Zonas de Vida (Sistema Holdridge)")
+    st.info("Clasificación bioclimática basada en la precipitación anual y la altitud de cada estación.")
+    
+    # Recuperar datos necesarios
+    df_anual = kwargs.get('df_anual_melted')
+    gdf_stations = kwargs.get('gdf_stations')
+    
+    if df_anual is None or gdf_stations is None:
+        st.warning("Datos insuficientes.")
+        return
+
+    # 1. Calcular Precipitación Media Anual Histórica por Estación
+    ppt_media = df_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+    
+    # 2. Unir con Altitud
+    merged = pd.merge(ppt_media, gdf_stations[[Config.STATION_NAME_COL, Config.ALTITUDE_COL, 'latitude', 'longitude']], on=Config.STATION_NAME_COL)
+    
+    # 3. Calcular Zona de Vida para cada punto
+    merged['Zona de Vida'] = merged.apply(
+        lambda row: classify_holdridge_point(row[Config.PRECIPITATION_COL], row[Config.ALTITUDE_COL]), axis=1
+    )
+    
+    # 4. Mapa Interactivo de Zonas
+    fig_map = px.scatter_mapbox(
+        merged,
+        lat="latitude", lon="longitude",
+        color="Zona de Vida",
+        size=Config.PRECIPITATION_COL,
+        hover_name=Config.STATION_NAME_COL,
+        hover_data={Config.ALTITUDE_COL: True, Config.PRECIPITATION_COL: ':.0f'},
+        zoom=8, mapbox_style="carto-positron",
+        title="Distribución de Zonas de Vida"
+    )
+    st.plotly_chart(fig_map, use_container_width=True)
+    
+    # 5. Tabla Resumen
+    st.markdown("#### Clasificación por Estación")
+    st.dataframe(merged[[Config.STATION_NAME_COL, 'Zona de Vida', Config.PRECIPITATION_COL, Config.ALTITUDE_COL]], use_container_width=True)
 
 def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🏜️ Análisis de Sequía (Índice SPI)")
@@ -715,13 +753,112 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
             st.warning(f"Datos insuficientes para calcular SPI-{scale} (se requieren min 30 meses de datos consecutivos).")
 
 def display_climate_scenarios_tab(**kwargs):
-    st.info("Módulo de Escenarios.")
+    st.subheader("🌡️ Simulador de Cambio Climático")
+    st.markdown("""
+    Este módulo simula cómo cambiaría el **Balance Hídrico (Oferta de Agua)** si aumentara la temperatura o cambiara la lluvia.
+    *Modelo utilizado: Fórmula de Turc.*
+    """)
+    
+    # Datos
+    df_anual = kwargs.get('df_anual_melted')
+    gdf_stations = kwargs.get('gdf_stations')
+    stations = kwargs.get('stations_for_analysis')
+    
+    if not stations:
+        st.warning("Seleccione estaciones.")
+        return
+
+    # 1. Controles de Escenario
+    c1, c2 = st.columns(2)
+    delta_temp = c1.slider("Aumento de Temperatura (°C):", 0.0, 5.0, 2.0, 0.1)
+    delta_ppt = c2.slider("Cambio en Precipitación (%):", -50, 50, -10, 5)
+    
+    # 2. Análisis
+    if st.button("Simular Escenario Futuro"):
+        results = []
+        
+        # Filtrar datos de estaciones seleccionadas
+        station_info = gdf_stations[gdf_stations[Config.STATION_NAME_COL].isin(stations)]
+        
+        for _, row in station_info.iterrows():
+            name = row[Config.STATION_NAME_COL]
+            alt = row[Config.ALTITUDE_COL]
+            
+            # Obtener lluvia actual promedio
+            ppt_actual = df_anual[df_anual[Config.STATION_NAME_COL] == name][Config.PRECIPITATION_COL].mean()
+            
+            if pd.notna(ppt_actual):
+                # Escenario BASE (Actual)
+                temp_actual = estimate_temperature(alt)
+                etr_base, q_base = calculate_water_balance_turc(ppt_actual, temp_actual)
+                
+                # Escenario FUTURO
+                temp_futura = temp_actual + delta_temp
+                ppt_futura = ppt_actual * (1 + delta_ppt/100)
+                etr_futura, q_futura = calculate_water_balance_turc(ppt_futura, temp_futura)
+                
+                # Cambio porcentual en caudal (Q)
+                delta_q_perc = ((q_futura - q_base) / q_base * 100) if q_base > 0 else 0
+                
+                results.append({
+                    "Estación": name,
+                    "Q Actual (mm)": round(q_base, 1),
+                    "Q Futuro (mm)": round(q_futura, 1),
+                    "Impacto (%)": round(delta_q_perc, 1)
+                })
+        
+        if results:
+            res_df = pd.DataFrame(results)
+            
+            # Métricas Globales
+            avg_impact = res_df["Impacto (%)"].mean()
+            st.metric("Impacto Promedio en Oferta Hídrica", f"{avg_impact:.1f}%", delta_color="normal" if avg_impact > 0 else "inverse")
+            
+            # Gráfico de Impacto
+            fig = px.bar(
+                res_df, y="Estación", x="Impacto (%)",
+                color="Impacto (%)",
+                title=f"Impacto en Escorrentía (Q) con +{delta_temp}°C y {delta_ppt}% Lluvia",
+                color_continuous_scale="RdYlGn",
+                orientation='h'
+            )
+            fig.add_vline(x=0, line_color="black")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.dataframe(res_df, use_container_width=True)
 
 def display_station_table_tab(**kwargs):
-    st.info("Tabla de Datos.")
+    st.subheader("📋 Tabla Detallada de Datos")
+    
+    # Podemos mostrar los datos mensuales o anuales
+    df_monthly = kwargs.get('df_monthly_filtered')
+    
+    if df_monthly is not None and not df_monthly.empty:
+        st.write(f"Mostrando {len(df_monthly)} registros filtrados.")
+        
+        # Formatear fecha para que se vea bonita
+        df_show = df_monthly.copy()
+        df_show['Fecha'] = df_show[Config.DATE_COL].dt.strftime('%Y-%m-%d')
+        
+        # Selección de columnas limpias
+        cols = ['Fecha', Config.STATION_NAME_COL, Config.PRECIPITATION_COL]
+        st.dataframe(df_show[cols], use_container_width=True)
+        
+        # Botón de descarga
+        csv = df_show[cols].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "📥 Descargar CSV",
+            csv,
+            "datos_precipitacion.csv",
+            "text/csv",
+            key='download-csv'
+        )
+    else:
+        st.warning("No hay datos para mostrar.")
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
