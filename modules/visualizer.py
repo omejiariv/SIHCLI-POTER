@@ -107,93 +107,85 @@ def display_alerts_tab(df_long, **kwargs):
         st.warning("No hay datos para alertas.")
 
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
-    st.subheader("Distribución Espacial y Disponibilidad")
+    st.subheader("🗺️ Distribución Espacial y Capas")
     
-    tab_map, tab_avail = st.tabs(["🗺️ Mapa Interactivo", "📊 Disponibilidad de Datos"])
+    tab_map, tab_avail = st.tabs(["Mapa Interactivo", "Disponibilidad"])
 
-    # --- PESTAÑA 1: MAPA CON CAPAS ---
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
         
         with col_ctrl:
             st.markdown("#### Capas")
+            # Controles de capas
             show_munis = st.checkbox("Municipios", value=True)
             show_cuencas = st.checkbox("Subcuencas", value=False)
             show_predios = st.checkbox("Predios", value=False)
-            
             base_map = st.selectbox("Mapa Base:", ["CartoDB positron", "OpenStreetMap", "Stamen Terrain"])
 
         with col_map:
-            if gdf_filtered is None or gdf_filtered.empty:
-                st.warning("Sin estaciones.")
-            else:
-                # Centro promedio
+            # Centrar el mapa
+            if gdf_filtered is not None and not gdf_filtered.empty:
                 lat_center = gdf_filtered.geometry.y.mean()
                 lon_center = gdf_filtered.geometry.x.mean()
-                
-                m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=base_map)
+            else:
+                lat_center, lon_center = 6.2, -75.5 # Medellín por defecto
 
-                # 1. Capas de Geometría
+            m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=base_map)
+
+            # --- CAPAS GEOMÉTRICAS (Optimizadas) ---
+            # Simplificamos la geometría un poco para evitar "Bad Message Format" si son muy pesadas
+            try:
                 if show_munis and not gdf_municipios.empty:
                     folium.GeoJson(
-                        gdf_municipios, name="Municipios",
-                        style_function=lambda x: {'color': 'gray', 'weight': 1, 'fillOpacity': 0.1}
+                        gdf_municipios[['geometry', 'nombre']].simplify(tolerance=0.001), # Simplificar
+                        name="Municipios",
+                        style_function=lambda x: {'color': 'gray', 'weight': 1, 'fillOpacity': 0.05},
+                        tooltip=folium.GeoJsonTooltip(fields=['nombre'])
                     ).add_to(m)
 
                 if show_cuencas and not gdf_subcuencas.empty:
                     folium.GeoJson(
-                        gdf_subcuencas, name="Subcuencas",
-                        style_function=lambda x: {'color': 'blue', 'weight': 2, 'fillOpacity': 0.0}
+                        gdf_subcuencas[['geometry', 'nombre']].simplify(tolerance=0.001),
+                        name="Subcuencas",
+                        style_function=lambda x: {'color': 'blue', 'weight': 2, 'fillOpacity': 0.0},
+                        tooltip=folium.GeoJsonTooltip(fields=['nombre'])
                     ).add_to(m)
                     
                 if show_predios and gdf_predios is not None and not gdf_predios.empty:
                     folium.GeoJson(
-                        gdf_predios, name="Predios",
-                        style_function=lambda x: {'color': 'orange', 'weight': 2, 'fillOpacity': 0.3}
+                        gdf_predios[['geometry', 'nombre']].simplify(tolerance=0.0001), # Menos tolerancia para predios
+                        name="Predios",
+                        style_function=lambda x: {'color': 'orange', 'weight': 2, 'fillOpacity': 0.2},
+                        tooltip=folium.GeoJsonTooltip(fields=['nombre'])
                     ).add_to(m)
+            except Exception as e:
+                st.warning(f"Algunas capas geométricas no se pudieron cargar: {e}")
 
-                # 2. Estaciones (Cluster)
+            # --- ESTACIONES (Marcadores Ligeros) ---
+            if gdf_filtered is not None and not gdf_filtered.empty:
                 marker_cluster = MarkerCluster().add_to(m)
+                # Iterar sobre datos limpios (sin geometría compleja)
                 for _, row in gdf_filtered.iterrows():
-                    folium.Marker(
-                        location=[row.geometry.y, row.geometry.x],
-                        tooltip=f"{row[Config.STATION_NAME_COL]} ({row[Config.ALTITUDE_COL]} m)",
-                        icon=folium.Icon(color="green", icon="info-sign")
-                    ).add_to(marker_cluster)
-                
-                folium.LayerControl().add_to(m)
-                st_folium(m, width="100%", height=600)
+                    try:
+                        folium.Marker(
+                            location=[row.geometry.y, row.geometry.x],
+                            tooltip=f"{row[Config.STATION_NAME_COL]}",
+                            icon=folium.Icon(color="green", icon="cloud")
+                        ).add_to(marker_cluster)
+                    except: pass
 
-    # --- PESTAÑA 2: GRÁFICO DE DISPONIBILIDAD ---
+            folium.LayerControl().add_to(m)
+            st_folium(m, width="100%", height=600)
+
     with tab_avail:
-        st.markdown("#### Porcentaje de Datos Disponibles por Estación")
         if df_long is not None and not df_long.empty and not gdf_filtered.empty:
-            # Calcular rango total de meses
-            min_date = df_long[Config.DATE_COL].min()
-            max_date = df_long[Config.DATE_COL].max()
-            total_months = (max_date.year - min_date.year) * 12 + (max_date.month - min_date.month) + 1
-            
-            # Contar datos reales por estación
-            availability = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
-            availability['Porcentaje (%)'] = (availability[Config.PRECIPITATION_COL] / total_months) * 100
-            
-            # Filtrar solo estaciones seleccionadas
-            availability = availability[availability[Config.STATION_NAME_COL].isin(gdf_filtered[Config.STATION_NAME_COL])]
-            
-            fig = px.bar(
-                availability, 
-                x='Porcentaje (%)', 
-                y=Config.STATION_NAME_COL, 
-                orientation='h',
-                title=f"Disponibilidad ({min_date.date()} a {max_date.date()})",
-                color='Porcentaje (%)',
-                color_continuous_scale='RdYlGn',
-                range_x=[0, 100]
-            )
+            counts = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
+            counts.columns = ["Estación", "Registros"]
+            fig = px.bar(counts, x="Registros", y="Estación", orientation='h', title="Cantidad de Datos por Estación")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Selecciona estaciones para calcular disponibilidad.")
-
+            st.info("Seleccione estaciones para ver disponibilidad.")
+            
 def display_graphs_tab(df_monthly_filtered, stations_for_analysis, **kwargs):
     st.subheader("📈 Análisis Gráfico Detallado")
     
@@ -927,6 +919,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
