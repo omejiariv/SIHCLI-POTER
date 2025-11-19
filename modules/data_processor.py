@@ -8,11 +8,9 @@ from modules.config import Config
 @st.cache_data(show_spinner="Cargando datos desde la Base de Datos...", ttl=600)
 def load_and_process_all_data():
     """
-    Carga segura de datos desde PostgreSQL/Supabase.
-    Inicializa variables a None para evitar errores si la conexión falla.
-    Previene columnas duplicadas que rompen la aplicación.
+    Carga datos desde PostgreSQL/Supabase y prepara las coordenadas
+    explícitas (lat/lon) que Streamlit necesita para los mapas.
     """
-    # Inicializar variables
     gdf_stations = None
     gdf_municipios = None
     df_long = None
@@ -33,20 +31,26 @@ def load_and_process_all_data():
             sql_estaciones = "SELECT * FROM estaciones"
             gdf_stations = gpd.read_postgis(sql_estaciones, engine, geom_col='geom', crs="EPSG:4326")
             
-            # --- CORRECCIÓN DE DUPLICADOS DE COLUMNAS ---
-            # 1. Renombrar columnas auxiliares primero
-            cols_aux = {
+            # --- CORRECCIÓN CRÍTICA: EXTRAER LAT/LON ---
+            # Streamlit .map() necesita columnas explícitas 'latitude' y 'longitude'
+            # Extraemos esto de la columna geométrica
+            gdf_stations['latitude'] = gdf_stations.geometry.y
+            gdf_stations['longitude'] = gdf_stations.geometry.x
+            
+            # También aseguramos las columnas de configuración por si acaso se usan en otros lados
+            gdf_stations[Config.LATITUDE_COL] = gdf_stations.geometry.y
+            gdf_stations[Config.LONGITUDE_COL] = gdf_stations.geometry.x
+
+            # Normalizar nombres de columnas
+            cols_map = {
                 'alt_est': Config.ALTITUDE_COL,
                 'municipio': Config.MUNICIPALITY_COL,
-                'depto_region': Config.REGION_COL,
-                'geom': 'geometry'
+                'depto_region': Config.REGION_COL
             }
-            gdf_stations = gdf_stations.rename(columns=cols_aux)
+            gdf_stations = gdf_stations.rename(columns=cols_map)
 
-            # 2. Resolver Nombre de Estación de forma inteligente
-            # Solo renombramos si la columna destino NO existe aún, para evitar duplicados
+            # Resolver nombre de estación
             target_col = Config.STATION_NAME_COL
-            
             if target_col not in gdf_stations.columns:
                 if 'nom_est' in gdf_stations.columns:
                     gdf_stations = gdf_stations.rename(columns={'nom_est': target_col})
@@ -55,8 +59,7 @@ def load_and_process_all_data():
                 elif 'nombre' in gdf_stations.columns:
                     gdf_stations = gdf_stations.rename(columns={'nombre': target_col})
             
-            # 3. LIMPIEZA FINAL DE DUPLICADOS (CRÍTICO)
-            # Esto elimina cualquier columna duplicada accidentalmente (ej. dos 'nom_est')
+            # Limpieza final de duplicados
             gdf_stations = gdf_stations.loc[:, ~gdf_stations.columns.duplicated()]
 
         except Exception as e:
@@ -82,7 +85,6 @@ def load_and_process_all_data():
             sql_ppt = "SELECT * FROM precipitacion_mensual"
             df_long = pd.read_sql(sql_ppt, engine)
             
-            # Renombrado seguro para precipitación
             ppt_renames = {
                 'id_estacion_fk': Config.STATION_NAME_COL,
                 'fecha': Config.DATE_COL,
@@ -90,8 +92,6 @@ def load_and_process_all_data():
                 'precipitation': Config.PRECIPITATION_COL
             }
             df_long = df_long.rename(columns=ppt_renames)
-            
-            # Eliminar duplicados de columnas en df_long también
             df_long = df_long.loc[:, ~df_long.columns.duplicated()]
 
             df_long[Config.DATE_COL] = pd.to_datetime(df_long[Config.DATE_COL])
