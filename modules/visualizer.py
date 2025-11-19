@@ -107,17 +107,53 @@ def display_spatial_distribution_tab(gdf_filtered, **kwargs):
     else:
         st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
 
-def display_graphs_tab(df_monthly_filtered, **kwargs):
-    st.subheader("📈 Análisis Temporal")
-    if df_monthly_filtered is not None and not df_monthly_filtered.empty:
-        # Gráfico de líneas interactivo
-        fig = px.line(df_monthly_filtered, x=Config.DATE_COL, y=Config.PRECIPITATION_COL, 
-                      color=Config.STATION_NAME_COL, title="Serie de Tiempo de Precipitación")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No hay datos mensuales para el rango y estaciones seleccionadas.")
+def display_graphs_tab(df_monthly_filtered, stations_for_analysis, **kwargs):
+    st.subheader("📈 Análisis Gráfico Detallado")
+    
+    if df_monthly_filtered is None or df_monthly_filtered.empty:
+        st.info("Seleccione estaciones y un rango de fechas con datos para visualizar gráficos.")
+        return
 
-# --- FUNCIONES QUE CAUSABAN EL ERROR (Ahora corregidas) ---
+    # Pestañas internas para organizar
+    tab1, tab2, tab3 = st.tabs(["Serie Temporal", "Comparativa Mensual", "Mapa de Calor"])
+    
+    with tab1:
+        # Gráfico de Líneas (Serie de Tiempo)
+        fig_line = px.line(
+            df_monthly_filtered, 
+            x=Config.DATE_COL, 
+            y=Config.PRECIPITATION_COL,
+            color=Config.STATION_NAME_COL,
+            title="Evolución de la Precipitación Mensual (mm)",
+            labels={Config.PRECIPITATION_COL: "Lluvia (mm)", Config.DATE_COL: "Fecha"}
+        )
+        fig_line.update_layout(hovermode="x unified", height=500)
+        st.plotly_chart(fig_line, use_container_width=True)
+    
+    with tab2:
+        # Boxplot (Distribución por Mes)
+        fig_box = px.box(
+            df_monthly_filtered,
+            x=Config.MONTH_COL,
+            y=Config.PRECIPITATION_COL,
+            color=Config.STATION_NAME_COL,
+            title="Distribución de Lluvias por Mes (Ciclo Anual)",
+            labels={Config.MONTH_COL: "Mes (1=Ene, 12=Dic)", Config.PRECIPITATION_COL: "Lluvia (mm)"}
+        )
+        st.plotly_chart(fig_box, use_container_width=True)
+
+    with tab3:
+        # Heatmap (Intensidad)
+        fig_heat = px.density_heatmap(
+            df_monthly_filtered,
+            x=Config.DATE_COL,
+            y=Config.STATION_NAME_COL,
+            z=Config.PRECIPITATION_COL,
+            histfunc="avg",
+            title="Mapa de Calor de Intensidad de Lluvia",
+            color_continuous_scale="Viridis"
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
 
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     """Muestra el pronóstico semanal para una estación seleccionada."""
@@ -183,19 +219,166 @@ def display_advanced_maps_tab(**kwargs):
     st.info("Módulo de Mapas Avanzados.")
 
 def display_climate_forecast_tab(**kwargs):
-    st.info("Módulo de Pronóstico Climático.")
+    st.subheader("🔮 Pronóstico Climático (Índices)")
+    df_enso = kwargs.get('df_enso')
+    
+    if df_enso is None or df_enso.empty:
+        st.warning("No hay datos de índices climáticos (ONI/SOI) cargados.")
+        return
+
+    st.info("Análisis de la evolución de índices macroclimáticos que afectan la lluvia en la región.")
+    
+    # Selector de índice
+    index_col = st.selectbox("Seleccione Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL], index=0)
+    
+    if index_col in df_enso.columns:
+        # Filtrar nulos
+        data = df_enso.dropna(subset=[index_col]).sort_values(Config.DATE_COL)
+        
+        # Gráfico interactivo
+        fig = px.line(data, x=Config.DATE_COL, y=index_col, title=f"Evolución Histórica: {index_col}")
+        
+        # Añadir líneas de referencia para ONI
+        if index_col == Config.ENSO_ONI_COL:
+            fig.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
+            fig.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
+            
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning(f"La columna {index_col} no se encuentra en los datos.")
 
 def display_trends_and_forecast_tab(**kwargs):
-    st.info("Módulo de Tendencias.")
+    # Recuperamos los datos del kwargs para no depender de argumentos posicionales
+    df_anual = kwargs.get('df_anual_melted')
+    stations = kwargs.get('stations_for_analysis')
 
-def display_anomalies_tab(**kwargs):
-    st.info("Módulo de Anomalías.")
+    st.subheader("📉 Análisis de Tendencias (Mann-Kendall)")
+    
+    if df_anual is None or df_anual.empty:
+        st.warning("No hay datos anuales suficientes para calcular tendencias.")
+        return
+
+    st.info("Este módulo calcula si la lluvia está aumentando o disminuyendo estadísticamente a lo largo de los años.")
+
+    # Selección de estación para análisis detallado
+    selected_station = st.selectbox("Analizar Tendencia de:", stations, key="trend_station_sel")
+    
+    if selected_station:
+        station_data = df_anual[df_anual[Config.STATION_NAME_COL] == selected_station].sort_values(Config.YEAR_COL)
+        
+        if len(station_data) < 5:
+            st.warning("Se necesitan al menos 5 años de datos para calcular una tendencia confiable.")
+        else:
+            # Regresión Lineal Simple (Visual)
+            fig = px.scatter(
+                station_data, 
+                x=Config.YEAR_COL, 
+                y=Config.PRECIPITATION_COL, 
+                trendline="ols",
+                title=f"Tendencia de Precipitación Anual - {selected_station}",
+                labels={Config.PRECIPITATION_COL: "Precipitación Total Anual (mm)"}
+            )
+            
+            # Obtener resultados de la regresión
+            results = px.get_trendline_results(fig)
+            model = results.px_fit_results.iloc[0]
+            slope = model.params[1]
+            p_value = model.pvalues[1]
+            
+            # Interpretación automática
+            trend_desc = "AUMENTO" if slope > 0 else "DISMINUCIÓN"
+            significance = "Significativo" if p_value < 0.05 else "No Significativo"
+            
+            c1, c2 = st.columns(2)
+            c1.metric("Tasa de Cambio Estimada", f"{slope:.2f} mm/año", delta=trend_desc)
+            c2.metric("Confianza Estadística", significance, help="P-value < 0.05 indica alta certeza")
+            
+            st.plotly_chart(fig, use_container_width=True)
+
+def display_anomalies_tab(df_monthly_filtered, df_long, **kwargs):
+    st.subheader("⚠️ Análisis de Anomalías")
+    st.markdown("Identificación de meses inusualmente húmedos o secos respecto al promedio histórico.")
+    
+    if df_monthly_filtered is None or df_monthly_filtered.empty:
+        st.warning("Datos insuficientes.")
+        return
+
+    # Calcular promedio mensual histórico (Climatología)
+    # Agrupamos por MES (1-12) para saber cuánto llueve normalmente en Enero, Febrero, etc.
+    climatology = df_long.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+    climatology = climatology.rename(columns={Config.PRECIPITATION_COL: 'mean_ppt'})
+    
+    # Unir con los datos filtrados
+    df_anom = pd.merge(df_monthly_filtered, climatology, on=Config.MONTH_COL, how='left')
+    
+    # Calcular Anomalía (Valor Real - Promedio Histórico)
+    df_anom['anomalia'] = df_anom[Config.PRECIPITATION_COL] - df_anom['mean_ppt']
+    
+    # Colores para el gráfico
+    df_anom['color'] = np.where(df_anom['anomalia'] >= 0, 'blue', 'red')
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df_anom[Config.DATE_COL],
+        y=df_anom['anomalia'],
+        marker_color=df_anom['color'],
+        name="Anomalía"
+    ))
+    fig.update_layout(
+        title="Anomalías de Precipitación (mm)",
+        yaxis_title="Desviación del Promedio (mm)",
+        xaxis_title="Fecha"
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 def display_stats_tab(**kwargs):
     st.info("Módulo de Estadísticas.")
 
 def display_correlation_tab(**kwargs):
-    st.info("Módulo de Correlación.")
+    st.subheader("🔗 Análisis de Correlación")
+    df_monthly = kwargs.get('df_monthly_filtered')
+    df_enso = kwargs.get('df_enso')
+    
+    if df_monthly is None or df_enso is None:
+        st.warning("Faltan datos de precipitación o índices climáticos.")
+        return
+
+    st.markdown("¿Qué tanto influye el Fenómeno del Niño/Niña en la lluvia local?")
+    
+    # Preparar datos para correlación (agrupar lluvia por fecha para tener una sola serie regional)
+    regional_ppt = df_monthly.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+    
+    # Unir con ENSO
+    merged = pd.merge(regional_ppt, df_enso, on=Config.DATE_COL, how='inner')
+    
+    if len(merged) > 10:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Scatter plot
+            fig = px.scatter(
+                merged, 
+                x=Config.ENSO_ONI_COL, 
+                y=Config.PRECIPITATION_COL,
+                trendline="ols",
+                title="Correlación Lluvia vs. ONI",
+                labels={Config.ENSO_ONI_COL: "Índice ONI (Temp. Océano)", Config.PRECIPITATION_COL: "Lluvia Regional (mm)"}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+        with col2:
+            # Calcular correlación
+            corr = merged[Config.ENSO_ONI_COL].corr(merged[Config.PRECIPITATION_COL])
+            st.metric("Coeficiente de Correlación (Pearson)", f"{corr:.2f}")
+            
+            if abs(corr) > 0.5:
+                st.success("Existe una correlación FUERTE.")
+            elif abs(corr) > 0.3:
+                st.info("Existe una correlación MODERADA.")
+            else:
+                st.warning("La correlación es DÉBIL o inexistente.")
+    else:
+        st.warning("No hay suficientes datos coincidentes en el tiempo para calcular correlación.")
 
 def display_enso_tab(df_enso, **kwargs):
     st.subheader("Fenómeno ENSO")
@@ -216,4 +399,5 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
