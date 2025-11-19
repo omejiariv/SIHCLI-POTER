@@ -1,99 +1,167 @@
-# modules/life_zones.py
 import numpy as np
 import pandas as pd
+import rasterio
+from rasterio.warp import reproject, Resampling
+from rasterio.features import rasterize
+from rasterio.transform import Affine
 import streamlit as st
-from scipy.interpolate import griddata
-import plotly.graph_objects as go
-from modules.config import Config
+import os
 
-# --- Diccionario de Zonas de Vida (Simplificado) ---
-holdridge_zone_map = {
-    1: "Nival", 2: "Tundra pluvial alpino", 3: "Tundra húmeda alpino", 4: "Tundra seca alpino",
-    5: "Páramo pluvial subalpino", 6: "Páramo muy húmedo subalpino", 7: "Páramo seco subalpino",
-    8: "Bosque pluvial Montano", 9: "Bosque muy húmedo Montano", 10: "Bosque húmedo Montano",
-    11: "Bosque seco Montano", 12: "Monte espinoso Montano",
-    13: "Bosque pluvial Premontano", 14: "Bosque muy húmedo Premontano", 15: "Bosque húmedo Premontano",
-    16: "Bosque seco Premontano", 17: "Monte espinoso Premontano",
-    18: "Bosque pluvial Tropical", 19: "Bosque muy húmedo Tropical", 20: "Bosque húmedo Tropical",
-    21: "Bosque seco Tropical", 22: "Monte espinoso Tropical", 0: "Desconocido"
+# --- Constantes y Diccionarios ---
+holdridge_zone_map_simplified = {
+    "Nival": 1,
+    "Tundra pluvial alpino (tp-A)": 2, "Tundra húmeda alpino (th-A)": 3, "Tundra seca alpino (ts-A)": 4,
+    "Páramo pluvial subalpino (pp-SA)": 5, "Páramo muy húmedo subalpino (pmh-SA)": 6, "Páramo seco subalpino (ps-SA)": 7,
+    "Bosque pluvial Montano (bp-M)": 8, "Bosque muy húmedo Montano (bmh-M)": 9, "Bosque húmedo Montano (bh-M)": 10,
+    "Bosque seco Montano (bs-M)": 11, "Monte espinoso Montano (me-M)": 12,
+    "Bosque pluvial Premontano (bp-PM)": 13, "Bosque muy húmedo Premontano (bmh-PM)": 14,
+    "Bosque húmedo Premontano (bh-PM)": 15, "Bosque seco Premontano (bs-PM)": 16, "Monte espinoso Premontano (me-PM)": 17,
+    "Bosque pluvial Tropical (bp-T)": 18, "Bosque muy húmedo Tropical (bmh-T)": 19, "Bosque húmedo Tropical (bh-T)": 20,
+    "Bosque seco Tropical (bs-T)": 21, "Monte espinoso Tropical (me-T)": 22,
+    "Zona Desconocida": 0
 }
 
-def classify_life_zone(altitude, ppt):
-    """Clasifica una celda según Holdridge (Altitud y Precipitación)."""
-    if pd.isna(altitude) or pd.isna(ppt) or altitude < 0 or ppt <= 0: return 0
-    
-    # Lógica simplificada de Holdridge basada en pisos altitudinales
-    if altitude > 4200: return 1 # Nival
-    
-    # Piso Alpino (3700 - 4200)
+holdridge_int_to_name_simplified = {v: k for k, v in holdridge_zone_map_simplified.items()}
+
+def classify_life_zone_alt_ppt(altitude, ppt):
+    """Clasifica una celda según su altitud (m) y precipitación anual (mm)."""
+    if pd.isna(altitude) or pd.isna(ppt) or altitude < 0 or ppt <= 0:
+        return 0
+        
+    if altitude > 4200:
+        return 1
+        
     if altitude >= 3700:
         if ppt >= 1500: return 2
         elif ppt >= 750: return 3
         else: return 4
         
-    # Piso Subalpino (3200 - 3700)
     if altitude >= 3200:
         if ppt >= 2000: return 5
         elif ppt >= 1000: return 6
         else: return 7
-
-    # Piso Montano (2000 - 3200)
+        
     if altitude >= 2000:
         if ppt >= 4000: return 8
         elif ppt >= 2000: return 9
         elif ppt >= 1000: return 10
         elif ppt >= 500: return 11
         else: return 12
-
-    # Piso Premontano (1000 - 2000)
+        
     if altitude >= 1000:
         if ppt >= 4000: return 13
         elif ppt >= 2000: return 14
         elif ppt >= 1000: return 15
         elif ppt >= 500: return 16
         else: return 17
-
-    # Piso Tropical (< 1000)
+        
+    # altitude < 1000
     if ppt >= 4000: return 18
-    elif ppt >= 2000: return 19
-    elif ppt >= 1000: return 20
-    elif ppt >= 500: return 21
-    else: return 22
+    if ppt >= 2000: return 19
+    if ppt >= 1000: return 20
+    if ppt >= 500: return 21
+    return 22
 
-def calculate_life_zones_grid(df_precip_mean, gdf_stations):
-    """Genera una grilla clasificada de zonas de vida interpolando Ppt y Altitud."""
+def _resample_raster_to_shape(src_dataset, dst_shape, dst_transform, dst_crs=None, resampling=Resampling.average):
+    dest = np.empty(dst_shape, dtype=np.float32)
+    if dst_crs is None:
+        dst_crs = src_dataset.crs
+        
+    reproject(
+        source=rasterio.band(src_dataset, 1),
+        destination=dest,
+        src_transform=src_dataset.transform,
+        src_crs=src_dataset.crs,
+        src_nodata=src_dataset.nodata,
+        dst_transform=dst_transform,
+        dst_crs=dst_crs,
+        dst_nodata=np.nan,
+        resampling=resampling
+    )
+    return dest
+
+def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, downscale_factor=4):
+    """
+    Genera mapa raster clasificado usando Altitud (DEM) y PPT.
+    """
     try:
-        # Unir precipitación con coordenadas y altitud
-        df = df_precip_mean.merge(
-            gdf_stations[[Config.STATION_NAME_COL, Config.LATITUDE_COL, Config.LONGITUDE_COL, Config.ALTITUDE_COL]], 
-            on=Config.STATION_NAME_COL, how='inner'
-        )
-        
-        # Limpiar datos (altitud debe ser numérica)
-        df[Config.ALTITUDE_COL] = pd.to_numeric(df[Config.ALTITUDE_COL], errors='coerce')
-        df = df.dropna(subset=[Config.ALTITUDE_COL, Config.PRECIPITATION_COL])
-        
-        if len(df) < 4:
-            return None, "Datos insuficientes para interpolar zonas de vida (mínimo 4 estaciones con altitud y precipitación)."
+        if downscale_factor is None or downscale_factor <= 0:
+            downscale_factor = 1
+            
+        # Abrir DEM
+        with rasterio.open(dem_path) as dem_src:
+            src_width = dem_src.width
+            src_height = dem_src.height
+            src_transform = dem_src.transform
+            dem_crs = dem_src.crs
+            
+            dst_width = max(1, src_width // downscale_factor)
+            dst_height = max(1, src_height // downscale_factor)
+            
+            scale_x = src_width / dst_width
+            scale_y = src_height / dst_height
+            dst_transform = src_transform * Affine.scale(scale_x, scale_y)
+            
+            dem_resampled = _resample_raster_to_shape(
+                dem_src, (dst_height, dst_width), 
+                dst_transform, dst_crs=dem_crs, resampling=Resampling.bilinear
+            )
 
-        # Crear Grilla
-        grid_lon = np.linspace(df[Config.LONGITUDE_COL].min(), df[Config.LONGITUDE_COL].max(), 100)
-        grid_lat = np.linspace(df[Config.LATITUDE_COL].min(), df[Config.LATITUDE_COL].max(), 100)
-        GX, GY = np.meshgrid(grid_lon, grid_lat)
+        # Abrir Precipitación
+        with rasterio.open(precip_raster_path) as ppt_src:
+            ppt_resampled = _resample_raster_to_shape(
+                ppt_src, (dst_height, dst_width), 
+                dst_transform, dst_crs=dem_crs, resampling=Resampling.average
+            )
+
+        # Máscara válida
+        dem_mask = np.isnan(dem_resampled)
+        ppt_mask = np.isnan(ppt_resampled)
+        valid_mask = (~dem_mask) & (~ppt_mask) & np.isfinite(ppt_resampled)
         
-        points = df[[Config.LONGITUDE_COL, Config.LATITUDE_COL]].values
-        values_ppt = df[Config.PRECIPITATION_COL].values
-        values_alt = df[Config.ALTITUDE_COL].values
+        classified_raster = np.zeros((dst_height, dst_width), dtype=np.int16)
         
-        # Interpolar Precipitación y Altitud
-        grid_ppt = griddata(points, values_ppt, (GX, GY), method='linear')
-        grid_alt = griddata(points, values_alt, (GX, GY), method='linear')
+        if np.any(valid_mask):
+            alt_values = dem_resampled[valid_mask]
+            ppt_values = ppt_resampled[valid_mask]
+            
+            vectorized_classify = np.vectorize(classify_life_zone_alt_ppt)
+            zone_ints = vectorized_classify(alt_values, ppt_values)
+            classified_raster[valid_mask] = zone_ints.astype(np.int16)
+
+        # Aplicar máscara de geometría (si existe)
+        if mask_geometry is not None and not mask_geometry.empty:
+            try:
+                if hasattr(mask_geometry, "crs") and mask_geometry.crs and dem_crs and mask_geometry.crs != dem_crs:
+                    mask_reproj = mask_geometry.to_crs(dem_crs)
+                else:
+                    mask_reproj = mask_geometry
+                    
+                shapes = [(geom, 1) for geom in mask_reproj.geometry]
+                mask_raster = rasterize(
+                    shapes,
+                    out_shape=(dst_height, dst_width),
+                    transform=dst_transform,
+                    fill=0,
+                    dtype=np.uint8
+                )
+                classified_raster = np.where(mask_raster == 1, classified_raster, 0)
+            except Exception as e_mask:
+                st.warning(f"No se pudo aplicar la máscara de geometría: {e_mask}")
+
+        output_profile = {
+            'driver': 'GTiff',
+            'dtype': rasterio.int16,
+            'nodata': 0,
+            'width': dst_width,
+            'height': dst_height,
+            'count': 1,
+            'crs': dem_crs,
+            'transform': dst_transform
+        }
         
-        # Clasificar cada celda vectorizada
-        vectorized_classify = np.vectorize(classify_life_zone)
-        grid_zones = vectorized_classify(grid_alt, grid_ppt)
-        
-        return (GX, GY, grid_zones), None
+        return classified_raster, output_profile, holdridge_int_to_name_simplified
 
     except Exception as e:
-        return None, str(e)
+        st.error(f"Error generando mapa de zonas de vida: {e}")
+        return None, None, None
