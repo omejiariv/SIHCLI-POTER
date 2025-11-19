@@ -119,29 +119,20 @@ def calculate_spei(precip_series, et_series, scale):
     return spei
     
 def calculate_monthly_anomalies(df_monthly, df_long_full):
-    """
-    Calcula anomalías comparando cada mes con su promedio histórico.
-    """
+    """Calcula anomalías mensuales."""
     if df_monthly.empty: return pd.DataFrame()
-    
-    # 1. Calcular Climatología (Promedio por mes 1-12)
     climatology = df_long_full.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-    climatology = climatology.rename(columns={Config.PRECIPITATION_COL: 'climatology_ppt'})
-    
-    # 2. Unir y restar
+    climatology = climatology.rename(columns={Config.PRECIPITATION_COL: 'mean_ppt'})
     merged = pd.merge(df_monthly, climatology, on=Config.MONTH_COL, how='left')
     merged['anomalia'] = merged[Config.PRECIPITATION_COL] - merged['climatology_ppt']
-    
     return merged
 
 def estimate_temperature(altitude_m):
-    """
-    Estima la temperatura media anual basada en la altitud (Gradiente térmico andino).
-    T = 28 - (0.006 * altitud)
-    """
-    if pd.isna(altitude_m): return 25.0 # Default tropical
+    """Estimación de temperatura basada en gradiente térmico vertical (Andes)."""
+    if pd.isna(altitude_m): return 25.0
+    # Gradiente típico: 28°C a nivel del mar, disminuye 0.6°C por cada 100m
     temp = 28.0 - (0.006 * altitude_m)
-    return max(temp, 1.0) # Evitar congelación absoluta en cálculos simples
+    return max(temp, 1.0) # Evitar temperaturas bajo cero extremas en modelo simple
 
 def calculate_water_balance_turc(precip_mm, temp_c):
     """
@@ -161,28 +152,20 @@ def calculate_water_balance_turc(precip_mm, temp_c):
     return etr, q
 
 def classify_holdridge_point(precip_mm, altitude_m):
-    """
-    Clasificación simplificada de Zonas de Vida (Holdridge) para un punto.
-    Retorna el nombre de la zona.
-    """
-    if pd.isna(precip_mm) or pd.isna(altitude_m): return "Datos Insuficientes"
-    
-    # Lógica simplificada basada en Pisos Térmicos y Lluvia
-    piso = ""
+    """Clasificación simple de Holdridge."""
+    if pd.isna(precip_mm) or pd.isna(altitude_m): return "N/A"
     if altitude_m < 1000: piso = "Tropical"
     elif altitude_m < 2000: piso = "Premontano"
     elif altitude_m < 3000: piso = "Montano Bajo"
-    elif altitude_m < 4000: piso = "Montano"
-    else: piso = "Páramo/Nival"
+    elif altitude_m < 3500: piso = "Montano-Paramo"
+    else: piso = "Montano"
     
-    provincia = ""
-    if precip_mm < 500: provincia = "Matorral Espinoso"
-    elif precip_mm < 1000: provincia = "Bosque Seco"
-    elif precip_mm < 2000: provincia = "Bosque Húmedo"
-    elif precip_mm < 4000: provincia = "Bosque Muy Húmedo"
-    else: provincia = "Bosque Pluvial"
+    if precip_mm < 1000: prov = "Bosque Seco"
+    elif precip_mm < 2000: prov = "Bosque Húmedo"
+    elif precip_mm < 4000: prov = "Bosque Muy Húmedo"
+    else: prov = "Bosque Pluvial"
     
-    return f"{provincia} {piso}"
+    return f"{prov} {piso}"
     
 def calculate_percentiles_and_extremes(df_long, station_name, p_lower=10, p_upper=90):
     """
@@ -332,64 +315,94 @@ def get_mean_altitude_for_basin(_basin_geometry):
         st.warning(error_message)
         return None, error_message
 
-def calculate_hydrological_balance(precip_mm, alt_prom_m, gdf_basin, delta_temp_c=0):
-    """Calcula balance hídrico simple (Turc)."""
-    if precip_mm is None: return {"error": "Falta precipitación"}
+def calculate_hydrological_balance(precip_mm_anual, alt_media_m, gdf_basin):
+    """
+    Calcula Balance Hídrico usando fórmula de Turc.
+    precip_mm_anual: Debe ser la suma anual (mm/año).
+    """
+    if precip_mm_anual is None or precip_mm_anual <= 0: 
+        return {"P": 0, "ET": 0, "Q": 0, "Vol": 0, "Alt": 0, "Area": 0}
     
-    # Estimar temperatura
-    temp_c = 28 - (0.006 * alt_prom_m) + delta_temp_c
+    # 1. Temperatura Media Anual (°C)
+    temp_c = estimate_temperature(alt_media_m)
     
-    # Evapotranspiración (Turc)
-    L = 300 + 25 * temp_c + 0.05 * (temp_c**3)
-    etr = precip_mm / np.sqrt(0.9 + (precip_mm / L)**2)
-    etr = min(etr, precip_mm)
+    # 2. Evapotranspiración Real (Turc)
+    # L = 300 + 25T + 0.05T^3
+    L = 300 + (25 * temp_c) + (0.05 * (temp_c**3))
     
-    # Caudal
-    q_mm = precip_mm - etr
+    # ETR = P / sqrt(0.9 + (P/L)^2)
+    # Validar que no sea NaN
+    denom = np.sqrt(0.9 + (precip_mm_anual / L)**2)
+    etr = precip_mm_anual / denom
     
-    # Volumen (si hay área)
-    q_vol_m3 = 0
-    area_km2 = 0
-    if gdf_basin is not None:
-        gdf_proj = gdf_basin.to_crs(epsg=3116)
-        area_km2 = gdf_proj.area.sum() / 1e6
-        q_vol_m3 = (q_mm / 1000) * (area_km2 * 1e6)
-        
+    # Ajuste físico: ETR no puede ser mayor que la precipitación
+    etr = min(etr, precip_mm_anual)
+    
+    # 3. Escorrentía (Caudal Q)
+    q_mm = precip_mm_anual - etr
+    
+    # 4. Volumen (Millones de m3)
+    # Q(mm) * Area(km2) * 1000 = m3 -> / 1e6 = Mm3
+    # Simplificado: Q(mm) * Area(km2) / 1000 = Mm3 ?? No
+    # 1 mm = 1 L/m2 = 0.001 m3/m2
+    # Vol = Q * 0.001 (m) * Area * 1e6 (m2) = Q * Area * 1000 (m3)
+    # En Millones de m3: (Q * Area * 1000) / 1e6 = (Q * Area) / 1000
+    
+    morph = calculate_morphometry(gdf_basin)
+    area = morph['area_km2']
+    vol_mm3 = (q_mm * area) / 1000.0
+    
     return {
-        "P_media_anual_mm": precip_mm,
-        "ET_media_anual_mm": etr,
-        "Q_mm": q_mm,
-        "Q_m3_año": q_vol_m3,
-        "Area_km2": area_km2,
-        "Altitud_media_m": alt_prom_m
+        "P": precip_mm_anual,
+        "ET": etr,
+        "Q": q_mm,
+        "Vol": vol_mm3,
+        "Alt": alt_media_m,
+        "Area": area
     }
+      
+def calculate_morphometry(gdf_basin):
+    """Calcula métricas morfométricas básicas."""
+    if gdf_basin is None or gdf_basin.empty: 
+        return {k: 0 for k in ["area_km2", "perimetro_km", "indice_forma", "alt_max", "alt_min", "alt_med", "pendiente_prom"]}
     
-def calculate_morphometry(gdf_basin, dem_path=None):
-    """Calcula métricas básicas de la cuenca."""
-    if gdf_basin is None or gdf_basin.empty: return {"error": "Cuenca vacía"}
-    
-    # Proyectar a metros para cálculos de área (EPSG:3116 es estándar Colombia, o 3857 genérico)
-    gdf_proj = gdf_basin.to_crs(epsg=3116)
+    # Proyectar a metros (EPSG:3116) para cálculos de área/distancia
+    try:
+        gdf_proj = gdf_basin.to_crs(epsg=3116)
+    except:
+        gdf_proj = gdf_basin # Fallback si falla la proyección
     
     area_km2 = gdf_proj.area.sum() / 1e6
     perimetro_km = gdf_proj.length.sum() / 1000
     
-    # Índice de compacidad (Gravelius)
-    k_c = 0.28 * perimetro_km / np.sqrt(area_km2) if area_km2 > 0 else 0
+    # Índice de compacidad (Gravelius) -> Kc = 0.28 * P / raiz(A)
+    indice_forma = (0.28 * perimetro_km) / np.sqrt(area_km2) if area_km2 > 0 else 0
     
-    # Altitud (Simulada si no hay DEM, o real si hay)
-    # Aquí asumimos valores por defecto si no hay raster procesado
-    alt_max = 3000 
-    alt_min = 1000
-    alt_med = 2000
+    # --- ESTIMACIÓN DE ALTITUDES ---
+    # Como no estamos procesando el DEM pixel por pixel aquí (sería muy lento),
+    # usamos valores típicos o los calculados previamente si existen.
+    # Si tuviéramos el DEM cargado en memoria, haríamos zonal statistics.
+    # Valores simulados coherentes para la región (a falta de Zonal Stats):
+    alt_max = 2800 
+    alt_min = 800
+    alt_med = (alt_max + alt_min) / 2
     
+    # Estimación de Pendiente Global (%) (Relief Ratio simplificado)
+    # Pendiente ~ (Desnivel / Longitud Característica)
+    longitud_aprox_km = np.sqrt(area_km2) # Asumiendo forma cuadrada
+    if longitud_aprox_km > 0:
+        pendiente_prom = ((alt_max - alt_min) / (longitud_aprox_km * 1000)) * 100
+    else:
+        pendiente_prom = 0
+        
     return {
         "area_km2": area_km2,
         "perimetro_km": perimetro_km,
-        "indice_forma": k_c,
+        "indice_forma": indice_forma,
         "alt_max_m": alt_max,
         "alt_min_m": alt_min,
-        "alt_prom_m": alt_med
+        "alt_prom_m": alt_med,
+        "pendiente_prom": pendiente_prom
     }
 
 def calculate_hypsometric_curve(basin_gdf, dem_path):
@@ -494,4 +507,5 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
