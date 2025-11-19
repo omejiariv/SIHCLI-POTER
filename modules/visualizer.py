@@ -96,98 +96,52 @@ def display_alerts_tab(df_long, **kwargs):
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
     st.subheader("🗺️ Distribución Espacial y Capas")
-    
     tab_map, tab_avail = st.tabs(["Mapa Interactivo", "Disponibilidad"])
-
+    
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
-        
         with col_ctrl:
             st.markdown("#### Capas")
             show_munis = st.checkbox("Municipios", value=True)
             show_cuencas = st.checkbox("Subcuencas", value=False)
             show_predios = st.checkbox("Predios", value=False)
             base_map = st.selectbox("Mapa Base:", ["CartoDB positron", "OpenStreetMap", "Stamen Terrain"])
-
         with col_map:
-            # Centrar el mapa
             if gdf_filtered is not None and not gdf_filtered.empty:
-                # Filtrar nulos para el centro
                 valid_locs = gdf_filtered.dropna(subset=['latitude', 'longitude'])
-                if not valid_locs.empty:
-                    lat_center = valid_locs['latitude'].mean()
-                    lon_center = valid_locs['longitude'].mean()
-                else:
-                    lat_center, lon_center = 6.2, -75.5
+                lat_center = valid_locs['latitude'].mean() if not valid_locs.empty else 6.2
+                lon_center = valid_locs['longitude'].mean() if not valid_locs.empty else -75.5
             else:
                 lat_center, lon_center = 6.2, -75.5
-
             m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=base_map)
-
-            # --- CAPAS GEOMÉTRICAS (CORREGIDO) ---
-            # Simplificamos la geometría preservando el DataFrame y sus columnas
             try:
                 if show_munis and not gdf_municipios.empty:
-                    # Copia para no alterar original
-                    munis_sim = gdf_municipios.copy()
-                    # Simplificar geometría en su lugar
-                    munis_sim['geometry'] = munis_sim['geometry'].simplify(tolerance=0.001)
-                    
-                    folium.GeoJson(
-                        munis_sim, 
-                        name="Municipios",
-                        style_function=lambda x: {'color': 'gray', 'weight': 1, 'fillOpacity': 0.05},
-                        tooltip=folium.GeoJsonTooltip(fields=['nombre'])
-                    ).add_to(m)
-
+                    # Simplificar para evitar crash, preservando columnas
+                    g_mun = gdf_municipios.copy()
+                    g_mun['geometry'] = g_mun.geometry.simplify(0.001)
+                    folium.GeoJson(g_mun, name="Municipios", style_function=lambda x: {'color': 'gray', 'weight': 1, 'fillOpacity': 0.05}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
                 if show_cuencas and not gdf_subcuencas.empty:
-                    cuencas_sim = gdf_subcuencas.copy()
-                    cuencas_sim['geometry'] = cuencas_sim['geometry'].simplify(tolerance=0.001)
-                    
-                    folium.GeoJson(
-                        cuencas_sim, 
-                        name="Subcuencas",
-                        style_function=lambda x: {'color': 'blue', 'weight': 2, 'fillOpacity': 0.0},
-                        tooltip=folium.GeoJsonTooltip(fields=['nombre'])
-                    ).add_to(m)
-                    
+                    g_cuenca = gdf_subcuencas.copy()
+                    g_cuenca['geometry'] = g_cuenca.geometry.simplify(0.001)
+                    folium.GeoJson(g_cuenca, name="Subcuencas", style_function=lambda x: {'color': 'blue', 'weight': 2, 'fillOpacity': 0.0}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
                 if show_predios and gdf_predios is not None and not gdf_predios.empty:
-                    predios_sim = gdf_predios.copy()
-                    predios_sim['geometry'] = predios_sim['geometry'].simplify(tolerance=0.0001)
-                    
-                    folium.GeoJson(
-                        predios_sim, 
-                        name="Predios",
-                        style_function=lambda x: {'color': 'orange', 'weight': 2, 'fillOpacity': 0.2},
-                        tooltip=folium.GeoJsonTooltip(fields=['nombre'])
-                    ).add_to(m)
-            except Exception as e:
-                st.warning(f"Algunas capas geométricas no se pudieron cargar: {e}")
-
-            # --- ESTACIONES ---
+                    g_pred = gdf_predios.copy()
+                    g_pred['geometry'] = g_pred.geometry.simplify(0.0001)
+                    folium.GeoJson(g_pred, name="Predios", style_function=lambda x: {'color': 'orange', 'weight': 2, 'fillOpacity': 0.2}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
+            except: pass
             if gdf_filtered is not None and not gdf_filtered.empty:
                 marker_cluster = MarkerCluster().add_to(m)
-                # Filtrar nulos antes de iterar
                 stations_to_plot = gdf_filtered.dropna(subset=['latitude', 'longitude'])
-                
                 for _, row in stations_to_plot.iterrows():
-                    folium.Marker(
-                        location=[row['latitude'], row['longitude']],
-                        tooltip=f"{row[Config.STATION_NAME_COL]}",
-                        icon=folium.Icon(color="green", icon="cloud")
-                    ).add_to(marker_cluster)
-
+                    folium.Marker([row['latitude'], row['longitude']], tooltip=f"{row[Config.STATION_NAME_COL]}", icon=folium.Icon(color="green", icon="cloud")).add_to(marker_cluster)
             folium.LayerControl().add_to(m)
             st_folium(m, width="100%", height=600)
-
+    
     with tab_avail:
         if df_long is not None and not df_long.empty and not gdf_filtered.empty:
             counts = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
-            counts.columns = ["Estación", "Registros"]
-            fig = px.bar(counts, x="Registros", y="Estación", orientation='h', title="Cantidad de Datos por Estación")
+            fig = px.bar(counts, x="precipitation", y=Config.STATION_NAME_COL, orientation='h', title="Cantidad de Datos por Estación")
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Seleccione estaciones para ver disponibilidad.")
             
 def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analysis, **kwargs):
     st.subheader("📊 Visualizaciones de Precipitación")
@@ -344,7 +298,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 
     mode = st.radio("Modo de Análisis:", ["Regional (Comparativo)", "Por Cuenca Específica"], horizontal=True)
     
-    # --- FUNCIÓN DE INTERPOLACIÓN ---
+    # --- FUNCIÓN INTERNA DE INTERPOLACIÓN ---
     def run_interpolation(df_data, method, grid_bounds, grid_res=100):
         minx, maxx, miny, maxy = grid_bounds
         grid_x, grid_y = np.mgrid[minx:maxx:complex(grid_res), miny:maxy:complex(grid_res)]
@@ -374,7 +328,6 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
         if st.button("Generar Comparación"):
             def plot_map(rng, meth, col):
                 mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
-                # Calcular Promedio Anual (mm/año)
                 df_ann = df_long[mask].groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
                 df_avg = df_ann.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                 df_map = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
@@ -394,7 +347,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             plot_map(range1, method1, c1)
             plot_map(range2, method2, c2)
 
-    # --- MODO 2: POR CUENCA (CORREGIDO TOTALMENTE) ---
+    # --- MODO 2: POR CUENCA ---
     else:
         if gdf_subcuencas.empty:
             st.warning("No hay capa de subcuencas.")
@@ -407,7 +360,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             c_time, c_meth = st.columns(2)
             with c_time:
                 min_y, max_y = int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max())
-                rng = st.slider("Período de Análisis (Promedio Anual):", min_y, max_y, (min_y, max_y), key="rng_c")
+                rng = st.slider("Período de Análisis:", min_y, max_y, (min_y, max_y), key="rng_c")
             with c_meth:
                 meth = st.selectbox("Método de Interpolación:", ["IDW (Lineal)", "Spline (Cúbico)", "Kriging (Simulado)"], key="meth_c")
 
@@ -422,39 +375,32 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     stations_in = gdf_stations[gdf_stations.geometry.intersects(buffer)]
                     
                     if not stations_in.empty:
-                        # -------------------------------------------------------------------
-                        # CORRECCIÓN MATEMÁTICA CRÍTICA: CALCULO DE mm/año
-                        # -------------------------------------------------------------------
                         target_ids = stations_in[Config.STATION_NAME_COL].unique()
-                        # Filtrar datos por estación y periodo
                         mask = (df_long[Config.STATION_NAME_COL].isin(target_ids)) & \
                                (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
                         df_subset = df_long[mask].copy()
                         
-                        # PASO 1: Sumar lluvia de cada año (Total Anual)
+                        # Promedio Anual Real
                         df_annual_sums = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-                        
-                        # PASO 2: Promediar los años (Promedio Multianual) -> Esto da mm/año razonables
                         df_points = df_annual_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                         
                         df_map_data = pd.merge(df_points, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
 
                         if len(df_map_data) >= 3:
-                            # 3. Interpolación
                             bounds = buffer.bounds
                             gx, gy, gz = run_interpolation(df_map_data, meth, bounds)
                             
-                            # 4. Cálculos Hidrológicos
-                            # Usamos el promedio de la grilla interpolada para representar mejor la cuenca
                             ppt_media = np.nanmean(gz) if gz is not None else df_map_data[Config.PRECIPITATION_COL].mean()
                             
+                            from modules.analysis import calculate_morphometry, calculate_hydrological_balance
                             morph = calculate_morphometry(gdf_union)
                             bal = calculate_hydrological_balance(ppt_media, morph['alt_prom_m'], gdf_union)
                             
                             st.session_state['basin_results'] = {
                                 'ready': True, 'gx': gx, 'gy': gy, 'gz': gz, 'df': df_map_data,
                                 'morph': morph, 'bal': bal, 'geom': gdf_union, 'buffer': buffer,
-                                'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}", 'method': meth
+                                'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}", 'method': meth,
+                                'bounds': [bounds[0], bounds[2], bounds[1], bounds[3]] # minx, maxx, miny, maxy
                             }
                         else: st.error("Insuficientes estaciones (<3) en radio de 50km.")
                     else: st.error("No hay estaciones cercanas.")
@@ -462,6 +408,10 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             # --- RENDERIZADO ---
             res = st.session_state.get('basin_results')
             if res and res.get('ready'):
+                # BLINDAJE CONTRA KEYERROR
+                if 'bounds' not in res: 
+                    st.warning("Datos antiguos en memoria. Presione 'Analizar' de nuevo."); return
+
                 st.success(f"Análisis Hidrológico **{res.get('periodo')}** completado.")
 
                 # 1. Mapa Interpolado
@@ -505,13 +455,14 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 cm[4].metric("Alt Mín", f"{m['alt_min_m']:.0f} m")
                 cm[5].metric("Pendiente", f"{m['pendiente_prom']:.1f} %")
 
-                # 3. MAPA DE CONTEXTO (EL QUE QUERÍAS VER)
+                # 3. MAPA DE CONTEXTO
                 st.markdown("---")
                 st.subheader("📍 Contexto Espacial (Cuenca + Radio 50km)")
+                
+                # Usar bounds seguros
                 minx, maxx, miny, maxy = res['bounds']
                 map_c = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=9, tiles="CartoDB positron")
                 
-                # Capas
                 folium.GeoJson(res['geom'], name="Cuenca", style_function=lambda x: {'color':'blue', 'weight':3}).add_to(map_c)
                 folium.GeoJson(res['buffer'], name="Radio 50km", style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False}).add_to(map_c)
                 
@@ -1044,6 +995,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
