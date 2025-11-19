@@ -117,20 +117,71 @@ def calculate_spei(precip_series, et_series, scale):
     spei.replace([np.inf, -np.inf], np.nan, inplace=True)
     return spei
     
-@st.cache_data
-def calculate_monthly_anomalies(df):
-    """Calcula anomalías mensuales (diferencia con el promedio histórico del mes)."""
-    if df.empty: return df
+def calculate_monthly_anomalies(df_monthly, df_long_full):
+    """
+    Calcula anomalías comparando cada mes con su promedio histórico.
+    """
+    if df_monthly.empty: return pd.DataFrame()
     
-    # Calcular promedio histórico por mes
-    monthly_means = df.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean()
+    # 1. Calcular Climatología (Promedio por mes 1-12)
+    climatology = df_long_full.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+    climatology = climatology.rename(columns={Config.PRECIPITATION_COL: 'climatology_ppt'})
     
-    # Unir y calcular anomalía
-    df = df.merge(monthly_means.rename('mean_precip'), on=Config.MONTH_COL, how='left')
-    df['anomaly'] = df[Config.PRECIPITATION_COL] - df['mean_precip']
-    df['anomaly_pct'] = (df['anomaly'] / df['mean_precip']) * 100
+    # 2. Unir y restar
+    merged = pd.merge(df_monthly, climatology, on=Config.MONTH_COL, how='left')
+    merged['anomalia'] = merged[Config.PRECIPITATION_COL] - merged['climatology_ppt']
     
-    return df
+    return merged
+
+def estimate_temperature(altitude_m):
+    """
+    Estima la temperatura media anual basada en la altitud (Gradiente térmico andino).
+    T = 28 - (0.006 * altitud)
+    """
+    if pd.isna(altitude_m): return 25.0 # Default tropical
+    temp = 28.0 - (0.006 * altitude_m)
+    return max(temp, 1.0) # Evitar congelación absoluta en cálculos simples
+
+def calculate_water_balance_turc(precip_mm, temp_c):
+    """
+    Estima Evapotranspiración Real (ETR) y Escorrentía (Q) usando la fórmula de Turc.
+    """
+    if pd.isna(precip_mm) or pd.isna(temp_c): return 0, 0
+    
+    # Fórmula de Turc para ETR
+    L = 300 + 25 * temp_c + 0.05 * (temp_c**3)
+    etr = precip_mm / np.sqrt(0.9 + (precip_mm / L)**2)
+    
+    # Limitar ETR a la precipitación (no puede evaporarse más de lo que llueve en este modelo simple)
+    etr = min(etr, precip_mm)
+    
+    # Escorrentía = Precipitación - ETR
+    q = precip_mm - etr
+    return etr, q
+
+def classify_holdridge_point(precip_mm, altitude_m):
+    """
+    Clasificación simplificada de Zonas de Vida (Holdridge) para un punto.
+    Retorna el nombre de la zona.
+    """
+    if pd.isna(precip_mm) or pd.isna(altitude_m): return "Datos Insuficientes"
+    
+    # Lógica simplificada basada en Pisos Térmicos y Lluvia
+    piso = ""
+    if altitude_m < 1000: piso = "Tropical"
+    elif altitude_m < 2000: piso = "Premontano"
+    elif altitude_m < 3000: piso = "Montano Bajo"
+    elif altitude_m < 4000: piso = "Montano"
+    else: piso = "Páramo/Nival"
+    
+    provincia = ""
+    if precip_mm < 500: provincia = "Matorral Espinoso"
+    elif precip_mm < 1000: provincia = "Bosque Seco"
+    elif precip_mm < 2000: provincia = "Bosque Húmedo"
+    elif precip_mm < 4000: provincia = "Bosque Muy Húmedo"
+    else: provincia = "Bosque Pluvial"
+    
+    return f"{provincia} {piso}"
     
 def calculate_percentiles_and_extremes(df_long, station_name, p_lower=10, p_upper=90):
     """
@@ -477,14 +528,3 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
-
-
-
-
-
-
-
-
-
-
-
