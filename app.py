@@ -58,7 +58,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # 1. Cargar Datos
-    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas = load_and_process_all_data()
+    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
 
     if gdf_stations is None or df_long is None:
         st.error("⚠️ Error Fatal: No se pudieron cargar los datos. Verifica la conexión a BD.")
@@ -90,6 +90,7 @@ def main():
         "gdf_stations": gdf_stations,
         "gdf_municipios": gdf_municipios,
         "gdf_subcuencas": gdf_subcuencas,
+        "gdf_predios": gdf_predios,
         "df_enso": df_enso,
         "stations_for_analysis": stations_for_analysis,
         "gdf_filtered": gdf_filtered,
@@ -209,3 +210,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
