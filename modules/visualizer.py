@@ -345,7 +345,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     col.warning("Datos insuficientes.")
                     return
                 
-                # Calcular Bounds locales para el gráfico (Zoom correcto)
+                # Calcular Bounds locales
                 pad = 0.05
                 bounds = [df_map.longitude.min()-pad, df_map.longitude.max()+pad, df_map.latitude.min()-pad, df_map.latitude.max()+pad]
                 
@@ -358,7 +358,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     ))
                     fig.add_trace(go.Scatter(x=df_map.longitude, y=df_map.latitude, mode='markers', marker=dict(color='red', size=5)))
                     
-                    # Forzar ejes para evitar zoom lejano
+                    # Forzar ejes
                     fig.update_layout(
                         title=f"{meth} ({rng[0]}-{rng[1]})", 
                         height=400, 
@@ -371,7 +371,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             plot_map(range2, method2, c2)
 
     # -------------------------------------------------------------------------
-    # MODO 2: POR CUENCA (CORREGIDO ZOOM Y CAUDAL L/S)
+    # MODO 2: POR CUENCA (CORREGIDO)
     # -------------------------------------------------------------------------
     else:
         if gdf_subcuencas.empty:
@@ -409,10 +409,9 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         df_map_data = pd.merge(df_points, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
 
                         if len(df_map_data) >= 3:
-                            # CORRECCIÓN DE BOUNDS PARA ZOOM CORRECTO
-                            # Usamos los límites del buffer para centrar, no de todo el mundo
+                            # CORRECCIÓN DE BOUNDS
                             b = buffer.bounds # (minx, miny, maxx, maxy)
-                            bounds = [b[0], b[2], b[1], b[3]] # Reordenar para función interna: minx, maxx, miny, maxy
+                            bounds = [b[0], b[2], b[1], b[3]] 
                             
                             gx, gy, gz = run_interpolation(df_map_data, meth, bounds)
                             
@@ -426,7 +425,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                                 'ready': True, 'gx': gx, 'gy': gy, 'gz': gz, 'df': df_map_data,
                                 'morph': morph, 'bal': bal, 'geom': gdf_union, 'buffer': buffer,
                                 'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}",
-                                'bounds': bounds # Guardamos los límites correctos
+                                'bounds': bounds
                             }
                         else: st.error("Insuficientes estaciones (<3) en radio de 50km.")
                     else: st.error("No hay estaciones cercanas.")
@@ -436,7 +435,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             if res and res.get('ready'):
                 st.success(f"Análisis Hidrológico **{res.get('periodo')}** completado.")
 
-                # 1. Mapa Interpolado (CORREGIDO ZOOM)
+                # 1. Mapa Interpolado
                 fig = go.Figure(data=go.Contour(
                     z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:],
                     colorscale='Viridis', colorbar=dict(title='mm/año'), contours=dict(coloring='heatmap', showlabels=True)
@@ -453,7 +452,6 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='white', width=3), showlegend=False))
                 except: pass
                 
-                # Fijar rango de ejes para zoom correcto
                 fig.update_layout(
                     height=600, 
                     title="Superficie de Lluvia (mm/año)",
@@ -467,18 +465,19 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 b = res['bal']
                 st.markdown(f"#### 💧 Balance Hídrico Estimado ({res['names']})")
                 
-                # CÁLCULO CAUDAL EN L/S
-                # Q(mm/año) * Area(km2) * 1000 / (365*24*3600) * 1000 = L/s
-                # Q(m3/año) / 31536000 * 1000
-                q_m3_ano = b['Q_m3_año']
-                q_ls = (q_m3_ano * 1000) / (365 * 24 * 3600)
+                # CÁLCULO CAUDAL EN L/S (CORREGIDO EL KEYERROR)
+                # Usamos 'Vol' (Millones m3) que viene de analysis.py
+                vol_mm3 = b['Vol']
+                # L/s = (Millones m3 * 10^6 * 1000 L/m3) / (365*24*3600 seg)
+                # L/s = (Vol * 10^9) / 31536000
+                q_ls = (vol_mm3 * 1_000_000_000) / 31536000
                 
                 cols = st.columns(5)
                 cols[0].metric("Precipitación Media", f"{b['P']:.0f} mm/año")
                 cols[1].metric("Altitud Media", f"{b['Alt']:.0f} m.s.n.m")
                 cols[2].metric("ET Media", f"{b['ET']:.0f} mm/año")
                 cols[3].metric("Escorrentía (Q)", f"{max(0, b['Q']):.0f} mm/año")
-                cols[4].metric("Caudal Medio", f"{q_ls:.0f} l/s") # <--- NUEVO
+                cols[4].metric("Caudal Medio", f"{q_ls:.0f} L/s")
                 
                 st.info(f"**Volumen de escorrentía anual estimado:** {b['Vol']:.2f} millones de m³ sobre un área de {b['Area']:.2f} km².")
                 
@@ -1027,6 +1026,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
