@@ -85,12 +85,12 @@ def main():
 
     # 3. Diccionario de Argumentos (Para pasar a las funciones limpiamente)
     display_args = {
-        "df_long": df_long, # DataFrame original completo
-        "df_full_monthly": df_long, # Alias para algunas funciones nuevas
+        "df_long": df_long,
         "gdf_stations": gdf_stations,
         "gdf_municipios": gdf_municipios,
         "gdf_subcuencas": gdf_subcuencas,
         "gdf_predios": gdf_predios,
+        "df_enso": df_enso,
         "df_enso": df_enso,
         "stations_for_analysis": stations_for_analysis,
         "gdf_filtered": gdf_filtered,
@@ -210,4 +210,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
