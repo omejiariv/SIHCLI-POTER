@@ -12,6 +12,7 @@ from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from modules.config import Config
 from shapely.ops import unary_union
+from shapely.geometry import Point
 from rasterio.mask import mask
 import pymannkendall as mk
 from statsmodels.tsa.seasonal import seasonal_decompose
@@ -2136,6 +2137,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
