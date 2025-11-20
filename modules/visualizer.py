@@ -17,7 +17,7 @@ from prophet import Prophet
 from scipy import stats
 from scipy.interpolate import griddata
 from scipy.interpolate import Rbf
-from modules.analysis import estimate_temperature, calculate_water_balance_turc, classify_holdridge_point, calculate_morphometry, calculate_hydrological_balance
+from modules.analysis import estimate_temperature, calculate_water_balance_turc, classify_holdridge_point, calculate_morphometry, calculate_hydrological_balance, calculate_hypsometric_curve, calculate_spei
 
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
@@ -1335,3 +1335,4 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
