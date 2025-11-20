@@ -140,7 +140,7 @@ def main():
     # ---------------------------------------------------------
     tab_titles = [
         "🏠 Bienvenida", 
-        "🚨 Alertas", 
+        "🚨 Monitoreo y Tiempo Real",
         "🗺️ Distribución", 
         "📈 Gráficos", 
         "📊 Estadísticas",
@@ -153,7 +153,6 @@ def main():
         "🌿 Cobertura",
         "🌱 Zonas de Vida",
         "🌡️ Cambio Climático",
-        "🛰️ Tiempo Real",
         "📄 Reporte"
     ]
     
@@ -166,8 +165,9 @@ def main():
     with tabs[0]: # Bienvenida
         display_welcome_tab()
     
-    with tabs[1]: # Alertas
-        display_alerts_tab(**display_args)
+    with tabs[1]: # Monitoreo y Tiempo Real (Fusión de Alertas + Pronóstico + Satélite)
+        from modules.visualizer import display_realtime_dashboard
+        display_realtime_dashboard(df_long, gdf_stations, gdf_filtered)
 
     with tabs[2]: # Mapa Distribución
         display_spatial_distribution_tab(**display_args)
@@ -209,15 +209,7 @@ def main():
     with tabs[13]: # Escenarios
         display_climate_scenarios_tab(**display_args)
 
-    with tabs[14]: # Tiempo Real (Satélite/Pronóstico)
-        st.subheader("Herramientas de Tiempo Real")
-        sub1, sub2 = st.tabs(["Pronóstico 7 Días", "Satélite"])
-        with sub1:
-            display_weekly_forecast_tab(stations_for_analysis, gdf_filtered)
-        with sub2:
-            display_satellite_imagery_tab(gdf_filtered)
-
-    with tabs[15]: # Reporte PDF
+    with tabs[14]: # Reporte PDF
         st.header("Generar Reporte PDF")
         col_pdf_1, col_pdf_2 = st.columns([1, 3])
         with col_pdf_1:
@@ -270,4 +262,5 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
 
