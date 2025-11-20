@@ -236,10 +236,10 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
     tab_names = [
         "Análisis Anual", 
         "Pptn Multianual",
-        "Análisis Mensual", 
+        "Análisis Mensual", # <--- ESTA ES LA QUE MODIFICAMOS AHORA
         "Comparación Rápida",
         "Boxplot Anual", 
-        "Distribución", # <--- ESTA ES LA QUE VAMOS A POTENCIAR
+        "Distribución", 
         "Serie Regional"
     ]
     tabs = st.tabs(tab_names)
@@ -272,14 +272,64 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         )
         st.plotly_chart(fig_bar, use_container_width=True)
 
-    # 3. ANÁLISIS MENSUAL
+    # -------------------------------------------------------------------------
+    # 3. ANÁLISIS MENSUAL (RENOVADO ESTILO DASHBOARD)
+    # -------------------------------------------------------------------------
     with tabs[2]:
-        st.markdown("##### Serie Histórica Mensual")
-        fig = px.line(
-            df_monthly_filtered, x=Config.DATE_COL, y=Config.PRECIPITATION_COL, 
-            color=Config.STATION_NAME_COL, title="Precipitación Mensual (Detalle)"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("#### Distribución de la Precipitación Mensual")
+        
+        # Layout de Columnas: Controles (Izquierda) - Gráfico (Derecha)
+        c_ctrl, c_plot = st.columns([1, 4])
+        
+        with c_ctrl:
+            st.markdown("**Opciones del Gráfico**")
+            chart_type = st.radio(
+                "Tipo de Gráfico:",
+                ["Líneas y Puntos", "Nube de Puntos", "Gráfico de Cajas (Mensual)"],
+                index=2 # Default Boxplot como en la imagen
+            )
+            
+            # El color por mes solo tiene sentido en scatter/lineas, en boxplot mensual suele ser por estación
+            disabled_color = chart_type == "Gráfico de Cajas (Mensual)"
+            color_by = st.radio(
+                "Colorear por:",
+                ["Estación", "Mes"],
+                index=0,
+                disabled=disabled_color
+            )
+        
+        with c_plot:
+            if chart_type == "Gráfico de Cajas (Mensual)":
+                # Boxplot: X=Mes, Y=Lluvia, Color=Estación
+                fig_mens = px.box(
+                    df_monthly_filtered, 
+                    x=Config.MONTH_COL, 
+                    y=Config.PRECIPITATION_COL, 
+                    color=Config.STATION_NAME_COL,
+                    title="Distribución de la Precipitación por Mes",
+                    points="all" if len(df_monthly_filtered) < 2000 else "outliers" # Optimización rendimiento
+                )
+                # Asegurar que el eje X muestre todos los meses
+                fig_mens.update_xaxes(tickmode='linear', dtick=1, title="Mes")
+                
+            else:
+                # Scatter o Líneas: X=Fecha
+                # Definir color
+                color_col = Config.STATION_NAME_COL if color_by == "Estación" else Config.MONTH_COL
+                
+                if chart_type == "Líneas y Puntos":
+                    fig_mens = px.line(
+                        df_monthly_filtered, x=Config.DATE_COL, y=Config.PRECIPITATION_COL, 
+                        color=color_col, markers=True, title="Serie de Tiempo Mensual"
+                    )
+                else: # Nube de Puntos
+                    fig_mens = px.scatter(
+                        df_monthly_filtered, x=Config.DATE_COL, y=Config.PRECIPITATION_COL, 
+                        color=color_col, title="Dispersión Mensual"
+                    )
+
+            fig_mens.update_layout(height=550, legend=dict(orientation="v"))
+            st.plotly_chart(fig_mens, use_container_width=True)
 
     # 4. COMPARACIÓN RÁPIDA
     with tabs[3]:
@@ -292,7 +342,7 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         fig_ciclo.update_xaxes(tickmode='linear', tick0=1, dtick=1)
         st.plotly_chart(fig_ciclo, use_container_width=True)
 
-    # 5. BOXPLOT
+    # 5. BOXPLOT ANUAL
     with tabs[4]:
         st.markdown("##### Variabilidad Anual")
         fig = px.box(
@@ -301,80 +351,40 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # -------------------------------------------------------------------------
-    # 6. DISTRIBUCIÓN (¡ACTUALIZADA Y MEJORADA!)
-    # -------------------------------------------------------------------------
+    # 6. DISTRIBUCIÓN
     with tabs[5]:
-        st.markdown("##### Análisis de Distribución y Frecuencias")
-        
-        # A. Controles
+        st.markdown("##### Análisis de Distribución")
         c1, c2, c3 = st.columns(3)
         with c1:
-            data_source = st.radio("Series de Datos:", ["Anual (Totales)", "Mensual (Detalle)"], horizontal=True, key="dist_source")
+            data_source = st.radio("Series de Datos:", ["Anual (Totales)", "Mensual (Detalle)"], horizontal=True, key="d_src")
         with c2:
-            chart_type = st.radio("Tipo de Gráfico:", ["Gráfico de Violín", "Histograma"], horizontal=True, key="dist_type")
+            chart_typ_d = st.radio("Tipo:", ["Gráfico de Violín", "Histograma"], horizontal=True, key="d_typ")
         with c3:
-            sort_order = st.selectbox("Ordenar Estaciones (por Mediana):", ["Alfabético", "Mayor a Menor", "Menor a Mayor"], key="dist_sort")
+            sort_order = st.selectbox("Ordenar:", ["Alfabético", "Mayor a Menor", "Menor a Mayor"], key="d_sort")
 
-        # B. Preparar Datos
-        if data_source == "Anual (Totales)":
-            df_plot = df_anual_melted
-            title_txt = "Distribución de Precipitación Anual"
-        else:
-            df_plot = df_monthly_filtered
-            title_txt = "Distribución de Precipitación Mensual"
-
-        # C. Lógica de Ordenamiento (Category Orders)
-        category_orders = {}
+        df_plot = df_anual_melted if data_source == "Anual (Totales)" else df_monthly_filtered
+        
+        # Ordenamiento
+        cat_orders = {}
         if sort_order != "Alfabético":
-            # Calcular mediana por estación para ordenar
             medians = df_plot.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].median()
-            if sort_order == "Mayor a Menor":
-                order_list = medians.sort_values(ascending=False).index.tolist()
-            else:
-                order_list = medians.sort_values(ascending=True).index.tolist()
-            
-            # Aplicar orden a Plotly
-            category_orders = {Config.STATION_NAME_COL: order_list}
+            asc = True if "Menor" in sort_order else False
+            cat_orders = {Config.STATION_NAME_COL: medians.sort_values(ascending=asc).index.tolist()}
 
-        # D. Generar Gráfico
-        if chart_type == "Gráfico de Violín":
-            fig = px.violin(
-                df_plot, 
-                x=Config.STATION_NAME_COL, 
-                y=Config.PRECIPITATION_COL, 
-                color=Config.STATION_NAME_COL,
-                box=True, # Mostrar caja estadística dentro del violín
-                points="all", # Mostrar todos los puntos (dispersión)
-                title=f"{title_txt} (Densidad)",
-                category_orders=category_orders
-            )
-            fig.update_layout(showlegend=False) # Ocultar leyenda redundante en violín
+        if chart_typ_d == "Gráfico de Violín":
+            fig = px.violin(df_plot, x=Config.STATION_NAME_COL, y=Config.PRECIPITATION_COL, color=Config.STATION_NAME_COL, box=True, points="all", category_orders=cat_orders)
+            fig.update_layout(showlegend=False)
         else:
-            # Histograma
-            fig = px.histogram(
-                df_plot, 
-                x=Config.PRECIPITATION_COL, 
-                color=Config.STATION_NAME_COL, 
-                marginal="box", # Boxplot pequeño arriba
-                title=f"{title_txt} (Frecuencia)",
-                barmode="overlay",
-                opacity=0.7,
-                category_orders=category_orders
-            )
+            fig = px.histogram(df_plot, x=Config.PRECIPITATION_COL, color=Config.STATION_NAME_COL, marginal="box", barmode="overlay", opacity=0.7, category_orders=cat_orders)
 
-        # E. Maximizar Altura
-        fig.update_layout(height=700) # Altura aumentada como pediste
+        fig.update_layout(height=600)
         st.plotly_chart(fig, use_container_width=True)
 
     # 7. SERIE REGIONAL
     with tabs[6]:
         st.markdown("##### Índice Regional")
         regional = df_monthly_filtered.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        fig = px.area(
-            regional, x=Config.DATE_COL, y=Config.PRECIPITATION_COL, 
-            title="Precipitación Promedio de la Zona Seleccionada", color_discrete_sequence=['#2ca02c']
-        )
+        fig = px.area(regional, x=Config.DATE_COL, y=Config.PRECIPITATION_COL, title="Precipitación Promedio Zona", color_discrete_sequence=['#2ca02c'])
         st.plotly_chart(fig, use_container_width=True)
         
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
@@ -1658,6 +1668,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
