@@ -890,13 +890,14 @@ def display_climate_forecast_tab(**kwargs):
 def display_trends_and_forecast_tab(**kwargs):
     st.subheader("📉 Tendencias, Pronósticos y Riesgo")
     
+    # Recuperar datos
     df_monthly = kwargs.get('df_monthly_filtered')
     df_anual = kwargs.get('df_anual_melted')
     stations = kwargs.get('stations_for_analysis')
     gdf_stations = kwargs.get('gdf_stations')
 
     if not stations or df_monthly.empty:
-        st.warning("Seleccione estaciones en el panel lateral.")
+        st.warning("Seleccione estaciones.")
         return
 
     # Pestañas Principales
@@ -910,51 +911,57 @@ def display_trends_and_forecast_tab(**kwargs):
         "Mapa de Riesgo"
     ])
     
-    selected_station = st.selectbox("Estación para Análisis Individual:", stations, key="trend_st")
+    selected_station = st.selectbox("Estación:", stations, key="trend_st")
     
-    # Preparación de datos para la estación seleccionada
-    if selected_station:
-        station_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == selected_station].sort_values(Config.DATE_COL).set_index(Config.DATE_COL)
-        # Interpolación para series de tiempo continuas (necesaria para modelos)
-        ts = station_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time')
+    # --- CORRECCIÓN CRÍTICA: Preparación de la Serie de Tiempo ---
+    station_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == selected_station].sort_values(Config.DATE_COL).set_index(Config.DATE_COL)
+    
+    # 1. Asignar frecuencia mensual explícita
+    # 2. Interpolar valores internos (huecos en el medio)
+    # 3. .dropna() para eliminar huecos al inicio/fin que la interpolación no puede llenar
+    ts = station_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='linear').dropna()
+
+    # Validar longitud mínima
+    if len(ts) < 24:
+        st.error(f"Datos insuficientes para la estación {selected_station} (se requieren al menos 24 meses continuos).")
+        return
 
     # 1. TENDENCIAS (Mann-Kendall)
     with tabs[0]:
-        if selected_station and len(ts) > 24:
-            try:
-                res = mk.original_test(ts)
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Tendencia", res.trend, delta=f"Pendiente: {res.slope:.3f}")
-                c2.metric("P-Value", f"{res.p:.4f}")
-                c3.metric("Tau Kendall", f"{res.Tau:.3f}")
-                
-                fig = px.scatter(ts.reset_index(), x=Config.DATE_COL, y=Config.PRECIPITATION_COL, trendline="ols", title=f"Tendencia Lineal - {selected_station}")
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"Error en Mann-Kendall: {e}")
-        else:
-            st.info("Datos insuficientes para la estación seleccionada.")
+        try:
+            res = mk.original_test(ts)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Tendencia", res.trend, delta=f"Slope: {res.slope:.3f}")
+            c2.metric("P-Value", f"{res.p:.4f}")
+            c3.metric("Tau Kendall", f"{res.Tau:.3f}")
+            
+            fig = px.scatter(ts.reset_index(), x=Config.DATE_COL, y=Config.PRECIPITATION_COL, trendline="ols", title="Tendencia Lineal")
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"No se pudo calcular Mann-Kendall: {e}")
 
     # 2. DESCOMPOSICIÓN
     with tabs[1]:
-        if selected_station and len(ts) > 24:
-            try:
-                decomp = seasonal_decompose(ts, model='additive', period=12)
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=ts.index, y=decomp.trend, name='Tendencia'))
-                fig.add_trace(go.Scatter(x=ts.index, y=decomp.seasonal, name='Estacionalidad'))
-                fig.add_trace(go.Scatter(x=ts.index, y=decomp.resid, name='Residuo', mode='markers'))
-                fig.update_layout(title=f"Descomposición de Serie Temporal - {selected_station}", height=600)
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"Error en descomposición: {e}")
+        try:
+            # Ahora ts no tiene NaNs, por lo que esto funcionará
+            decomp = seasonal_decompose(ts, model='additive', period=12)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=ts.index, y=decomp.trend, name='Tendencia'))
+            fig.add_trace(go.Scatter(x=ts.index, y=decomp.seasonal, name='Estacionalidad'))
+            fig.add_trace(go.Scatter(x=ts.index, y=decomp.resid, name='Residuo', mode='markers'))
+            fig.update_layout(title="Descomposición de Serie Temporal")
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error en descomposición: {e}")
 
     # 3. AUTOCORRELACIÓN (ACF/PACF)
     with tabs[2]:
-        if selected_station and len(ts) > 24:
+        try:
             from statsmodels.tsa.stattools import acf, pacf
-            lag_acf = acf(ts, nlags=min(40, len(ts)//2))
-            lag_pacf = pacf(ts, nlags=min(40, len(ts)//2))
+            # Limitar lags a 50% de la serie para evitar errores
+            nlags = min(40, len(ts)//2 - 1)
+            lag_acf = acf(ts, nlags=nlags)
+            lag_pacf = pacf(ts, nlags=nlags)
             
             c1, c2 = st.columns(2)
             fig_acf = px.bar(x=range(len(lag_acf)), y=lag_acf, title="Autocorrelación (ACF)")
@@ -962,46 +969,54 @@ def display_trends_and_forecast_tab(**kwargs):
             
             fig_pacf = px.bar(x=range(len(lag_pacf)), y=lag_pacf, title="Autocorrelación Parcial (PACF)")
             c2.plotly_chart(fig_pacf, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error en ACF/PACF: {e}")
 
     # 4. SARIMA
     with tabs[3]:
         st.markdown("#### Pronóstico SARIMA")
         horizon = st.slider("Horizonte:", 6, 36, 12, key="h_sarima")
-        
         if st.button("Calcular SARIMA"):
-            with st.spinner("Ajustando modelo SARIMA..."):
-                try:
-                    from statsmodels.tsa.statespace.sarimax import SARIMAX
-                    # Modelo simple (1,1,1)(1,1,1,12) como base robusta
+            try:
+                # Simulación visual rápida (o usar statsmodels real si está instalado)
+                from statsmodels.tsa.statespace.sarimax import SARIMAX
+                
+                with st.spinner("Ajustando modelo SARIMA..."):
+                    # Modelo genérico robusto (1,1,1)(1,1,1,12)
                     model = SARIMAX(ts, order=(1, 1, 1), seasonal_order=(1, 1, 1, 12), enforce_stationarity=False, enforce_invertibility=False)
                     model_fit = model.fit(disp=False)
                     
                     # Predicción
-                    forecast = model_fit.get_forecast(steps=horizon)
-                    fc_mean = forecast.predicted_mean
-                    conf_int = forecast.conf_int()
+                    forecast_res = model_fit.get_forecast(steps=horizon)
+                    forecast_vals = forecast_res.predicted_mean
+                    conf_int = forecast_res.conf_int()
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=ts.index[-60:], y=ts.tail(60), name="Histórico (Últimos 5 años)"))
-                    fig.add_trace(go.Scatter(x=fc_mean.index, y=fc_mean, name="Pronóstico SARIMA", line=dict(color='red', dash='dash')))
+                    # Mostrar últimos 5 años de historia para claridad
+                    tail_ts = ts.tail(60)
+                    fig.add_trace(go.Scatter(x=tail_ts.index, y=tail_ts, name="Histórico"))
+                    fig.add_trace(go.Scatter(x=forecast_vals.index, y=forecast_vals, name="Pronóstico SARIMA", line=dict(color='red', dash='dash')))
+                    
+                    # Intervalo de confianza
                     fig.add_trace(go.Scatter(
                         x=pd.concat([conf_int.index, conf_int.index[::-1]]),
                         y=pd.concat([conf_int.iloc[:, 0], conf_int.iloc[:, 1][::-1]]),
                         fill='toself', fillcolor='rgba(255,0,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
                         name='Intervalo Confianza'
                     ))
+
                     st.plotly_chart(fig, use_container_width=True)
-                    st.session_state['sarima_res'] = fc_mean
-                except Exception as e:
-                    st.error(f"Error en SARIMA: {e}")
+                    st.session_state['sarima_res'] = forecast_vals
+            except Exception as e:
+                st.error(f"Error en cálculo SARIMA: {e}")
 
     # 5. PROPHET
     with tabs[4]:
         st.markdown("#### Pronóstico Prophet")
         horizon_p = st.slider("Horizonte:", 6, 36, 12, key="h_prophet")
         if st.button("Calcular Prophet"):
-            with st.spinner("Entrenando Prophet..."):
-                try:
+            try:
+                with st.spinner("Entrenando Prophet..."):
                     df_p = ts.reset_index().rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
                     m = Prophet(yearly_seasonality=True)
                     m.fit(df_p)
@@ -1009,18 +1024,26 @@ def display_trends_and_forecast_tab(**kwargs):
                     fcst = m.predict(future)
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_p['ds'].tail(60), y=df_p['y'].tail(60), name="Histórico"))
-                    fig.add_trace(go.Scatter(x=fcst['ds'].tail(horizon_p), y=fcst['yhat'].tail(horizon_p), name="Prophet", line=dict(color='green')))
+                    # Historia
+                    hist_tail = df_p.tail(60)
+                    fig.add_trace(go.Scatter(x=hist_tail['ds'], y=hist_tail['y'], name="Real"))
+                    
+                    # Pronóstico
+                    fc_tail = fcst.tail(horizon_p)
+                    fig.add_trace(go.Scatter(x=fc_tail['ds'], y=fc_tail['yhat'], name="Prophet", line=dict(color='green')))
+                    
+                    # Banda de error
                     fig.add_trace(go.Scatter(
-                        x=pd.concat([fcst['ds'].tail(horizon_p), fcst['ds'].tail(horizon_p)[::-1]]),
-                        y=pd.concat([fcst['yhat_lower'].tail(horizon_p), fcst['yhat_upper'].tail(horizon_p)[::-1]]),
+                        x=pd.concat([fc_tail['ds'], fc_tail['ds'][::-1]]),
+                        y=pd.concat([fc_tail['yhat_upper'], fc_tail['yhat_lower'][::-1]]),
                         fill='toself', fillcolor='rgba(0,255,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
                         name='Intervalo Confianza'
                     ))
+
                     st.plotly_chart(fig, use_container_width=True)
                     st.session_state['prophet_res'] = fcst[['ds', 'yhat']].tail(horizon_p).set_index('ds')['yhat']
-                except Exception as e:
-                    st.error(f"Error en Prophet: {e}")
+            except Exception as e:
+                st.error(f"Error en Prophet: {e}")
 
     # 6. COMPARACIÓN
     with tabs[5]:
@@ -1029,72 +1052,63 @@ def display_trends_and_forecast_tab(**kwargs):
         
         if s_res is not None and p_res is not None:
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=s_res.index, y=s_res, name="SARIMA", line=dict(color='red')))
-            fig.add_trace(go.Scatter(x=p_res.index, y=p_res, name="Prophet", line=dict(color='green')))
-            fig.update_layout(title="Comparación de Modelos", yaxis_title="Precipitación (mm)")
+            fig.add_trace(go.Scatter(x=s_res.index, y=s_res, name="SARIMA"))
+            # Asegurar alineación de índices si difieren ligeramente
+            fig.add_trace(go.Scatter(x=p_res.index, y=p_res, name="Prophet"))
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Ejecute ambos pronósticos (SARIMA y Prophet) primero para ver la comparación.")
+            st.info("Ejecute ambos pronósticos primero.")
 
-    # 7. MAPA DE RIESGO (Tendencias Espaciales)
+    # 7. MAPA DE RIESGO
     with tabs[6]:
         st.markdown("#### Mapa de Vulnerabilidad (Tendencias de Lluvia)")
-        st.info("Interpolación de la Pendiente de Sen (mm/año) para todas las estaciones con >10 años de datos.")
-        
         if st.button("Generar Mapa de Riesgo"):
             with st.spinner("Calculando tendencias regionales..."):
                 trend_data = []
-                # Usar todas las estaciones disponibles en el dataset cargado, no solo las filtradas
-                for stn in gdf_stations[Config.STATION_NAME_COL].unique():
-                    # Buscar datos para esta estación en df_anual completo (sin filtrar por fecha del sidebar si es posible)
-                    # Pero usamos df_anual (que ya viene filtrado) o df_long completo si se pasa
-                    # Usaremos df_anual por coherencia con lo que ve el usuario
+                # Usar todas las estaciones disponibles en la selección anual
+                stations_pool = df_anual[Config.STATION_NAME_COL].unique()
+                
+                for stn in stations_pool:
                     sub = df_anual[df_anual[Config.STATION_NAME_COL] == stn]
-                    
                     if len(sub) > 10: # Min 10 años
                         try:
                             res = mk.original_test(sub[Config.PRECIPITATION_COL])
-                            # Obtener lat/lon
-                            loc = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == stn].iloc[0]
-                            trend_data.append({
-                                'lat': loc['latitude'], 'lon': loc['longitude'], 
-                                'slope': res.slope, 'name': stn
-                            })
+                            # Buscar coordenadas en gdf_stations (usando el gdf completo pasado en kwargs si está, o filtrar)
+                            if gdf_stations is not None:
+                                loc = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == stn]
+                                if not loc.empty:
+                                    iloc = loc.iloc[0]
+                                    trend_data.append({
+                                        'lat': iloc['latitude'], 'lon': iloc['longitude'], 
+                                        'slope': res.slope, 'name': stn
+                                    })
                         except: pass
                 
                 if len(trend_data) >= 4:
                     df_trend = pd.DataFrame(trend_data)
                     
-                    # Interpolar superficie de "Pendiente" (Slope)
-                    from scipy.interpolate import griddata
-                    
-                    # Grilla
-                    pad = 0.1
-                    grid_x, grid_y = np.mgrid[df_trend.lon.min()-pad:df_trend.lon.max()+pad:100j, 
-                                              df_trend.lat.min()-pad:df_trend.lat.max()+pad:100j]
+                    # Interpolar
+                    grid_x, grid_y = np.mgrid[df_trend.lon.min():df_trend.lon.max():100j, 
+                                              df_trend.lat.min():df_trend.lat.max():100j]
                     
                     grid_z = griddata(
                         df_trend[['lon', 'lat']].values, 
                         df_trend['slope'].values, 
                         (grid_x, grid_y), 
-                        method='linear' # Linear es seguro para tendencias
+                        method='linear'
                     )
                     
                     fig = go.Figure(data=go.Contour(
                         z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:],
-                        colorscale='RdBu', # Rojo=Negativo (Disminuye lluvia), Azul=Positivo (Aumenta)
+                        colorscale='RdBu', 
                         colorbar=dict(title='Tendencia (mm/año)'),
-                        zmid=0 # Centrar el blanco en 0 cambio
+                        zmid=0
                     ))
-                    fig.add_trace(go.Scatter(
-                        x=df_trend.lon, y=df_trend.lat, mode='markers', 
-                        text=df_trend.apply(lambda row: f"{row['name']}: {row['slope']:.2f}", axis=1),
-                        marker=dict(color='black', size=4), name='Estaciones'
-                    ))
+                    fig.add_trace(go.Scatter(x=df_trend.lon, y=df_trend.lat, mode='markers', text=df_trend.name))
                     fig.update_layout(title="Mapa de Tendencias de Precipitación (Pendiente Sen)", height=600)
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.warning("No hay suficientes estaciones con >10 años de datos en la selección actual para interpolar un mapa de riesgo.")
+                    st.warning("No hay suficientes estaciones con >10 años de datos para interpolar tendencias.")
 
 def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, **kwargs):
     st.subheader("⚠️ Análisis de Anomalías de Precipitación")
@@ -2024,6 +2038,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
