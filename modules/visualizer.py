@@ -1597,7 +1597,7 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
             st.plotly_chart(fig_p, use_container_width=True)
         else:
             st.warning("Error calculando percentiles.")
-
+            
 def display_climate_scenarios_tab(**kwargs):
     st.subheader("🌡️ Simulador de Cambio Climático")
     st.markdown("""
@@ -1821,6 +1821,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
