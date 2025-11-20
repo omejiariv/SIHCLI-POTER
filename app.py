@@ -148,7 +148,7 @@ def main():
         "⚠️ Anomalías",
         "🔗 Correlación",
         "🌊 ENSO",
-        "🏜️ Sequía (SPI)",
+        "🌊 Extremos Hidrológicos",
         "🌍 Mapas Avanzados",
         "🌿 Cobertura",
         "🌱 Zonas de Vida",
@@ -194,7 +194,7 @@ def main():
     with tabs[8]: # ENSO
         display_enso_tab(**display_args)
 
-    with tabs[9]: # Sequía
+    with tabs[9]: # Extremos Hidrológicos
         display_drought_analysis_tab(**display_args)
 
     with tabs[10]: # Mapas Avanzados
@@ -270,3 +270,4 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
