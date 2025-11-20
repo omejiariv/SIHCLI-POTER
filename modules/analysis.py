@@ -71,46 +71,41 @@ def calculate_spi(df, col=Config.PRECIPITATION_COL, window=12):
     return df_spi['spi']
 
 @st.cache_data
-def calculate_spei(precip_series, et_series, scale):
+def calculate_spei(precip_series, et_series, window=12):
     """
-    Calcula el SPEI. Incluye lógica para estimar ET si se recibe Temperatura.
+    Calcula el SPEI usando la distribución Log-Laplace.
+    CORREGIDO: Ahora acepta el argumento 'window' para ser compatible con el visualizador.
     """
-    # Validación inicial
-    if precip_series is None or et_series is None:
-        return pd.Series(dtype=float)
-    if precip_series.empty or et_series.empty:
-        return pd.Series(dtype=float)
-
-    try:
-        scale = int(scale)
-    except:
+    scale = int(window) # Mapeo de argumento window -> scale
+    
+    # Validación
+    if precip_series is None or et_series is None or precip_series.empty or et_series.empty:
         return pd.Series(dtype=float)
 
     # Alineación
     df = pd.DataFrame({'precip': precip_series, 'et': et_series}).sort_index()
-    df = df.asfreq('MS') # Forzar frecuencia mensual
+    df = df.asfreq('MS') 
 
     # Limpieza
     df.dropna(subset=['precip'], inplace=True)
     df['et'] = df['et'].fillna(method='ffill').fillna(method='bfill')
     df.dropna(subset=['et'], inplace=True)
 
-    # --- ADAPTACIÓN INTELIGENTE ---
-    # Si los valores de 'et' son muy bajos (ej. promedio 20), probablemente son Temperatura (°C)
-    # y no Evapotranspiración (mm). Convertimos usando aprox Thornthwaite simple (T * 4.5).
+    # --- AJUSTE INTELIGENTE DE UNIDADES ---
+    # Si 'et' parece ser Temperatura (< 40 promedio), lo convertimos a ET aprox.
     if df['et'].mean() < 40:
-        df['et'] = df['et'] * 4.5
+        df['et'] = df['et'] * 4.5 # Aprox Thornthwaite simple para trópico
 
     if len(df) < scale * 2:
         return pd.Series(dtype=float)
 
-    # Balance Hídrico (D)
+    # Balance (D)
     water_balance = df['precip'] - df['et']
     
     # Acumulación
     rolling_balance = water_balance.rolling(window=scale, min_periods=scale).sum()
     
-    # Ajuste Estadístico (Log-Laplace)
+    # Ajuste Log-Laplace
     data_for_fit = rolling_balance.dropna()
     data_for_fit = data_for_fit[np.isfinite(data_for_fit)]
 
@@ -118,22 +113,16 @@ def calculate_spei(precip_series, et_series, scale):
 
     if not data_for_fit.empty and len(data_for_fit.unique()) > 1:
         try:
-            # Ajuste dinámico de posición (floc)
+            # Ajuste de parámetros
             params = loglaplace.fit(data_for_fit, floc=data_for_fit.min() - 1e-5 if data_for_fit.min() <= 0 else 0)
-            
             # CDF
             cdf = loglaplace.cdf(rolling_balance.dropna(), *params)
             cdf_series = pd.Series(cdf, index=rolling_balance.dropna().index)
-            
-            # Clipping para evitar infinitos en la transformación Normal
+            # Clipping y Z-Score
             cdf_clipped = np.clip(cdf_series.values, 1e-7, 1 - 1e-7)
-            
-            # Transformación Normal (Z-Score)
-            spei_calculated = norm.ppf(cdf_clipped)
-            spei.loc[cdf_series.index] = spei_calculated
-            
+            spei.loc[cdf_series.index] = norm.ppf(cdf_clipped)
         except Exception:
-            pass # Fallo en ajuste, retorna NaN
+            pass # Retorna NaN si falla el ajuste matemático
 
     spei.replace([np.inf, -np.inf], np.nan, inplace=True)
     return spei
@@ -665,6 +654,7 @@ def calculate_percentiles_extremes(df_long, station_name, p_low=10, p_high=90):
     df_station.loc[df_station[Config.PRECIPITATION_COL] >= thresh_high, 'Tipo Evento'] = f'Alto (>P{p_high})'
     
     return df_station, thresh_low, thresh_high
+
 
 
 
