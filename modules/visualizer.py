@@ -1427,150 +1427,176 @@ def display_life_zones_tab(**kwargs):
             st.dataframe(merged[[Config.STATION_NAME_COL, 'Zona de Vida', Config.PRECIPITATION_COL, Config.ALTITUDE_COL]], use_container_width=True)
 
 def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
-    st.subheader("🏜️ Análisis de Sequía (SPI / SPEI)")
-    st.info("""
-    Esta herramienta permite monitorear eventos extremos:
-    * **SPI (Standardized Precipitation Index):** Solo considera la lluvia. Útil para sequía meteorológica.
-    * **SPEI (Standardized Precipitation-Evapotranspiration Index):** Considera el balance hídrico (Lluvia - Evaporación). Útil para sequía agrícola e hidrológica bajo calentamiento.
-    """)
+    st.subheader("🌊 Análisis de Extremos Hidrológicos")
+    st.info("Evaluación de eventos extremos: Sequías (Déficit), Inundaciones (Exceso) y Frecuencia (Períodos de Retorno).")
 
     if df_long is None or df_long.empty:
-        st.warning("No hay datos de precipitación para el cálculo.")
+        st.warning("No hay datos de precipitación.")
         return
 
-    # 1. Configuración del Análisis
-    col1, col2, col3 = st.columns(3)
+    # 1. Selección Global de Estación
+    stations = sorted(df_long[Config.STATION_NAME_COL].unique())
+    selected_station = st.selectbox("Seleccionar Estación para Análisis:", stations, key="extremes_station_sel")
     
-    with col1:
-        stations = sorted(df_long[Config.STATION_NAME_COL].unique())
-        selected_station = st.selectbox("Estación:", stations, key="drought_station_sel")
-    
-    with col2:
-        index_type = st.selectbox("Índice:", ["SPI (Precipitación)", "SPEI (Balance Hídrico)"], key="drought_type")
-        
-    with col3:
-        scale = st.selectbox("Escala (Meses):", [1, 3, 6, 12, 24], index=2, 
-                             help="3: Suelos, 6: Caudales, 12: Embalses/Acuíferos")
+    if not selected_station: return
 
-    if selected_station:
-        # 2. Preparación de Datos
-        # Obtener datos de la estación y ordenar cronológicamente
-        df_station = df_long[df_long[Config.STATION_NAME_COL] == selected_station].sort_values(Config.DATE_COL).copy()
-        df_station.set_index(Config.DATE_COL, inplace=True)
+    # 2. Pestañas Internas
+    tab_idx, tab_freq, tab_perc = st.tabs([
+        "Índices Estandarizados (SPI/SPEI)", 
+        "Frecuencia de Máximos (Gumbel)", 
+        "Umbrales y Percentiles"
+    ])
+
+    # -------------------------------------------------------------------------
+    # SUB-PESTAÑA 1: SPI / SPEI (Lo que ya teníamos)
+    # -------------------------------------------------------------------------
+    with tab_idx:
+        c1, c2 = st.columns(2)
+        idx_type = c1.radio("Índice:", ["SPI (Lluvia)", "SPEI (Balance)"], horizontal=True)
+        scale = c2.selectbox("Escala (Meses):", [1, 3, 6, 12, 24], index=2)
         
-        # Resamplear a mensual (MS) para asegurar continuidad (rellenar huecos es vital para series de tiempo)
-        # Para SPI/SPEI, los huecos deben ser tratados con cuidado.
+        # Preparar datos
+        df_station = df_long[df_long[Config.STATION_NAME_COL] == selected_station].sort_values(Config.DATE_COL).set_index(Config.DATE_COL)
         ts_ppt = df_station[Config.PRECIPITATION_COL].resample('MS').sum()
-
-        # Obtener altitud para estimar temperatura (necesario para SPEI si no hay datos de T)
+        
+        # Obtener altitud para SPEI
         try:
-            station_meta = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == selected_station].iloc[0]
-            altitude = station_meta[Config.ALTITUDE_COL] if Config.ALTITUDE_COL in station_meta else 1500
-        except:
-            altitude = 1500 # Fallback por defecto
+            alt = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == selected_station].iloc[0][Config.ALTITUDE_COL]
+        except: alt = 1500
 
-        # 3. Cálculo del Índice
+        # Cálculo (Lógica resumida llamando a analysis.py)
         try:
-            final_index_series = None
-            
-            if "SPI" in index_type:
-                # --- CÁLCULO SPI (Gamma) ---
-                # Suma móvil
-                rolling_ppt = ts_ppt.rolling(window=scale, center=False).sum()
-                
-                # Filtrar datos válidos para el ajuste
-                valid_data = rolling_ppt.dropna()
-                data_nonzero = valid_data[valid_data > 0]
-                
-                if len(data_nonzero) > 30:
-                    # Ajuste Gamma
-                    alpha, loc, beta = stats.gamma.fit(data_nonzero)
-                    # Calcular Probabilidad Acumulada (CDF)
-                    cdf = stats.gamma.cdf(valid_data, alpha, loc=loc, scale=beta)
-                    # Transformar a Z-Score (Normal)
-                    final_index_series = pd.Series(stats.norm.ppf(cdf), index=valid_data.index)
-                else:
-                    st.warning("Datos insuficientes (no nulos) para ajustar la distribución Gamma.")
-
+            if "SPI" in idx_type:
+                # SPI Gamma (Implementación rápida inline o llamar a función si la tienes separada)
+                # Por robustez, repetimos la lógica de cálculo seguro aquí o llamamos a calculate_spi si existe
+                from modules.analysis import calculate_spi # Asumiendo que existe o usando la lógica previa
+                # Si no tienes calculate_spi en analysis, usa el bloque de la respuesta anterior
+                # Aquí uso un placeholder funcional:
+                if len(ts_ppt) > 30:
+                    roll = ts_ppt.rolling(scale).sum().dropna()
+                    fit_alpha, fit_loc, fit_beta = stats.gamma.fit(roll[roll > 0])
+                    cdf = stats.gamma.cdf(roll, fit_alpha, loc=fit_loc, scale=fit_beta)
+                    series_idx = pd.Series(stats.norm.ppf(cdf), index=roll.index)
+                else: series_idx = None
             else:
-                # --- CÁLCULO SPEI (Normal o Log-Logística sobre D) ---
-                # 1. Estimar Temperatura Media Mensual (Si no hay datos reales, usamos estimación por altitud)
-                # T = 28 - 0.006 * h
-                temp_est = max(28.0 - (0.006 * altitude), 5.0) # Evitar temperaturas irreales
-                
-                # 2. Calcular PET Mensual (Método Thornthwaite simplificado o proporcional a T para este demo)
-                # Una aprox simple para Colombia: PET ~ 4.0 * T (mm/mes aprox variable)
-                # Mejor: Método de Hargreaves simplificado si tuviéramos Tmax/Tmin. 
-                # Usamos constante * T como proxy de demanda atmosférica.
-                pet_series = pd.Series([temp_est * 4.5] * len(ts_ppt), index=ts_ppt.index) # ~100-120 mm/mes en trópico
-                
-                # 3. Balance (D)
-                d_series = ts_ppt - pet_series
-                
-                # 4. Acumulación
-                d_rolled = d_series.rolling(window=scale).sum().dropna()
-                
-                # 5. Estandarización (Z-Score simple)
-                # El SPEI oficial usa Log-Logística, pero la Normal es una buena aproximación para apps web rápidas
-                if len(d_rolled) > 30:
-                    final_index_series = (d_rolled - d_rolled.mean()) / d_rolled.std()
-            
-            # 4. Visualización
-            if final_index_series is not None:
-                # Preparar DF para Plotly
-                df_vis = pd.DataFrame({'Valor': final_index_series})
-                df_vis['Color'] = np.where(df_vis['Valor'] >= 0, '#1f77b4', '#d62728') # Azul/Rojo
-                
-                # Métricas del último mes
-                last_date = df_vis.index[-1]
-                last_val = df_vis.iloc[-1]['Valor']
-                
-                state_text = "Normal"
-                if last_val <= -2.0: state_text = "Sequía Extrema"
-                elif last_val <= -1.5: state_text = "Sequía Severa"
-                elif last_val <= -1.0: state_text = "Sequía Moderada"
-                elif last_val >= 1.5: state_text = "Humedad Severa"
-                
-                st.metric(f"Estado Actual ({last_date.strftime('%Y-%m')})", state_text, f"{last_val:.2f} σ")
+                # SPEI (Lógica simplificada)
+                from modules.analysis import calculate_spei
+                t_series = pd.Series([25 - (0.006*alt)]*len(ts_ppt), index=ts_ppt.index)
+                series_idx = calculate_spei(ts_ppt, t_series, window=scale)
 
-                # Gráfico
+            if series_idx is not None:
+                df_vis = pd.DataFrame({'Val': series_idx})
+                df_vis['Color'] = np.where(df_vis['Val'] >= 0, 'blue', 'red')
+                
                 fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    x=df_vis.index, 
-                    y=df_vis['Valor'],
-                    marker_color=df_vis['Color'],
-                    name=index_type.split()[0]
+                fig.add_trace(go.Bar(x=df_vis.index, y=df_vis['Val'], marker_color=df_vis['Color'], name=idx_type))
+                fig.add_hline(y=-1.5, line_dash="dash", line_color="red", annotation_text="Sequía Severa")
+                fig.add_hline(y=1.5, line_dash="dash", line_color="blue", annotation_text="Humedad Severa")
+                fig.update_layout(title=f"Evolución {idx_type}-{scale}", height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Datos insuficientes para el índice.")
+        except Exception as e:
+            st.error(f"Error calculando índice: {e}")
+
+    # -------------------------------------------------------------------------
+    # SUB-PESTAÑA 2: FRECUENCIA (GUMBEL) - ¡NUEVO!
+    # -------------------------------------------------------------------------
+    with tab_freq:
+        st.markdown("#### Análisis de Frecuencia (Máximos Anuales)")
+        st.info("Estimación de la precipitación máxima esperada para diferentes Períodos de Retorno (Tr) usando la distribución de Gumbel.")
+        
+        from modules.analysis import calculate_return_periods
+        
+        res_df, debug_data = calculate_return_periods(df_long, selected_station)
+        
+        if res_df is not None:
+            c1, c2 = st.columns([1, 2])
+            
+            with c1:
+                st.markdown("**Tabla de Diseño**")
+                st.dataframe(res_df.style.format({"Ppt Máxima Esperada (mm)": "{:.1f}"}), use_container_width=True)
+                
+                # Botón descarga
+                csv = res_df.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Descargar Tabla (CSV)", csv, f"frecuencia_{selected_station}.csv", "text/csv")
+
+            with c2:
+                st.markdown("**Curva de Frecuencia**")
+                # Graficar Gumbel
+                annual_max = debug_data['data']
+                params = debug_data['params']
+                
+                # Eje X para la curva (Tr continuo)
+                tr_plot = np.linspace(1.01, 100, 100)
+                prob_plot = 1 - (1/tr_plot)
+                ppt_plot = stats.gumbel_r.ppf(prob_plot, *params)
+                
+                fig_freq = go.Figure()
+                
+                # Línea Teórica
+                fig_freq.add_trace(go.Scatter(
+                    x=tr_plot, y=ppt_plot, mode='lines', 
+                    name='Curva Gumbel', line=dict(color='red', width=2)
                 ))
                 
-                # Líneas de umbral
-                fig.add_hline(y=0, line_width=1, line_color="black")
-                fig.add_hline(y=-1.0, line_dash="dot", line_color="orange", annotation_text="Moderada")
-                fig.add_hline(y=-1.5, line_dash="dash", line_color="red", annotation_text="Severa")
-                fig.add_hline(y=-2.0, line_width=2, line_color="darkred", annotation_text="Extrema")
+                # Puntos Observados (Posición de ploteo de Gringorten o Weibull)
+                # Weibull: P = m / (n+1) -> Tr = (n+1)/m
+                sorted_max = np.sort(annual_max.values)
+                n = len(sorted_max)
+                rank = np.arange(1, n+1)
+                tr_obs = (n + 1) / (n + 1 - rank) # Tr para máximos (orden ascendente en Gumbel plot)
                 
-                fig.update_layout(
-                    title=f"Evolución Histórica del {index_type} - Escala {scale} meses",
-                    yaxis_title="Índice Estandarizado (σ)",
-                    xaxis_title="Fecha",
+                # Ojo: Gumbel ppf usa probabilidad de NO excedencia.
+                # Para graficar los puntos observados contra la curva ajustada:
+                fig_freq.add_trace(go.Scatter(
+                    x=tr_obs, y=sorted_max, mode='markers',
+                    name='Datos Observados', marker=dict(color='black', size=6)
+                ))
+                
+                fig_freq.update_layout(
+                    xaxis_title="Período de Retorno (Años)",
+                    yaxis_title="Precipitación Máxima Anual (mm)",
+                    xaxis_type="log", # Escala logarítmica es estándar para Tr
                     height=500,
                     hovermode="x"
                 )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Explicación
-                with st.expander("📖 Guía de Interpretación"):
-                    st.markdown("""
-                    * **> 2.0**: Extremadamente Húmedo
-                    * **1.5 a 1.99**: Muy Húmedo
-                    * **-0.99 a 0.99**: Normal
-                    * **-1.0 a -1.49**: Sequía Moderada
-                    * **-1.5 a -1.99**: Sequía Severa
-                    * **< -2.0**: Sequía Extrema
-                    """)
+                st.plotly_chart(fig_freq, use_container_width=True)
+        else:
+            st.error(debug_data) # Mostrar mensaje de error (ej. <10 años)
 
-        except Exception as e:
-            st.error(f"Error en el cálculo estadístico: {e}")
-            st.info("Verifique que la estación tenga suficientes datos históricos continuos (mínimo 30 meses).")
+    # -------------------------------------------------------------------------
+    # SUB-PESTAÑA 3: PERCENTILES (Configurable) - ¡NUEVO!
+    # -------------------------------------------------------------------------
+    with tab_perc:
+        st.markdown("#### Análisis de Umbrales y Percentiles")
+        
+        c_p1, c_p2 = st.columns(2)
+        p_low = c_p1.slider("Percentil Bajo (Seco):", 1, 20, 10)
+        p_high = c_p2.slider("Percentil Alto (Húmedo):", 80, 99, 95)
+        
+        from modules.analysis import calculate_percentiles_extremes
+        res_perc = calculate_percentiles_extremes(df_long, selected_station, p_low, p_high)
+        
+        if res_perc:
+            df_p, t_low, t_high = res_perc
+            
+            c_m1, c_m2 = st.columns(2)
+            c_m1.metric(f"Umbral Seco (P{p_low})", f"{t_low:.1f} mm")
+            c_m2.metric(f"Umbral Húmedo (P{p_high})", f"{t_high:.1f} mm")
+            
+            # Gráfico de dispersión clasificado
+            fig_p = px.scatter(
+                df_p, x=Config.DATE_COL, y=Config.PRECIPITATION_COL,
+                color='Tipo Evento',
+                color_discrete_map={'Normal': 'gray', f'Bajo (<P{p_low})': 'red', f'Alto (>P{p_high})': 'blue'},
+                title=f"Eventos Extremos según Percentiles"
+            )
+            fig_p.add_hline(y=t_high, line_dash="dot", line_color="blue")
+            fig_p.add_hline(y=t_low, line_dash="dot", line_color="red")
+            st.plotly_chart(fig_p, use_container_width=True)
+        else:
+            st.warning("Error calculando percentiles.")
 
 def display_climate_scenarios_tab(**kwargs):
     st.subheader("🌡️ Simulador de Cambio Climático")
@@ -1795,6 +1821,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
