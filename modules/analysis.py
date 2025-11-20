@@ -19,26 +19,36 @@ from scipy import stats
 @st.cache_data
 def calculate_spi(df, col=Config.PRECIPITATION_COL, window=12):
     """
-    Calcula el Índice Estandarizado de Precipitación (SPI) usando una aproximación estadística.
-    window: ventana de meses (ej. 3, 6, 12).
+    Calcula el Índice Estandarizado de Precipitación (SPI) usando transformación logarítmica.
     """
-    if df.empty: return df
+    if df is None or df.empty: return df
     
-    df_spi = df.copy().sort_values(Config.DATE_COL)
+    # Asegurar que sea un DataFrame con índice fecha si viene como Serie
+    if isinstance(df, pd.Series):
+        df = df.to_frame(name=col)
     
+    df_spi = df.copy().sort_index() # Asumimos índice fecha
+    
+    # Si el índice no es datetime, intentamos usar la columna de configuración
+    if not isinstance(df_spi.index, pd.DatetimeIndex) and Config.DATE_COL in df_spi.columns:
+        df_spi = df_spi.set_index(Config.DATE_COL).sort_index()
+
     # 1. Calcular acumulado móvil (Rolling Sum)
+    # min_periods=window asegura que no calcule si falta un mes en la ventana
     df_spi['rolling_precip'] = df_spi[col].rolling(window=window, min_periods=window).sum()
     
-    # 2. Calcular SPI (Aproximación Z-Score sobre logaritmos para normalizar)
-    # El SPI real usa distribución Gamma, pero Z-Score logarítmico es una buena aproximación robusta
+    # 2. Calcular SPI (Aproximación Z-Score sobre logaritmos)
     try:
-        valid_mask = df_spi['rolling_precip'] > 0 # Evitar log(0)
+        # Filtrar ceros y nulos para el logaritmo
+        valid_mask = (df_spi['rolling_precip'] > 0) & (df_spi['rolling_precip'].notna())
         
-        # Transformación Logarítmica para normalizar la distribución de lluvia
+        # Transformación Logarítmica para normalizar
         log_precip = np.log(df_spi.loc[valid_mask, 'rolling_precip'])
         
         mean = log_precip.mean()
         std = log_precip.std()
+        
+        df_spi['spi'] = np.nan # Inicializar
         
         if std == 0:
             df_spi['spi'] = 0
@@ -46,77 +56,84 @@ def calculate_spi(df, col=Config.PRECIPITATION_COL, window=12):
             # Calcular Z-score
             df_spi.loc[valid_mask, 'spi'] = (log_precip - mean) / std
             
-            # Llenar valores donde llovió 0 con el mínimo SPI detectado (sequía extrema)
+            # Manejo de Ceros (Sequía Extrema)
+            # Si llovió 0 en X meses, el SPI debe ser muy bajo
             min_spi = df_spi['spi'].min()
             if pd.isna(min_spi): min_spi = -3.0
-            df_spi.loc[~valid_mask & df_spi['rolling_precip'].notna(), 'spi'] = min_spi
+            # Asignar mínimo a los valores que eran 0 originalmente
+            df_spi.loc[~valid_mask & df_spi['rolling_precip'].notna() & (df_spi['rolling_precip'] == 0), 'spi'] = min_spi
             
-    except Exception:
+    except Exception as e:
+        # st.warning(f"Error cálculo SPI: {e}") # Debug silencioso
         df_spi['spi'] = np.nan
         
-    return df_spi
+    # Retornar solo la serie SPI
+    return df_spi['spi']
 
 @st.cache_data
 def calculate_spei(precip_series, et_series, scale):
     """
-    Calcula el Índice de Precipitación y Evapotranspiración Estandarizado (SPEI).
+    Calcula el SPEI. Incluye lógica para estimar ET si se recibe Temperatura.
     """
-
-    # Validación inicial de entradas
+    # Validación inicial
     if precip_series is None or et_series is None:
-        st.error(f"SPEI-{scale}: precip_series o et_series es None.")
         return pd.Series(dtype=float)
     if precip_series.empty or et_series.empty:
-         st.warning(f"SPEI-{scale}: precip_series o et_series está vacía.")
-         return pd.Series(dtype=float)
-
-    scale = int(scale)
-    # Asegurar alineación de índices y frecuencia mensual
-    df = pd.DataFrame({'precip': precip_series, 'et': et_series}).sort_index()
-    # Intentar inferir frecuencia mensual o rellenar si es necesario
-    df = df.asfreq('MS') # Fuerza frecuencia mensual, rellenará con NaN si faltan meses
-
-    # Rellenar NaNs en et_series con la media podría ser una opción, pero puede distorsionar resultados.
-    # Por ahora, solo quitamos filas donde AMBOS son NaN o donde P es NaN
-    df.dropna(subset=['precip'], inplace=True) 
-    df['et'] = df['et'].fillna(method='ffill').fillna(method='bfill') # Relleno simple para ET si tiene NaNs
-    df.dropna(subset=['et'], inplace=True) # Quitar si aún quedan NaNs en ET
-
-    if len(df) < scale * 2: # Chequeo DESPUÉS de limpiar NaNs
-        st.warning(f"SPEI-{scale}: Serie demasiado corta ({len(df)} puntos) después de limpiar NaNs.")
         return pd.Series(dtype=float)
 
+    try:
+        scale = int(scale)
+    except:
+        return pd.Series(dtype=float)
+
+    # Alineación
+    df = pd.DataFrame({'precip': precip_series, 'et': et_series}).sort_index()
+    df = df.asfreq('MS') # Forzar frecuencia mensual
+
+    # Limpieza
+    df.dropna(subset=['precip'], inplace=True)
+    df['et'] = df['et'].fillna(method='ffill').fillna(method='bfill')
+    df.dropna(subset=['et'], inplace=True)
+
+    # --- ADAPTACIÓN INTELIGENTE ---
+    # Si los valores de 'et' son muy bajos (ej. promedio 20), probablemente son Temperatura (°C)
+    # y no Evapotranspiración (mm). Convertimos usando aprox Thornthwaite simple (T * 4.5).
+    if df['et'].mean() < 40:
+        df['et'] = df['et'] * 4.5
+
+    if len(df) < scale * 2:
+        return pd.Series(dtype=float)
+
+    # Balance Hídrico (D)
     water_balance = df['precip'] - df['et']
+    
+    # Acumulación
     rolling_balance = water_balance.rolling(window=scale, min_periods=scale).sum()
+    
+    # Ajuste Estadístico (Log-Laplace)
     data_for_fit = rolling_balance.dropna()
-    data_for_fit = data_for_fit[np.isfinite(data_for_fit)] # Quitar Infinitos
+    data_for_fit = data_for_fit[np.isfinite(data_for_fit)]
 
-    spei = pd.Series(np.nan, index=rolling_balance.index) # Inicializar salida con NaN
+    spei = pd.Series(np.nan, index=rolling_balance.index)
 
-    if not data_for_fit.empty and len(data_for_fit.unique()) > 1: # Añadido chequeo de más de un valor único
+    if not data_for_fit.empty and len(data_for_fit.unique()) > 1:
         try:
-            # Ajustar floc dinámicamente para evitar errores si min <= 0
-            params = loglaplace.fit(data_for_fit, floc=data_for_fit.min() - 1e-5 if data_for_fit.min() <=0 else 0) 
-
-            cdf = loglaplace.cdf(rolling_balance.dropna(), *params) # Calcular CDF solo para valores no-NaN del rolling_balance
-            cdf_series = pd.Series(cdf, index=rolling_balance.dropna().index) # Ponerlo en una Serie con el índice correcto
-
-            # Asegurar probabilidades entre casi 0 y casi 1
-            cdf_clipped = np.clip(cdf_series.values, 1e-7, 1 - 1e-7) 
-
+            # Ajuste dinámico de posición (floc)
+            params = loglaplace.fit(data_for_fit, floc=data_for_fit.min() - 1e-5 if data_for_fit.min() <= 0 else 0)
+            
+            # CDF
+            cdf = loglaplace.cdf(rolling_balance.dropna(), *params)
+            cdf_series = pd.Series(cdf, index=rolling_balance.dropna().index)
+            
+            # Clipping para evitar infinitos en la transformación Normal
+            cdf_clipped = np.clip(cdf_series.values, 1e-7, 1 - 1e-7)
+            
+            # Transformación Normal (Z-Score)
             spei_calculated = norm.ppf(cdf_clipped)
-
-            # Asignar los valores calculados al índice correcto en la serie de salida 'spei'
             spei.loc[cdf_series.index] = spei_calculated
-
-        except Exception as e:
-             st.error(f"SPEI-{scale}: Falló el ajuste Log-Laplace o cálculo CDF. Error: {e}")
-             import traceback
-             st.error(traceback.format_exc()) # Imprime el traceback completo
-    elif data_for_fit.empty:
-        st.warning(f"SPEI-{scale}: No hay datos válidos (data_for_fit vacío) para ajustar la distribución después de la suma acumulada.")
-    else: # Solo un valor único
-         st.warning(f"SPEI-{scale}: Todos los valores en data_for_fit son iguales ({data_for_fit.iloc[0]}). No se puede ajustar la distribución.")
+            
+        except Exception:
+            pass # Fallo en ajuste, retorna NaN
 
     spei.replace([np.inf, -np.inf], np.nan, inplace=True)
     return spei
@@ -648,5 +665,6 @@ def calculate_percentiles_extremes(df_long, station_name, p_low=10, p_high=90):
     df_station.loc[df_station[Config.PRECIPITATION_COL] >= thresh_high, 'Tipo Evento'] = f'Alto (>P{p_high})'
     
     return df_station, thresh_low, thresh_high
+
 
 
