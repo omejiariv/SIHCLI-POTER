@@ -45,17 +45,78 @@ def get_weather_forecast_simple(lat, lon):
     except: return pd.DataFrame()
         
 def create_enso_chart(enso_data):
+    """
+    Genera el gráfico avanzado de ENSO con franjas de fondo para las fases.
+    """
     if enso_data is None or enso_data.empty or Config.ENSO_ONI_COL not in enso_data.columns:
         return go.Figure().update_layout(title="Datos ENSO no disponibles", height=300)
 
+    # Preparar datos
     data = enso_data.copy().sort_values(Config.DATE_COL).dropna(subset=[Config.ENSO_ONI_COL])
-    data['color'] = np.where(data[Config.ENSO_ONI_COL] >= 0.5, 'red', np.where(data[Config.ENSO_ONI_COL] <= -0.5, 'blue', 'gray'))
+    
+    # Definir colores de fondo según el valor ONI
+    # El Niño >= 0.5 (Rojo), La Niña <= -0.5 (Azul), Neutral (Gris)
+    conditions = [
+        data[Config.ENSO_ONI_COL] >= 0.5,
+        data[Config.ENSO_ONI_COL] <= -0.5
+    ]
+    # Colores con transparencia (rgba) para el fondo
+    colors = ['rgba(255, 0, 0, 0.2)', 'rgba(0, 0, 255, 0.2)'] 
+    data['color'] = np.select(conditions, colors, default='rgba(200, 200, 200, 0.2)') # Gris transparente
+
+    # Calcular rangos para que las barras cubran todo el alto del gráfico
+    y_min = data[Config.ENSO_ONI_COL].min() - 0.5
+    y_max = data[Config.ENSO_ONI_COL].max() + 0.5
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=data[Config.DATE_COL], y=data[Config.ENSO_ONI_COL], marker_color=data['color'], name="ONI"))
-    fig.add_hline(y=0.5, line_dash="dash", line_color="red")
-    fig.add_hline(y=-0.5, line_dash="dash", line_color="blue")
-    fig.update_layout(title="Índice Oceánico El Niño (ONI)", height=400)
+
+    # 1. Barras de Fondo (Fases)
+    # Usamos un gráfico de barras ancho para simular las franjas de fondo
+    fig.add_trace(go.Bar(
+        x=data[Config.DATE_COL],
+        y=[y_max - y_min] * len(data), # Altura total
+        base=y_min, # Empezar desde abajo
+        marker_color=data['color'],
+        width=86400000 * 30, # Ancho aprox de 1 mes en milisegundos para que se peguen
+        hoverinfo="skip", # No mostrar tooltip para el fondo
+        showlegend=False,
+        name="Fase"
+    ))
+
+    # 2. Línea Principal (ONI)
+    fig.add_trace(go.Scatter(
+        x=data[Config.DATE_COL], 
+        y=data[Config.ENSO_ONI_COL], 
+        mode='lines', 
+        line=dict(color='black', width=2),
+        name='Anomalía ONI'
+    ))
+
+    # 3. Líneas de Umbral
+    fig.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="Umbral El Niño (+0.5)")
+    fig.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="Umbral La Niña (-0.5)")
+    fig.add_hline(y=0, line_width=1, line_color="black")
+
+    # 4. Leyenda Personalizada (Ficticia para mostrar los colores de fase)
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', 
+                             marker=dict(symbol='square', size=10, color='rgba(255, 0, 0, 0.5)'), name='El Niño'))
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', 
+                             marker=dict(symbol='square', size=10, color='rgba(0, 0, 255, 0.5)'), name='La Niña'))
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', 
+                             marker=dict(symbol='square', size=10, color='rgba(200, 200, 200, 0.5)'), name='Neutral'))
+
+    # Configuración del Layout
+    fig.update_layout(
+        title="Fases del Fenómeno ENSO y Anomalía ONI",
+        yaxis_title="Anomalía ONI (°C)",
+        xaxis_title="Fecha",
+        height=500,
+        hovermode="x unified",
+        yaxis_range=[y_min, y_max], # Fijar rango Y
+        barmode='overlay', # Superponer la línea a las barras
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
     return fig
     
 # 1. FUNCIONES AUXILIARES DE PARSEO Y DATOS
@@ -1821,6 +1882,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
