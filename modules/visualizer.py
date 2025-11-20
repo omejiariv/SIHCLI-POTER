@@ -225,136 +225,142 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
         else:
             st.warning("No hay datos para generar la matriz anual.")
             
-def display_graphs_tab(**kwargs):
+def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analysis, **kwargs):
     st.subheader("📊 Visualizaciones de Precipitación")
     
-    # Recuperar datos
-    df_long = kwargs.get('df_long')
-    df_anual = kwargs.get('df_anual_melted')
-    
-    if df_long is None or df_long.empty or df_anual is None or df_anual.empty:
-        st.warning("No hay datos cargados para generar gráficos.")
+    if df_monthly_filtered is None or df_monthly_filtered.empty:
+        st.warning("No hay datos para mostrar.")
         return
-
-    # --- DEFINICIÓN DE PESTAÑAS (AQUÍ ESTABA EL ERROR) ---
-    # Debemos definir exactamente 6 variables para las 6 pestañas
-    tab_anual, tab_mensual, tab_comp, tab_boxplot, tab_dist_anual, tab_serie_reg = st.tabs([
+    
+    # Definición de Pestañas (Orden Lógico)
+    tab_names = [
         "Análisis Anual", 
+        "Pptn Multianual",       # <--- NUEVA PESTAÑA (Barras ordenables)
         "Análisis Mensual", 
-        "Comparación Rápida",  # Esta corresponde a tab_comp
-        "Boxplot Distribución", 
-        "Distribución Anual Acumulada", 
+        "Comparación Rápida",    # <--- RESTAURADA (Ciclo Anual)
+        "Boxplot Anual", 
+        "Distribución", 
         "Serie Regional"
-    ])
-
-    # -------------------------------------------------------------------------
-    # PESTAÑA 1: ANÁLISIS ANUAL
-    # -------------------------------------------------------------------------
-    with tab_anual:
-        st.markdown("##### Precipitación Total Anual")
+    ]
+    tabs = st.tabs(tab_names)
+    
+    # 1. ANÁLISIS ANUAL (Serie de Tiempo)
+    with tabs[0]:
+        st.markdown("##### Serie Histórica Anual")
         fig = px.line(
-            df_anual, 
+            df_anual_melted, 
             x=Config.YEAR_COL, 
             y=Config.PRECIPITATION_COL, 
-            color=Config.STATION_NAME_COL,
+            color=Config.STATION_NAME_COL, 
+            markers=True, 
             title="Precipitación Total Anual por Estación",
-            labels={Config.PRECIPITATION_COL: "Precipitación (mm)", Config.YEAR_COL: "Año"}
+            labels={Config.PRECIPITATION_COL: "Lluvia (mm)", Config.YEAR_COL: "Año"}
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # -------------------------------------------------------------------------
-    # PESTAÑA 2: ANÁLISIS MENSUAL
-    # -------------------------------------------------------------------------
-    with tab_mensual:
-        st.markdown("##### Patrón Mensual de Precipitación")
-        monthly_avg = df_long.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        fig = px.bar(
-            monthly_avg, 
-            x=Config.MONTH_COL, 
-            y=Config.PRECIPITATION_COL, 
-            title="Precipitación Mensual Promedio (Regional)",
-            labels={Config.PRECIPITATION_COL: "Precipitación Promedio (mm)", Config.MONTH_COL: "Mes"}
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    # -------------------------------------------------------------------------
-    # PESTAÑA 3: COMPARACIÓN RÁPIDA (Multianual)
-    # -------------------------------------------------------------------------
-    with tab_comp:
-        st.markdown("##### Precipitación Media Multianual")
+    # 2. PPTN MULTIANUAL (Barras Ordenables - Lo que añadimos antes)
+    with tabs[1]:
+        st.markdown("##### Precipitación Media Multianual (Ranking)")
         
-        # Calcular promedio por estación
-        avg_ppt_by_station = df_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        avg_ppt_by_station.rename(columns={Config.PRECIPITATION_COL: "Precipitación Media Anual (mm)"}, inplace=True)
+        # Calcular promedio
+        avg_ppt = df_anual_melted.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+        col_val = "Precipitación Media (mm)"
+        avg_ppt.rename(columns={Config.PRECIPITATION_COL: col_val}, inplace=True)
         
-        # Controles de ordenamiento
-        sort_option = st.radio(
-            "Ordenar por:",
-            ["Mayor a Menor", "Menor a Mayor", "Alfabético"],
-            index=0,
-            horizontal=True,
-            key="sort_comp_multianual"
+        # Control de Orden
+        sort_opt = st.radio(
+            "Ordenar por:", 
+            ["Mayor a Menor", "Menor a Mayor", "Alfabético"], 
+            horizontal=True, 
+            key="sort_multianual"
         )
         
-        if sort_option == "Mayor a Menor":
-            avg_ppt_by_station = avg_ppt_by_station.sort_values("Precipitación Media Anual (mm)", ascending=False)
-        elif sort_option == "Menor a Mayor":
-            avg_ppt_by_station = avg_ppt_by_station.sort_values("Precipitación Media Anual (mm)", ascending=True)
+        if sort_opt == "Mayor a Menor":
+            avg_ppt = avg_ppt.sort_values(col_val, ascending=False)
+        elif sort_opt == "Menor a Mayor":
+            avg_ppt = avg_ppt.sort_values(col_val, ascending=True)
         else:
-            avg_ppt_by_station = avg_ppt_by_station.sort_values(Config.STATION_NAME_COL)
+            avg_ppt = avg_ppt.sort_values(Config.STATION_NAME_COL)
             
-        # Gráfico de Barras
-        fig_multianual = px.bar(
-            avg_ppt_by_station,
-            x=Config.STATION_NAME_COL,
-            y="Precipitación Media Anual (mm)",
-            title="Precipitación Media Anual por Estación",
-            color="Precipitación Media Anual (mm)",
-            color_continuous_scale=px.colors.sequential.Blues
+        fig_bar = px.bar(
+            avg_ppt, 
+            x=Config.STATION_NAME_COL, 
+            y=col_val,
+            color=col_val,
+            color_continuous_scale=px.colors.sequential.Blues,
+            title="Ranking de Precipitación Media Anual"
         )
-        fig_multianual.update_xaxes(tickangle=45)
-        st.plotly_chart(fig_multianual, use_container_width=True)
-        
-    # -------------------------------------------------------------------------
-    # PESTAÑA 4: BOXPLOT
-    # -------------------------------------------------------------------------
-    with tab_boxplot:
-        st.markdown("##### Distribución Mensual")
-        fig = px.box(
-            df_long, 
-            x=Config.MONTH_COL, 
-            y=Config.PRECIPITATION_COL, 
-            color=Config.STATION_NAME_COL,
-            title="Distribución Mensual de Precipitación",
-            labels={Config.PRECIPITATION_COL: "Precipitación (mm)", Config.MONTH_COL: "Mes"}
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig_bar, use_container_width=True)
 
-    # -------------------------------------------------------------------------
-    # PESTAÑA 5: DISTRIBUCIÓN ACUMULADA
-    # -------------------------------------------------------------------------
-    with tab_dist_anual:
-        st.markdown("##### Distribución Acumulada (ECDF)")
-        fig = px.ecdf(
-            df_anual, 
-            x=Config.PRECIPITATION_COL, 
-            color=Config.STATION_NAME_COL,
-            title="Probabilidad Acumulada de Precipitación Anual",
-            labels={Config.PRECIPITATION_COL: "Precipitación Anual (mm)"}
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    # -------------------------------------------------------------------------
-    # PESTAÑA 6: SERIE REGIONAL
-    # -------------------------------------------------------------------------
-    with tab_serie_reg:
-        st.markdown("##### Serie Regional Promedio")
-        regional_avg = df_long.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        fig = px.area(
-            regional_avg, 
+    # 3. ANÁLISIS MENSUAL (Serie detallada)
+    with tabs[2]:
+        st.markdown("##### Serie Histórica Mensual")
+        fig = px.line(
+            df_monthly_filtered, 
             x=Config.DATE_COL, 
             y=Config.PRECIPITATION_COL, 
-            title="Precipitación Mensual Promedio (Zona)",
+            color=Config.STATION_NAME_COL, 
+            title="Precipitación Mensual (Detalle)",
+            labels={Config.PRECIPITATION_COL: "Lluvia (mm)", Config.DATE_COL: "Fecha"}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # 4. COMPARACIÓN RÁPIDA (Ciclo Anual - RESTAURADO)
+    with tabs[3]:
+        st.markdown("##### Régimen de Lluvias (Ciclo Anual Promedio)")
+        st.info("Muestra el comportamiento promedio mes a mes para identificar temporadas secas y lluviosas.")
+        
+        # Agrupar por Mes y Estación
+        ciclo = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.MONTH_COL])[Config.PRECIPITATION_COL].mean().reset_index()
+        
+        fig_ciclo = px.line(
+            ciclo, 
+            x=Config.MONTH_COL, 
+            y=Config.PRECIPITATION_COL, 
+            color=Config.STATION_NAME_COL, 
+            markers=True,
+            title="Ciclo Anual Promedio",
+            labels={Config.MONTH_COL: "Mes (1=Ene, 12=Dic)", Config.PRECIPITATION_COL: "Lluvia Promedio (mm)"}
+        )
+        # Asegurar eje X con todos los meses
+        fig_ciclo.update_xaxes(tickmode='linear', tick0=1, dtick=1)
+        st.plotly_chart(fig_ciclo, use_container_width=True)
+
+    # 5. BOXPLOT (Variabilidad)
+    with tabs[4]:
+        st.markdown("##### Variabilidad Anual")
+        fig = px.box(
+            df_anual_melted, 
+            x=Config.STATION_NAME_COL, 
+            y=Config.PRECIPITATION_COL, 
+            color=Config.STATION_NAME_COL, 
+            points="all", 
+            title="Distribución de Precipitación Anual"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # 6. DISTRIBUCIÓN (Histograma)
+    with tabs[5]:
+        st.markdown("##### Histograma de Frecuencias")
+        fig = px.histogram(
+            df_monthly_filtered, 
+            x=Config.PRECIPITATION_COL, 
+            color=Config.STATION_NAME_COL, 
+            marginal="box", 
+            title="Distribución de Lluvias Mensuales",
+            opacity=0.7
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # 7. SERIE REGIONAL
+    with tabs[6]:
+        st.markdown("##### Índice Regional")
+        regional = df_monthly_filtered.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+        fig = px.area(
+            regional, 
+            x=Config.DATE_COL, 
+            y=Config.PRECIPITATION_COL, 
+            title="Precipitación Promedio de la Zona Seleccionada",
             color_discrete_sequence=['#2ca02c']
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -1640,6 +1646,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
