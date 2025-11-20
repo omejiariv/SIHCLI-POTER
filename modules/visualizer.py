@@ -273,6 +273,49 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         )
         st.plotly_chart(fig_ciclo, use_container_width=True)
 
+    # -------------------------------------------------------------------------
+    # NUEVA PESTAÑA: COMPARACIÓN RÁPIDA (Precipitación Media Multianual)
+    # -------------------------------------------------------------------------
+    with tab_comp:
+        st.markdown("##### Precipitación Media Multianual")
+        
+        # Opciones de gráfico (solo barras para este caso)
+        # st.radio("Seleccionar tipo de gráfico:", ["Gráfico de Barras (Promedio)"], index=0, key="graph_type_comp")
+        
+        # Calcular precipitación media anual por estación para todo el período
+        # df_anual ya tiene la precipitación anual de cada estación por año
+        avg_ppt_by_station = df_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+        avg_ppt_by_station.rename(columns={Config.PRECIPITATION_COL: "Precipitación Media Anual (mm)"}, inplace=True)
+        
+        # Opciones de Ordenamiento
+        sort_option = st.radio(
+            "Ordenar estaciones por:",
+            ["Promedio (Mayor a Menor)", "Promedio (Menor a Mayor)", "Alfabético"],
+            index=0,
+            horizontal=True,
+            key="sort_comp"
+        )
+        
+        if sort_option == "Promedio (Mayor a Menor)":
+            avg_ppt_by_station = avg_ppt_by_station.sort_values("Precipitación Media Anual (mm)", ascending=False)
+        elif sort_option == "Promedio (Menor a Mayor)":
+            avg_ppt_by_station = avg_ppt_by_station.sort_values("Precipitación Media Anual (mm)", ascending=True)
+        else: # Alfabético
+            avg_ppt_by_station = avg_ppt_by_station.sort_values(Config.STATION_NAME_COL)
+            
+        # Gráfico de Barras
+        fig_multianual = px.bar(
+            avg_ppt_by_station,
+            x=Config.STATION_NAME_COL,
+            y="Precipitación Media Anual (mm)",
+            title="Precipitación Media Anual por Estación",
+            labels={Config.STATION_NAME_COL: "Estación"},
+            color="Precipitación Media Anual (mm)", # Colorear por valor para un gradiente
+            color_continuous_scale=px.colors.sequential.Blues # Escala de azules
+        )
+        fig_multianual.update_xaxes(tickangle=45) # Inclinar etiquetas para que no se superpongan
+        st.plotly_chart(fig_multianual, use_container_width=True)    
+
     # 4. BOXPLOT ANUAL
     with tabs[3]:
         fig_box = px.box(
@@ -1592,5 +1635,6 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
