@@ -1307,7 +1307,7 @@ def display_station_table_tab(**kwargs):
 def display_land_cover_analysis_tab(**kwargs):
     st.subheader("🌿 Análisis de Cobertura del Suelo y Escenarios")
     
-    # 1. Verificar Datos Previos
+    # Verificar Cuenca
     res_basin = st.session_state.get('basin_results')
     if not res_basin or not res_basin.get('ready') or 'gdf_union' not in res_basin:
         st.info("ℹ️ Primero analice una cuenca en la pestaña **'Mapas Avanzados'**.")
@@ -1316,14 +1316,15 @@ def display_land_cover_analysis_tab(**kwargs):
     gdf_basin = res_basin['gdf_union']
     basin_name = res_basin.get('names', 'Cuenca')
     
-    # RECUPERACIÓN SEGURA DE VARIABLES HIDROLÓGICAS
-    # Intentamos leer del diccionario de balance ('bal')
+    # Recuperación segura de variables
     bal = res_basin.get('bal', {})
     ppt_anual = bal.get('P', 0)
-    q_actual = bal.get('Q', 0) # Usar 'Q' o 'Q_mm' según analysis.py
+    q_actual = bal.get('Q', 0) 
     if q_actual == 0 and 'Q_mm' in bal: q_actual = bal['Q_mm']
-    
-    vol_actual = bal.get('Vol', 0) # Volumen en Mm3
+    vol_actual = bal.get('Vol', 0)
+
+    # Recuperar Área de la cuenca de forma segura para usarla globalmente en la función
+    area_total_km2 = res_basin['morph']['area_km2']
 
     st.markdown(f"Cuenca: **{basin_name}** (Ppt ref: {ppt_anual:.0f} mm/año)")
 
@@ -1340,26 +1341,10 @@ def display_land_cover_analysis_tab(**kwargs):
             out_image, _ = mask(src, gdf_basin.geometry, crop=True)
             data = out_image[0]
 
-        # LEYENDA CORINE LAND COVER (CLC) COLOMBIA (Códigos Típicos Nivel 1 y 2)
-        # Ajusta esto si tu raster usa códigos específicos (1,2,3...)
         legend = {
-            1: "Zonas Urbanas",
-            2: "Cultivos Transitorios",
-            3: "Pastos",
-            4: "Áreas Agrícolas Heterogéneas",
-            5: "Bosques",
-            6: "Vegetación Herbácea/Arbustiva",
-            7: "Áreas Abiertas/Sin Vegetación",
-            8: "Aguas Continentales",
-            9: "Bosque Fragmentado",        # Asumido por tu imagen
-            10: "Vegetación Secundaria",    # Asumido por tu imagen
-            11: "Zonas Quemadas / Degradadas", # Asumido por tu imagen
-            12: "Pantanos / Humedales",
-            # Códigos CLC Estándar (por si acaso)
-            111: "Tejido urbano continuo", 112: "Tejido urbano discontinuo",
-            211: "Otros cultivos transitorios", 231: "Pastos limpios", 233: "Pastos enmalezados",
-            243: "Mosaico de cultivos, pastos y espacios naturales",
-            311: "Bosque denso", 323: "Vegetación secundaria o en transición"
+            1: "Zonas Urbanas", 2: "Cultivos Transitorios", 3: "Pastos", 4: "Áreas Agrícolas",
+            5: "Bosques", 6: "Vegetación Herbácea", 7: "Áreas Abiertas", 8: "Aguas",
+            9: "Bosque Fragmentado", 10: "Vegetación Secundaria", 11: "Zonas Degradadas", 12: "Humedales"
         }
         
         valid_pixels = data[data != src.nodata]
@@ -1368,17 +1353,15 @@ def display_land_cover_analysis_tab(**kwargs):
             return
 
         unique, counts = np.unique(valid_pixels, return_counts=True)
-        area_total = res_basin['morph']['area_km2']
         
         rows = []
         for val, count in zip(unique, counts):
             perc = (count / counts.sum()) * 100
-            area = (perc / 100) * area_total
+            area = (perc / 100) * area_total_km2
             rows.append({"Cobertura": legend.get(val, f"Clase {val}"), "Área (km²)": area, "%": perc})
             
         df_cover = pd.DataFrame(rows).sort_values("%", ascending=False)
 
-        # Visualización
         c1, c2 = st.columns([3, 2])
         with c1:
             st.markdown("#### Distribución Actual")
@@ -1387,13 +1370,11 @@ def display_land_cover_analysis_tab(**kwargs):
             fig = px.pie(df_cover, values='Área (km²)', names='Cobertura', hole=0.4)
             fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Métrica Q Actual (Ahora sí conectada)
-            st.metric("Escorrentía Actual Estimada (Q)", f"{q_actual:.0f} mm/año", f"Vol: {vol_actual:.2f} Mm³")
+            st.metric("Escorrentía Actual (Q)", f"{q_actual:.0f} mm/año", f"Vol: {vol_actual:.2f} Mm³")
 
         st.markdown("---")
-        
-        # --- SIMULADOR DE ESCENARIOS ---
+
+        # --- SIMULADOR ---
         st.subheader("🎛️ Simulador de Escorrentía (SCS-CN)")
         
         with st.expander("Configuración de Números de Curva (CN)", expanded=False):
@@ -1415,51 +1396,30 @@ def display_land_cover_analysis_tab(**kwargs):
         total_p = p_bosque + p_pasto + p_cultivo + p_urbano + p_suelo
         
         if total_p != 100:
-            st.warning(f"⚠️ Suma de porcentajes: {total_p}%. Debe ser 100%.")
+            st.warning(f"⚠️ Suma: {total_p}%. Debe ser 100%.")
         else:
             if st.button("Estimar Escorrentía del Escenario"):
-                # CN Ponderado
                 cn_comp = ((p_bosque*cn_bosque) + (p_pasto*cn_pasto) + (p_cultivo*cn_cultivo) + (p_urbano*cn_urbano) + (p_suelo*cn_suelo)) / 100
-                
-                # Método SCS Anual Simplificado
                 S = (25400 / cn_comp) - 254
                 Q_escenario = ((ppt_anual - 0.2 * S)**2) / (ppt_anual + 0.8 * S) if ppt_anual > 0.2 * S else 0
-                vol_escenario = (Q_escenario * area_total_cuenca) / 1000
                 
-                # Diferencia
+                # CORRECCIÓN AQUÍ: Usamos area_total_km2 definida arriba
+                vol_escenario = (Q_escenario * area_total_km2) / 1000
+                
                 delta_q = Q_escenario - q_actual
-                delta_color = "normal" if delta_q > 0 else "inverse" # Verde si sube, Rojo si baja (o viceversa según interpretación)
                 
-                # RESULTADOS
                 st.success("Escenario Calculado")
                 col_res1, col_res2, col_res3 = st.columns(3)
-                
                 col_res1.metric("CN Ponderado", f"{cn_comp:.1f}")
+                col_res2.metric("Escorrentía (Q)", f"{Q_escenario:.0f} mm/año", delta=f"{delta_q:+.0f} mm/año")
+                col_res3.metric("Volumen Total", f"{vol_escenario:.2f} Mm³", delta=f"{(vol_escenario - vol_actual):+.2f} Mm³")
                 
-                # AQUÍ ESTÁ LA CAJA QUE PEDISTE
-                col_res2.metric(
-                    "Escorrentía Estimada (Q)", 
-                    f"{Q_escenario:.0f} mm/año", 
-                    delta=f"{delta_q:+.0f} mm/año", # Flecha automática
-                    delta_color=delta_color
-                )
-                
-                col_res3.metric(
-                    "Volumen Total", 
-                    f"{vol_escenario:.2f} Mm³",
-                    delta=f"{(vol_escenario - vol_actual):+.2f} Mm³"
-                )
-                
-                # Gráfico Comparativo
-                fig = go.Figure(data=[
+                fig_sim = go.Figure(data=[
                     go.Bar(name='Actual', x=['Escorrentía'], y=[q_actual], marker_color='#1f77b4'),
                     go.Bar(name='Escenario', x=['Escorrentía'], y=[Q_escenario], marker_color='#2ca02c')
                 ])
-                fig.update_layout(title="Comparación Q (mm/año)", barmode='group', height=300)
-                st.plotly_chart(fig, use_container_width=True)
+                fig_sim.update_layout(title="Comparación Q (mm/año)", height=300)
+                st.plotly_chart(fig_sim, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
-
-
-
