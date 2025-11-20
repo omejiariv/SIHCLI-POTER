@@ -407,44 +407,31 @@ def calculate_morphometry(gdf_basin):
 
 def calculate_hypsometric_curve(gdf_basin, dem_path=None):
     """
-    Genera los datos para la curva hipsométrica.
-    Si no hay DEM, usa una simulación estadística basada en la morfometría.
+    Genera curva hipsométrica con ecuación legible.
     """
     if gdf_basin is None or gdf_basin.empty: return None
 
-    # Obtener morfometría básica (altitud mínima y máxima estimadas)
     morph = calculate_morphometry(gdf_basin)
-    min_z = morph['alt_min_m']
-    max_z = morph['alt_max_m']
+    min_z, max_z = morph['alt_min_m'], morph['alt_max_m']
     
-    # Si hay DEM real, intentaríamos leerlo aquí (pero es pesado para web)
-    # Por ahora, usamos la simulación robusta que es rápida y suficiente para visualización.
-    
-    # Generar curva teórica (Sigmoide adaptada a cuencas andinas)
+    # Simulación S-Curve (Modelo teórico robusto para cuencas andinas)
     n_points = 100
-    # Elevaciones desde min hasta max
     elevations = np.linspace(min_z, max_z, n_points)
-    
-    # Área acumulada teórica (Modelada como S-Curve)
-    # x va de -3 a 3 para cubrir el rango sigmoide
     x = np.linspace(-3, 3, n_points)
     area_percent = 100 * (1 / (1 + np.exp(-x)))
-    
-    # Ajustar la curva para que tenga sentido físico (más área en elevaciones medias)
-    # Invertimos si es necesario para que % Area > Elevación sea decreciente
-    area_percent = np.sort(area_percent)[::-1] 
+    area_percent = np.sort(area_percent)[::-1] # Invertir para que sea decreciente (100% en base)
 
-    # Ajuste Polinómico de 3er Grado para la ecuación
-    # y (elevación) = f(x) (% área)
     try:
+        # Ajuste Polinómico Grado 3
         coeffs = np.polyfit(area_percent, elevations, 3)
         poly_model = np.poly1d(coeffs)
         
-        # Formato bonito para la ecuación
-        eq_str = f"H = {coeffs[0]:.1e}A³ + {coeffs[1]:.1e}A² + {coeffs[2]:.1e}A + {coeffs[3]:.0f}"
+        # FORMATO DECIMAL LEGIBLE (Fixed-point notation 'f')
+        # Evita la notación científica 'e' que confunde.
+        eq_str = f"H = {coeffs[0]:.6f}A³ + {coeffs[1]:.4f}A² + {coeffs[2]:.2f}A + {coeffs[3]:.0f}"
     except:
         eq_str = "N/A"
-        poly_model = lambda x: x # Fallback
+        poly_model = lambda x: x
 
     return {
         "elevations": elevations,
@@ -452,7 +439,7 @@ def calculate_hypsometric_curve(gdf_basin, dem_path=None):
         "equation": eq_str,
         "poly_model": poly_model
     }
-
+    
 def calculate_all_station_trends(df_anual, gdf_stations):
     """
     Calcula la tendencia de Mann-Kendall y la Pendiente de Sen para todas las
@@ -488,6 +475,7 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     )
     
     return gpd.GeoDataFrame(gdf_trends)
+
 
 
 
