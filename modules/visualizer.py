@@ -1783,37 +1783,95 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
             st.error(debug_data) # Mostrar mensaje de error (ej. <10 años)
 
     # -------------------------------------------------------------------------
-    # SUB-PESTAÑA 3: PERCENTILES (Configurable) - ¡NUEVO!
-    # -------------------------------------------------------------------------
-    with tab_perc:
-        st.markdown("#### Análisis de Umbrales y Percentiles")
-        
-        c_p1, c_p2 = st.columns(2)
-        p_low = c_p1.slider("Percentil Bajo (Seco):", 1, 20, 10)
-        p_high = c_p2.slider("Percentil Alto (Húmedo):", 80, 99, 95)
-        
-        from modules.analysis import calculate_percentiles_extremes
-        res_perc = calculate_percentiles_extremes(df_long, selected_station, p_low, p_high)
-        
-        if res_perc:
-            df_p, t_low, t_high = res_perc
+    # --- TAB 3: PERCENTILES (ESTA ES LA QUE MEJORAMOS AHORA) ---
+    with tab3:
+        st.markdown("#### Umbrales de Percentil Mensual (Climatología Histórica)")
+        st.info("Define los rangos normales de lluvia para cada mes. Todo lo que esté por fuera de las líneas azul/roja es un evento inusual.")
+
+        if selected_station:
+            # 1. Preparar datos
+            df_station = df_long[df_long[Config.STATION_NAME_COL] == selected_station].copy()
+            df_station['Mes'] = df_station[Config.DATE_COL].dt.month
             
-            c_m1, c_m2 = st.columns(2)
-            c_m1.metric(f"Umbral Seco (P{p_low})", f"{t_low:.1f} mm")
-            c_m2.metric(f"Umbral Húmedo (P{p_high})", f"{t_high:.1f} mm")
+            # 2. Sliders de configuración
+            c_p1, c_p2 = st.columns(2)
+            p_low = c_p1.slider("Percentil Inferior (Seco):", 1, 20, 10, key="pl")
+            p_high = c_p2.slider("Percentil Superior (Húmedo):", 80, 99, 90, key="ph")
+
+            # 3. Calcular Climatología (Percentiles por Mes)
+            # Agrupamos por MES (1-12) y calculamos los percentiles de la historia
+            climatology = df_station.groupby('Mes')[Config.PRECIPITATION_COL].quantile([p_low/100, 0.5, p_high/100]).unstack()
+            climatology.columns = ['low', 'median', 'high']
             
-            # Gráfico de dispersión clasificado
-            fig_p = px.scatter(
-                df_p, x=Config.DATE_COL, y=Config.PRECIPITATION_COL,
-                color='Tipo Evento',
-                color_discrete_map={'Normal': 'gray', f'Bajo (<P{p_low})': 'red', f'Alto (>P{p_high})': 'blue'},
-                title=f"Eventos Extremos según Percentiles"
+            # Calcular media también para referencia
+            climatology['mean'] = df_station.groupby('Mes')[Config.PRECIPITATION_COL].mean()
+            
+            # Nombres de meses para el eje X
+            month_names = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+            climatology['Mes_Nombre'] = month_names
+
+            # 4. Gráfico de Umbrales (Idéntico a tu imagen)
+            fig = go.Figure()
+            
+            # Línea Superior (Azul)
+            fig.add_trace(go.Scatter(
+                x=climatology['Mes_Nombre'], y=climatology['high'],
+                mode='lines+markers', name=f'Percentil Superior (P{p_high})',
+                line=dict(color='blue', width=2), marker=dict(symbol='circle')
+            ))
+            
+            # Línea Inferior (Roja)
+            fig.add_trace(go.Scatter(
+                x=climatology['Mes_Nombre'], y=climatology['low'],
+                mode='lines+markers', name=f'Percentil Inferior (P{p_low})',
+                line=dict(color='red', width=2), marker=dict(symbol='circle')
+            ))
+            
+            # Línea Media (Verde Punteada)
+            fig.add_trace(go.Scatter(
+                x=climatology['Mes_Nombre'], y=climatology['mean'],
+                mode='lines', name='Media Mensual',
+                line=dict(color='green', width=2, dash='dot')
+            ))
+
+            fig.update_layout(
+                title=f"Umbrales de Precipitación Mensual - {selected_station}",
+                xaxis_title="Mes",
+                yaxis_title="Precipitación (mm)",
+                height=500,
+                hovermode="x unified"
             )
-            fig_p.add_hline(y=t_high, line_dash="dot", line_color="blue")
-            fig_p.add_hline(y=t_low, line_dash="dot", line_color="red")
-            st.plotly_chart(fig_p, use_container_width=True)
-        else:
-            st.warning("Error calculando percentiles.")
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 5. Análisis de Eventos Recientes
+            st.markdown("##### Eventos Recientes vs Umbrales")
+            last_year = df_station[Config.YEAR_COL].max()
+            df_last = df_station[df_station[Config.YEAR_COL] == last_year].sort_values(Config.DATE_COL)
+            
+            if not df_last.empty:
+                # Evaluar cada mes del último año
+                eval_data = []
+                for _, row in df_last.iterrows():
+                    m = row['Mes']
+                    val = row[Config.PRECIPITATION_COL]
+                    limits = climatology.iloc[m-1] # Mes 1 es índice 0
+                    
+                    status = "Normal"
+                    if val < limits['low']: status = "🔴 Muy Seco"
+                    elif val > limits['high']: status = "🔵 Muy Húmedo"
+                    
+                    eval_data.append({
+                        "Fecha": row[Config.DATE_COL].strftime('%Y-%m'),
+                        "Lluvia (mm)": val,
+                        f"P{p_low} (mm)": limits['low'],
+                        f"P{p_high} (mm)": limits['high'],
+                        "Estado": status
+                    })
+                
+                st.dataframe(pd.DataFrame(eval_data).style.applymap(
+                    lambda v: 'color: red; font-weight: bold' if 'Seco' in str(v) else ('color: blue; font-weight: bold' if 'Húmedo' in str(v) else ''),
+                    subset=['Estado']
+                ), use_container_width=True)
             
 def display_climate_scenarios_tab(**kwargs):
     st.subheader("🌡️ Simulador de Cambio Climático")
@@ -2038,6 +2096,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
