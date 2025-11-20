@@ -1657,8 +1657,8 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
     
     if not selected_station: return
 
-    # 2. Definición de Pestañas (AQUÍ ESTABA EL ERROR)
-    tab1, tab2, tab3 = st.tabs([
+    # 2. DEFINICIÓN DE PESTAÑAS (Nombres claros para evitar errores)
+    tab_indices, tab_frequency, tab_percentiles = st.tabs([
         "Índices Estandarizados (SPI/SPEI)", 
         "Frecuencia de Máximos (Gumbel)", 
         "Umbrales Percentiles"
@@ -1667,7 +1667,7 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
     # -------------------------------------------------------------------------
     # SUB-PESTAÑA 1: SPI / SPEI
     # -------------------------------------------------------------------------
-    with tab1:
+    with tab_indices:
         c1, c2 = st.columns(2)
         idx_type = c1.radio("Índice:", ["SPI (Lluvia)", "SPEI (Balance)"], horizontal=True)
         scale = c2.selectbox("Escala (Meses):", [1, 3, 6, 12, 24], index=2)
@@ -1682,6 +1682,7 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
         except: alt = 1500
 
         try:
+            series_idx = None
             if "SPI" in idx_type:
                 # SPI Gamma
                 from modules.analysis import calculate_spi
@@ -1718,7 +1719,7 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
     # -------------------------------------------------------------------------
     # SUB-PESTAÑA 2: FRECUENCIA (GUMBEL)
     # -------------------------------------------------------------------------
-    with tab2:
+    with tab_frequency:
         st.markdown("#### Análisis de Frecuencia (Máximos Anuales)")
         st.info("Estimación de la precipitación máxima esperada para diferentes Períodos de Retorno (Tr).")
         
@@ -1752,19 +1753,20 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
                 sorted_max = np.sort(annual_max.values)
                 n = len(sorted_max)
                 rank = np.arange(1, n+1)
-                tr_obs = (n + 0.12) / (n + 1 - rank - 0.44) # Gringorten
+                tr_obs = (n + 0.12) / (n + 1 - rank - 0.44) 
                 
                 fig_freq.add_trace(go.Scatter(x=tr_obs, y=sorted_max, mode='markers', name='Observados', marker=dict(color='black', size=6)))
                 
                 fig_freq.update_layout(xaxis_title="Período de Retorno (Años)", yaxis_title="Precipitación Máxima (mm)", xaxis_type="log", height=500)
                 st.plotly_chart(fig_freq, use_container_width=True)
         else:
-            st.error(debug_data)
+            if debug_data: st.error(debug_data)
+            else: st.warning("Datos insuficientes.")
 
     # -------------------------------------------------------------------------
-    # SUB-PESTAÑA 3: PERCENTILES (MEJORADA)
+    # SUB-PESTAÑA 3: PERCENTILES (UMBRALES)
     # -------------------------------------------------------------------------
-    with tab3:
+    with tab_percentiles:
         st.markdown("#### Umbrales de Percentil Mensual (Climatología)")
         st.info("Define los rangos normales de lluvia para cada mes. Lo que esté fuera de las líneas es inusual.")
 
@@ -2041,6 +2043,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
