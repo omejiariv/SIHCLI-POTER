@@ -38,26 +38,50 @@ def display_current_filters(stations, regions, municipios, years):
             st.caption(f"Selección: {', '.join(stations)}")
 
 def analyze_point_data(lat, lon, df_long, gdf_stations):
-    """Genera un reporte completo para una coordenada arbitraria."""
+    """
+    Genera un reporte completo para una coordenada arbitraria.
+    Incluye interpolación de lluvia histórica y cálculo de tendencia local.
+    """
     results = {}
     
-    # 1. ESTIMAR PRECIPITACIÓN HISTÓRICA (IDW Simple)
+    # 1. IDENTIFICAR ESTACIONES VECINAS (Para interpolación)
     try:
-        # Promedios anuales de las estaciones
-        df_avg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
-        # Unir con coordenadas
-        df_locs = gdf_stations.set_index(Config.STATION_NAME_COL)[['latitude', 'longitude']]
-        df_merge = pd.concat([df_avg, df_locs], axis=1).dropna()
+        # Calcular distancias a todas las estaciones
+        df_locs = gdf_stations.set_index(Config.STATION_NAME_COL)[['latitude', 'longitude']].copy()
+        df_locs['dist'] = np.sqrt((df_locs['latitude'] - lat)**2 + (df_locs['longitude'] - lon)**2)
         
-        # Calcular distancias
-        dist = np.sqrt((df_merge['latitude'] - lat)**2 + (df_merge['longitude'] - lon)**2)
-        # Evitar división por cero si se clicó encima de una estación
-        dist = dist.replace(0, 0.0001)
-        weights = 1 / dist**2
+        # Usar solo las 5 más cercanas para influencia local
+        nearest = df_locs.nsmallest(5, 'dist')
         
-        ppt_est = (df_merge[Config.PRECIPITATION_COL] * weights).sum() / weights.sum()
-        results['Ppt_Media'] = ppt_est
-    except: results['Ppt_Media'] = 0
+        # Pesos IDW (Inverse Distance Weighting)
+        nearest['weights'] = 1 / (nearest['dist']**2).replace(0, 0.00001)
+        
+        # A. PRECIPITACIÓN MEDIA
+        # Obtener promedios de esas estaciones
+        avg_ppt = df_long[df_long[Config.STATION_NAME_COL].isin(nearest.index)].groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
+        # Unir y calcular promedio ponderado
+        df_calc = pd.concat([avg_ppt, nearest['weights']], axis=1, join='inner')
+        results['Ppt_Media'] = (df_calc[Config.PRECIPITATION_COL] * df_calc['weights']).sum() / df_calc['weights'].sum()
+
+        # B. TENDENCIA (NUEVO)
+        # Calculamos la pendiente de Sen para las 5 vecinas y la interpolamos
+        slopes = []
+        for stn in nearest.index:
+            # Datos anuales de la estación
+            df_st = df_long[df_long[Config.STATION_NAME_COL] == stn]
+            df_ann = df_st.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum()
+            if len(df_ann) > 10:
+                res = mk.original_test(df_ann)
+                slopes.append(res.slope)
+            else:
+                slopes.append(0.0) # Sin datos suficientes, asume neutro
+        
+        # Promedio ponderado de las tendencias
+        results['Tendencia'] = np.average(slopes, weights=nearest['weights'].values[:len(slopes)])
+        
+    except Exception as e: 
+        results['Ppt_Media'] = 0
+        results['Tendencia'] = 0
 
     # 2. EXTRAER ALTITUD (DEM)
     try:
@@ -66,9 +90,8 @@ def analyze_point_data(lat, lon, df_long, gdf_stations):
             with rasterio.open(Config.DEM_FILE_PATH) as src:
                 vals = list(src.sample([(lon, lat)]))
                 alt = vals[0][0]
-                if alt < -1000: alt = 0 # NoData
-                results['Altitud'] = alt
-        else: results['Altitud'] = 1500 # Default
+                results['Altitud'] = alt if alt > -1000 else 1500
+        else: results['Altitud'] = 1500
     except: results['Altitud'] = 1500
 
     # 3. EXTRAER COBERTURA
@@ -78,14 +101,12 @@ def analyze_point_data(lat, lon, df_long, gdf_stations):
             with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
                 vals = list(src.sample([(lon, lat)]))
                 cov_id = vals[0][0]
-                # Leyenda simplificada
                 legend = {1:"Urbano", 2:"Cultivos", 3:"Pastos", 5:"Bosque", 8:"Agua"}
                 results['Cobertura'] = legend.get(cov_id, f"Clase {cov_id}")
         else: results['Cobertura'] = "N/A"
     except: results['Cobertura'] = "N/A"
 
-    # 4. ZONA DE VIDA (Calculada)
-    from modules.analysis import classify_holdridge_point
+    # 4. ZONA DE VIDA
     results['Zona_Vida'] = classify_holdridge_point(results['Ppt_Media'], results['Altitud'])
     
     return results
@@ -366,16 +387,14 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
     st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
-    
-    # Instrucción clara
     st.info("👆 **Haga clic en el mapa** o ingrese coordenadas manualmente para analizar un punto específico.")
+
+    # GESTIÓN DE ESTADO DEL PUNTO (MEMORIA)
+    if 'selected_point' not in st.session_state:
+        st.session_state.selected_point = None # {'lat': float, 'lon': float}
 
     tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
     
-    # Variables para el punto seleccionado (iniciadas vacías)
-    selected_lat, selected_lon = None, None
-    manual_input = False
-
     # --- PESTAÑA 1: MAPA + PUNTO INTELIGENTE ---
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
@@ -383,13 +402,15 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
         with col_ctrl:
             st.markdown("#### Configuración")
             
-            # 1. Ingreso Manual de Coordenadas
+            # 1. Ingreso Manual (Actualiza la memoria)
             with st.expander("📍 Ingresar Coordenadas", expanded=False):
-                in_lat = st.number_input("Latitud:", value=6.2, format="%.5f", min_value=-90.0, max_value=90.0)
-                in_lon = st.number_input("Longitud:", value=-75.5, format="%.5f", min_value=-180.0, max_value=180.0)
+                # Usamos keys únicos para no conflictuar
+                in_lat = st.number_input("Latitud:", value=6.2, format="%.5f", min_value=-90.0, max_value=90.0, key="manual_lat")
+                in_lon = st.number_input("Longitud:", value=-75.5, format="%.5f", min_value=-180.0, max_value=180.0, key="manual_lon")
+                
                 if st.button("Analizar Coordenada"):
-                    selected_lat, selected_lon = in_lat, in_lon
-                    manual_input = True
+                    st.session_state.selected_point = {'lat': in_lat, 'lng': in_lon}
+                    # No usamos st.rerun() aquí para dejar que el flujo continúe
 
             st.markdown("#### Capas")
             show_munis = st.checkbox("Municipios", value=True)
@@ -408,20 +429,19 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             selected_tiles = base_map_options[base_map_name]
         
         with col_map:
-            # Centrar mapa
-            if gdf_filtered is not None and not gdf_filtered.empty:
+            # Centrar mapa (Si hay punto seleccionado, centrar ahí, si no, promedio)
+            if st.session_state.selected_point:
+                lat_c, lon_c = st.session_state.selected_point['lat'], st.session_state.selected_point['lng']
+                zoom_start = 11
+            elif gdf_filtered is not None and not gdf_filtered.empty:
                 valid_locs = gdf_filtered.dropna(subset=['latitude', 'longitude'])
                 if not valid_locs.empty:
-                    lat_c = valid_locs['latitude'].mean()
-                    lon_c = valid_locs['longitude'].mean()
-                else: lat_c, lon_c = 6.2, -75.5
-            else: lat_c, lon_c = 6.2, -75.5
+                    lat_c, lon_c = valid_locs['latitude'].mean(), valid_locs['longitude'].mean()
+                    zoom_start = 9
+                else: lat_c, lon_c, zoom_start = 6.2, -75.5, 9
+            else: lat_c, lon_c, zoom_start = 6.2, -75.5, 9
             
-            # Si hay input manual, centrar ahí
-            if manual_input:
-                lat_c, lon_c = selected_lat, selected_lon
-            
-            m = folium.Map(location=[lat_c, lon_c], zoom_start=9, tiles=selected_tiles["tiles"], attr=selected_tiles["attr"])
+            m = folium.Map(location=[lat_c, lon_c], zoom_start=zoom_start, tiles=selected_tiles["tiles"], attr=selected_tiles["attr"])
             
             # Capas
             try:
@@ -436,97 +456,68 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}).add_to(m)
             except: pass
 
-            # Estaciones
             if gdf_filtered is not None:
                 marker_cluster = MarkerCluster().add_to(m)
                 for _, row in gdf_filtered.dropna(subset=['latitude', 'longitude']).iterrows():
                     folium.Marker([row['latitude'], row['longitude']], tooltip=f"{row[Config.STATION_NAME_COL]}", icon=folium.Icon(color="green", icon="cloud")).add_to(marker_cluster)
             
-            # Marcador del punto seleccionado (si es manual)
-            if manual_input:
-                folium.Marker([selected_lat, selected_lon], popup="Punto Seleccionado", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
+            # Marcador del punto seleccionado (persistente)
+            if st.session_state.selected_point:
+                folium.Marker(
+                    [st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], 
+                    popup="Punto de Análisis", icon=folium.Icon(color="red", icon="info-sign")
+                ).add_to(m)
 
             folium.LayerControl().add_to(m)
             
-            # RETORNO DEL MAPA INTERACTIVO
+            # CAPTURA DE CLIC
             map_data = st_folium(m, width="100%", height=600)
 
-    # --- LÓGICA DE ANÁLISIS DE PUNTO ---
-    # Prioridad: Input Manual > Clic en Mapa
-    if not manual_input and map_data and map_data.get("last_clicked"):
-        clicked = map_data["last_clicked"]
-        selected_lat, selected_lon = clicked["lat"], clicked["lng"]
-    
-    if selected_lat and selected_lon:
-        st.markdown("---")
-        st.subheader(f"📍 Análisis de Punto Seleccionado ({selected_lat:.4f}, {selected_lon:.4f})")
+            # ACTUALIZAR ESTADO SI HUBO CLIC
+            if map_data and map_data.get("last_clicked"):
+                clicked = map_data["last_clicked"]
+                # Solo actualizamos si cambió para evitar loops infinitos
+                if st.session_state.selected_point is None or \
+                   abs(clicked['lat'] - st.session_state.selected_point['lat']) > 0.0001:
+                    st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
+                    st.rerun() # Recargar para mostrar datos del nuevo punto
+
+    # --- MOSTRAR RESULTADOS (SI HAY PUNTO EN MEMORIA) ---
+    if st.session_state.selected_point:
+        clat, clon = st.session_state.selected_point['lat'], st.session_state.selected_point['lng']
         
-        with st.spinner("Analizando punto..."):
-            # 1. CÁLCULO PRECIPITACIÓN HISTÓRICA (CORREGIDO: ANUAL REAL)
-            ppt_est = 0
-            try:
-                # Primero sumamos por año para tener el total anual real
-                df_annual_sums = df_long.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-                # Luego promediamos los años para tener la media anual
-                df_avg_annual = df_annual_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
-                
-                # Unir para tener coords
-                gdf_s = gdf_filtered.set_index(Config.STATION_NAME_COL)
-                # Intersección de índices (estaciones con datos y coords)
-                common_stations = df_avg_annual.index.intersection(gdf_s.index)
-                
-                if not common_stations.empty:
-                    df_m = pd.DataFrame({
-                        'Ppt': df_avg_annual.loc[common_stations],
-                        'lat': gdf_s.loc[common_stations, 'latitude'],
-                        'lon': gdf_s.loc[common_stations, 'longitude']
-                    }).dropna()
-                    
-                    # IDW (Inverso de la Distancia)
-                    dist = np.sqrt((df_m['lat']-selected_lat)**2 + (df_m['lon']-selected_lon)**2).replace(0, 0.0001)
-                    weights = 1/dist**2
-                    ppt_est = (df_m['Ppt']*weights).sum()/weights.sum()
-            except: ppt_est = 0
+        st.markdown("---")
+        st.subheader(f"📍 Análisis de Punto Seleccionado ({clat:.4f}, {clon:.4f})")
+        
+        with st.spinner("Consultando bases de datos..."):
+            # 1. Análisis Geográfico y Tendencias
+            point_data = analyze_point_data(clat, clon, df_long, gdf_filtered)
             
-            # 2. Pronóstico y Datos Ambientales (Open-Meteo)
-            fc_data = get_weather_forecast_detailed(selected_lat, selected_lon)
+            # 2. Pronóstico
+            fc_data = get_weather_forecast_detailed(clat, clon)
             
-            # Datos estimados por defecto si falla la API
-            alt_est = 1500 
-            temp_est = 25.0
-            rad_est = 0.0
+            # MÉTRICAS
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Altitud", f"{point_data['Altitud']:.0f} m")
+            c2.metric("Ppt Histórica", f"{point_data['Ppt_Media']:.0f} mm/año")
+            
+            # Tendencia con color
+            trend_val = point_data['Tendencia']
+            c3.metric("Tendencia Lluvia", f"{trend_val:+.1f} mm/año", 
+                      delta="Aumento" if trend_val > 0 else "Disminución",
+                      delta_color="normal" if trend_val > 0 else "inverse") # Rojo si disminuye (riesgo sequía)
+            
+            c4.metric("Zona de Vida", point_data['Zona_Vida'])
+            c5.metric("Cobertura", point_data['Cobertura'])
             
             if not fc_data.empty:
-                today = fc_data.iloc[0]
-                # Asumimos elevación base del modelo si estuviera disponible, o usamos la fórmula T
-                temp_est = (today['T. Máx (°C)'] + today['T. Mín (°C)']) / 2
-                rad_est = today['Radiación SW (MJ/m²)']
-                
-                # Estimar altura inversa a la temperatura (aprox): h = (28 - T) / 0.006
-                alt_est = (28 - temp_est) / 0.006
-                if alt_est < 0: alt_est = 0
-
-            # 3. Zona de Vida
-            zona_vida = classify_holdridge_point(ppt_est, alt_est)
-
-            # 4. VISUALIZACIÓN DE RESULTADOS
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Ppt Media Histórica", f"{ppt_est:.0f} mm/año")
-            c2.metric("Altitud Estimada", f"{alt_est:.0f} m.s.n.m.")
-            c3.metric("Temp. Media Hoy", f"{temp_est:.1f} °C")
-            c4.metric("Radiación Solar", f"{rad_est:.1f} MJ/m²")
-            
-            st.info(f"**Zona de Vida Probable:** {zona_vida}")
-            
-            if not fc_data.empty:
-                with st.expander("Ver Pronóstico 7 Días para este punto", expanded=True):
+                with st.expander("Ver Pronóstico Meteorológico (7 días)", expanded=True):
                     fig = make_subplots(specs=[[{"secondary_y": True}]])
                     fig.add_trace(go.Scatter(x=fc_data['Fecha'], y=fc_data['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
-                    fig.add_trace(go.Scatter(x=fc_data['Fecha'], y=fc_data['T. Mín (°C)'], name='Min', line=dict(color='blue'), fill='tonexty'), secondary_y=False)
                     fig.add_trace(go.Bar(x=fc_data['Fecha'], y=fc_data['Ppt. (mm)'], name='Lluvia', marker_color='blue', opacity=0.5), secondary_y=True)
-                    fig.update_layout(height=300, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified", showlegend=True)
+                    fig.update_layout(height=300, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified")
                     st.plotly_chart(fig, use_container_width=True)
-
+                    
     # --- PESTAÑA 2: DISPONIBILIDAD ---
     with tab_avail:
         if df_long is not None and not gdf_filtered.empty:
@@ -2142,6 +2133,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
