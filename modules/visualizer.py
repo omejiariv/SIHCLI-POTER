@@ -26,6 +26,59 @@ from modules.analysis import generate_life_zone_raster
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
 
+def analyze_point_data(lat, lon, df_long, gdf_stations):
+    """Genera un reporte completo para una coordenada arbitraria."""
+    results = {}
+    
+    # 1. ESTIMAR PRECIPITACIÓN HISTÓRICA (IDW Simple)
+    try:
+        # Promedios anuales de las estaciones
+        df_avg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
+        # Unir con coordenadas
+        df_locs = gdf_stations.set_index(Config.STATION_NAME_COL)[['latitude', 'longitude']]
+        df_merge = pd.concat([df_avg, df_locs], axis=1).dropna()
+        
+        # Calcular distancias
+        dist = np.sqrt((df_merge['latitude'] - lat)**2 + (df_merge['longitude'] - lon)**2)
+        # Evitar división por cero si se clicó encima de una estación
+        dist = dist.replace(0, 0.0001)
+        weights = 1 / dist**2
+        
+        ppt_est = (df_merge[Config.PRECIPITATION_COL] * weights).sum() / weights.sum()
+        results['Ppt_Media'] = ppt_est
+    except: results['Ppt_Media'] = 0
+
+    # 2. EXTRAER ALTITUD (DEM)
+    try:
+        if os.path.exists(Config.DEM_FILE_PATH):
+            import rasterio
+            with rasterio.open(Config.DEM_FILE_PATH) as src:
+                vals = list(src.sample([(lon, lat)]))
+                alt = vals[0][0]
+                if alt < -1000: alt = 0 # NoData
+                results['Altitud'] = alt
+        else: results['Altitud'] = 1500 # Default
+    except: results['Altitud'] = 1500
+
+    # 3. EXTRAER COBERTURA
+    try:
+        if os.path.exists(Config.LAND_COVER_RASTER_PATH):
+            import rasterio
+            with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
+                vals = list(src.sample([(lon, lat)]))
+                cov_id = vals[0][0]
+                # Leyenda simplificada
+                legend = {1:"Urbano", 2:"Cultivos", 3:"Pastos", 5:"Bosque", 8:"Agua"}
+                results['Cobertura'] = legend.get(cov_id, f"Clase {cov_id}")
+        else: results['Cobertura'] = "N/A"
+    except: results['Cobertura'] = "N/A"
+
+    # 4. ZONA DE VIDA (Calculada)
+    from modules.analysis import classify_holdridge_point
+    results['Zona_Vida'] = classify_holdridge_point(results['Ppt_Media'], results['Altitud'])
+    
+    return results
+
 def get_weather_forecast_detailed(lat, lon):
     """
     Obtiene pronóstico detallado de Open-Meteo con 9 variables agrometeorológicas.
@@ -2016,6 +2069,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
