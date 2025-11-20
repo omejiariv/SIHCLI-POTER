@@ -1296,7 +1296,7 @@ def display_station_table_tab(**kwargs):
 def display_land_cover_analysis_tab(**kwargs):
     st.subheader("🌿 Análisis de Cobertura del Suelo y Escenarios")
     
-    # Verificar Cuenca
+    # 1. Verificar Datos Previos
     res_basin = st.session_state.get('basin_results')
     if not res_basin or not res_basin.get('ready') or 'gdf_union' not in res_basin:
         st.info("ℹ️ Primero analice una cuenca en la pestaña **'Mapas Avanzados'**.")
@@ -1304,66 +1304,84 @@ def display_land_cover_analysis_tab(**kwargs):
 
     gdf_basin = res_basin['gdf_union']
     basin_name = res_basin.get('names', 'Cuenca')
-    ppt_anual = res_basin['bal']['P']
-    # Recuperar Q actual de forma segura (evita KeyError 'Q_mm')
-    q_actual = res_basin['bal'].get('Q_mm', 0) 
+    
+    # RECUPERACIÓN SEGURA DE VARIABLES HIDROLÓGICAS
+    # Intentamos leer del diccionario de balance ('bal')
+    bal = res_basin.get('bal', {})
+    ppt_anual = bal.get('P', 0)
+    q_actual = bal.get('Q', 0) # Usar 'Q' o 'Q_mm' según analysis.py
+    if q_actual == 0 and 'Q_mm' in bal: q_actual = bal['Q_mm']
+    
+    vol_actual = bal.get('Vol', 0) # Volumen en Mm3
 
     st.markdown(f"Cuenca: **{basin_name}** (Ppt ref: {ppt_anual:.0f} mm/año)")
 
     try:
-        # Verificar archivo
         if not os.path.exists(Config.LAND_COVER_RASTER_PATH):
-            st.error(f"⚠️ Archivo raster no encontrado en: `{Config.LAND_COVER_RASTER_PATH}`")
+            st.error(f"⚠️ Raster no encontrado: {Config.LAND_COVER_RASTER_PATH}")
             return
 
         import rasterio
         from rasterio.mask import mask
 
         with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
-            if gdf_basin.crs != src.crs:
-                gdf_basin = gdf_basin.to_crs(src.crs)
-            
-            out_image, out_transform = mask(src, gdf_basin.geometry, crop=True)
-            out_image = out_image[0] # Banda 1
+            if gdf_basin.crs != src.crs: gdf_basin = gdf_basin.to_crs(src.crs)
+            out_image, _ = mask(src, gdf_basin.geometry, crop=True)
+            data = out_image[0]
 
-        # Leyenda (CORINE simplificada)
+        # LEYENDA CORINE LAND COVER (CLC) COLOMBIA (Códigos Típicos Nivel 1 y 2)
+        # Ajusta esto si tu raster usa códigos específicos (1,2,3...)
         legend = {
-            1: "Zonas Urbanas", 2: "Cultivos Transitorios", 3: "Pastos", 4: "Áreas Agrícolas",
-            5: "Bosques", 6: "Vegetación Arbustiva", 7: "Áreas Abiertas", 8: "Aguas"
+            1: "Zonas Urbanas",
+            2: "Cultivos Transitorios",
+            3: "Pastos",
+            4: "Áreas Agrícolas Heterogéneas",
+            5: "Bosques",
+            6: "Vegetación Herbácea/Arbustiva",
+            7: "Áreas Abiertas/Sin Vegetación",
+            8: "Aguas Continentales",
+            9: "Bosque Fragmentado",        # Asumido por tu imagen
+            10: "Vegetación Secundaria",    # Asumido por tu imagen
+            11: "Zonas Quemadas / Degradadas", # Asumido por tu imagen
+            12: "Pantanos / Humedales",
+            # Códigos CLC Estándar (por si acaso)
+            111: "Tejido urbano continuo", 112: "Tejido urbano discontinuo",
+            211: "Otros cultivos transitorios", 231: "Pastos limpios", 233: "Pastos enmalezados",
+            243: "Mosaico de cultivos, pastos y espacios naturales",
+            311: "Bosque denso", 323: "Vegetación secundaria o en transición"
         }
         
-        valid_pixels = out_image[out_image != src.nodata]
+        valid_pixels = data[data != src.nodata]
         if valid_pixels.size == 0:
             st.warning("Cuenca fuera del raster.")
             return
 
         unique, counts = np.unique(valid_pixels, return_counts=True)
-        area_total_cuenca = res_basin['morph']['area_km2']
+        area_total = res_basin['morph']['area_km2']
         
-        data = []
+        rows = []
         for val, count in zip(unique, counts):
             perc = (count / counts.sum()) * 100
-            area_cat = (perc / 100) * area_total_cuenca
-            data.append({"Cobertura": legend.get(val, f"Clase {val}"), "Área (km²)": area_cat, "%": perc})
+            area = (perc / 100) * area_total
+            rows.append({"Cobertura": legend.get(val, f"Clase {val}"), "Área (km²)": area, "%": perc})
             
-        df_cover = pd.DataFrame(data).sort_values("%", ascending=False)
+        df_cover = pd.DataFrame(rows).sort_values("%", ascending=False)
 
-        # --- VISUALIZACIÓN ACTUAL ---
-        c1, c2 = st.columns([2, 1])
+        # Visualización
+        c1, c2 = st.columns([3, 2])
         with c1:
             st.markdown("#### Distribución Actual")
             st.dataframe(df_cover.style.format({"Área (km²)": "{:.2f}", "%": "{:.1f}%"}), use_container_width=True)
         with c2:
-            fig_pie = px.pie(df_cover, values='Área (km²)', names='Cobertura', hole=0.4)
-            fig_pie.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=300)
-            st.plotly_chart(fig_pie, use_container_width=True)
+            fig = px.pie(df_cover, values='Área (km²)', names='Cobertura', hole=0.4)
+            fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
+            st.plotly_chart(fig, use_container_width=True)
             
-            # Métrica Q Actual
-            vol_actual = (q_actual * area_total_cuenca) / 1000
+            # Métrica Q Actual (Ahora sí conectada)
             st.metric("Escorrentía Actual Estimada (Q)", f"{q_actual:.0f} mm/año", f"Vol: {vol_actual:.2f} Mm³")
 
         st.markdown("---")
-
+        
         # --- SIMULADOR DE ESCENARIOS ---
         st.subheader("🎛️ Simulador de Escorrentía (SCS-CN)")
         
@@ -1431,4 +1449,5 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
