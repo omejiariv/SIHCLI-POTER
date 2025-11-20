@@ -902,11 +902,8 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
         st.warning("No hay datos de precipitación filtrados.")
         return
 
-    # -------------------------------------------------------------------------
-    # 1. CONFIGURACIÓN DEL ANÁLISIS
-    # -------------------------------------------------------------------------
+    # 1. CONFIGURACIÓN
     st.markdown("#### Configuración del Análisis")
-    
     col_conf1, col_conf2 = st.columns([1, 2])
     
     with col_conf1:
@@ -921,6 +918,10 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
     if reference_method == "Una Normal Climatológica (período base fijo)":
         with col_conf2:
             all_years = sorted(df_long[Config.YEAR_COL].unique())
+            if not all_years:
+                st.error("No hay datos anuales disponibles.")
+                return
+                
             min_y, max_y = all_years[0], all_years[-1]
             
             def_start = 1991 if 1991 in all_years else min_y
@@ -934,11 +935,9 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
                 st.error("El año de inicio debe ser menor al año de fin.")
                 return
 
-    # -------------------------------------------------------------------------
-    # 2. CÁLCULO DE ANOMALÍAS
-    # -------------------------------------------------------------------------
+    # 2. CÁLCULO
     with st.spinner("Calculando anomalías..."):
-        # A. Calcular Climatología
+        # A. Definir datos de referencia
         if reference_method == "Una Normal Climatológica (período base fijo)":
             mask_base = (df_long[Config.YEAR_COL] >= start_base) & (df_long[Config.YEAR_COL] <= end_base)
             df_reference = df_long[mask_base]
@@ -947,25 +946,23 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
             df_reference = df_long
             ref_text = "Promedio Histórico Total"
             
-        # 1. Serie regional mensual (promedio de estaciones seleccionadas)
+        # B. Serie regional mensual (promedio de estaciones seleccionadas)
         df_regional = df_monthly_filtered.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
         df_regional[Config.MONTH_COL] = df_regional[Config.DATE_COL].dt.month
         
-        # 2. Climatología regional
+        # C. Climatología regional
         stations_list = df_monthly_filtered[Config.STATION_NAME_COL].unique()
         df_ref_stations = df_reference[df_reference[Config.STATION_NAME_COL].isin(stations_list)]
         climatology = df_ref_stations.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean().reset_index()
         climatology.rename(columns={Config.PRECIPITATION_COL: 'clim_mean'}, inplace=True)
         
-        # 3. Unir y Restar
+        # D. Unir y Restar
         df_anom = pd.merge(df_regional, climatology, on=Config.MONTH_COL, how='left')
         df_anom['anomalia'] = df_anom[Config.PRECIPITATION_COL] - df_anom['clim_mean']
         
         df_anom['color'] = np.where(df_anom['anomalia'] >= 0, 'blue', 'red')
 
-    # -------------------------------------------------------------------------
     # 3. VISUALIZACIÓN
-    # -------------------------------------------------------------------------
     tab_ts, tab_enso, tab_table = st.tabs(["Gráfico de Anomalías", "Anomalías por Fase ENSO", "Tabla de Eventos Extremos"])
     
     # --- A. SERIE TEMPORAL ---
@@ -996,6 +993,7 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
             
             if target_idx_col in df_enso.columns:
                 enso_clean = df_enso.copy()
+                # Parseo seguro de fechas
                 if enso_clean[Config.DATE_COL].dtype == 'object':
                     enso_clean[Config.DATE_COL] = enso_clean[Config.DATE_COL].apply(parse_spanish_date)
                 else:
@@ -1036,17 +1034,15 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
     with tab_table:
         st.subheader("Eventos Extremos")
         
-        # Usamos las constantes de Config para seleccionar columnas
+        # CORRECCIÓN: Usar variables de Config en lugar de strings fijos
         cols_to_select = [Config.DATE_COL, Config.PRECIPITATION_COL, 'clim_mean', 'anomalia']
         cols_rename = ['Fecha', 'Ppt Real', 'Ppt Normal', 'Diferencia']
         
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**🔴 Top 10 Meses Más Secos**")
-            # Corregido: Usamos nombres de columnas seguros
             driest = df_anom.nsmallest(10, 'anomalia')[cols_to_select]
             driest.columns = cols_rename
-            # Formatear fecha para que se vea bien
             driest['Fecha'] = driest['Fecha'].dt.strftime('%Y-%m')
             st.dataframe(driest.style.format("{:.1f}", subset=['Ppt Real', 'Ppt Normal', 'Diferencia']), use_container_width=True)
             
@@ -1799,6 +1795,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
