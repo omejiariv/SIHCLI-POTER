@@ -98,9 +98,14 @@ def display_alerts_tab(df_long, **kwargs):
         st.warning("No hay datos para alertas.")
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
-    st.subheader("🗺️ Distribución Espacial y Capas")
-    tab_map, tab_avail = st.tabs(["Mapa Interactivo", "Disponibilidad"])
+    st.subheader("🗺️ Distribución Espacial y Datos Históricos")
     
+    # Creamos 3 pestañas ahora
+    tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad de Datos", "📅 Series Anuales"])
+
+    # -------------------------------------------------------------------------
+    # PESTAÑA 1: MAPA (Se mantiene igual de robusto)
+    # -------------------------------------------------------------------------
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
         with col_ctrl:
@@ -116,10 +121,10 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                 lon_center = valid_locs['longitude'].mean() if not valid_locs.empty else -75.5
             else:
                 lat_center, lon_center = 6.2, -75.5
+            
             m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=base_map)
             try:
                 if show_munis and not gdf_municipios.empty:
-                    # Simplificar para evitar crash, preservando columnas
                     g_mun = gdf_municipios.copy()
                     g_mun['geometry'] = g_mun.geometry.simplify(0.001)
                     folium.GeoJson(g_mun, name="Municipios", style_function=lambda x: {'color': 'gray', 'weight': 1, 'fillOpacity': 0.05}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
@@ -132,19 +137,93 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     g_pred['geometry'] = g_pred.geometry.simplify(0.0001)
                     folium.GeoJson(g_pred, name="Predios", style_function=lambda x: {'color': 'orange', 'weight': 2, 'fillOpacity': 0.2}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
             except: pass
+            
             if gdf_filtered is not None and not gdf_filtered.empty:
                 marker_cluster = MarkerCluster().add_to(m)
                 stations_to_plot = gdf_filtered.dropna(subset=['latitude', 'longitude'])
                 for _, row in stations_to_plot.iterrows():
                     folium.Marker([row['latitude'], row['longitude']], tooltip=f"{row[Config.STATION_NAME_COL]}", icon=folium.Icon(color="green", icon="cloud")).add_to(marker_cluster)
+            
             folium.LayerControl().add_to(m)
             st_folium(m, width="100%", height=600)
     
+    # -------------------------------------------------------------------------
+    # PESTAÑA 2: DISPONIBILIDAD (CON ORDENAMIENTO)
+    # -------------------------------------------------------------------------
     with tab_avail:
+        st.markdown("#### Cantidad de Datos por Estación")
+        
         if df_long is not None and not df_long.empty and not gdf_filtered.empty:
-            counts = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
-            fig = px.bar(counts, x="precipitation", y=Config.STATION_NAME_COL, orientation='h', title="Cantidad de Datos por Estación")
+            # 1. Filtrar datos para las estaciones seleccionadas
+            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
+            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
+            
+            # 2. Contar
+            counts = df_subset.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
+            counts.columns = ["Estación", "Registros"]
+            
+            # 3. Lógica de Ordenamiento
+            sort_option = st.radio(
+                "Ordenar por:", 
+                ["Mayor a Menor", "Menor a Mayor", "Alfabético"], 
+                horizontal=True,
+                key="sort_avail"
+            )
+            
+            if sort_option == "Mayor a Menor":
+                counts = counts.sort_values("Registros", ascending=True) # Ascendente para que en h-bar quede el mayor arriba
+            elif sort_option == "Menor a Mayor":
+                counts = counts.sort_values("Registros", ascending=False)
+            else:
+                counts = counts.sort_values("Estación", ascending=False) # Alfabético inverso para graficar de A-Z arriba-abajo
+            
+            # 4. Graficar
+            fig = px.bar(
+                counts, 
+                x="Registros", 
+                y="Estación", 
+                orientation='h', 
+                text="Registros",
+                height=max(500, len(counts) * 25) # Altura dinámica
+            )
+            fig.update_traces(marker_color='#1f77b4')
+            fig.update_layout(xaxis_title="Número de Meses con Datos", yaxis_title="")
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Seleccione estaciones para ver disponibilidad.")
+
+    # -------------------------------------------------------------------------
+    # PESTAÑA 3: SERIES ANUALES (MATRIZ DE CALOR) - NUEVA
+    # -------------------------------------------------------------------------
+    with tab_matrix:
+        st.markdown("#### Series de Precipitación Anual por Estación (mm)")
+        st.info("Tabla cruzada de precipitación total anual. Los colores indican la intensidad (Oscuro = Menos lluvia, Claro/Amarillo = Más lluvia).")
+
+        if df_long is not None and not df_long.empty and not gdf_filtered.empty:
+            # 1. Filtrar y Agrupar Anual
+            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
+            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
+            
+            # Pivote: Indice=Estación, Columnas=Año, Valor=Suma Precipitación
+            df_pivot = df_subset.pivot_table(
+                index=Config.STATION_NAME_COL, 
+                columns=Config.YEAR_COL, 
+                values=Config.PRECIPITATION_COL, 
+                aggfunc='sum'
+            )
+            
+            # 2. Estilizar como Heatmap (Gradiente)
+            # Usamos 'viridis' para simular el estilo de la imagen (morado -> amarillo)
+            st.dataframe(
+                df_pivot.style
+                .format("{:.0f}", na_rep="0")
+                .background_gradient(cmap="viridis", axis=None, vmin=0, vmax=df_pivot.max().max())
+                .highlight_null(color='black'), # Nulos/Ceros oscuros
+                use_container_width=True,
+                height=600
+            )
+        else:
+            st.warning("No hay datos para generar la matriz anual.")
             
 def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analysis, **kwargs):
     st.subheader("📊 Visualizaciones de Precipitación")
@@ -1513,4 +1592,5 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
