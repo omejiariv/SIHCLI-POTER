@@ -6,6 +6,7 @@ from modules.data_processor import load_and_process_all_data, complete_series
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
 from modules.visualizer import (
+    display_current_filters,
     display_welcome_tab,
     display_realtime_dashboard,
     display_spatial_distribution_tab,
@@ -75,6 +76,9 @@ def main():
         "start_date": start_date,
         "end_date": end_date
     }
+
+    # --- NUEVO: CAJA DE INFORMACIÓN GLOBAL ---
+    display_current_filters(stations_for_analysis, sel_regions, sel_munis, year_range)    
 
     # 4. Pestañas
     tab_titles = [
@@ -165,3 +169,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
