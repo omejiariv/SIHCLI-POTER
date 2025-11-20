@@ -177,11 +177,9 @@ def main():
         st.markdown("---")
         display_station_table_tab(**display_args)
 
-    with tabs[5]: # Tendencias y Pronósticos
-        display_trends_and_forecast_tab(**display_args)
-        st.markdown("---")
-        display_climate_forecast_tab(**display_args)
-
+    with tabs[5]: # Tendencias
+        display_trends_and_forecast_tab(**args)
+    
     with tabs[6]: # Anomalías
         display_anomalies_tab(**display_args)
 
@@ -259,6 +257,7 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
