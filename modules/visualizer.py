@@ -910,23 +910,19 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
     col_conf1, col_conf2 = st.columns([1, 2])
     
     with col_conf1:
-        # Selección del método de referencia
         reference_method = st.radio(
             "Calcular anomalía con respecto a:",
             ["El promedio de todo el período", "Una Normal Climatológica (período base fijo)"],
             key="anomaly_ref_method"
         )
         
-    # Lógica para el período base
     start_base, end_base = None, None
     
     if reference_method == "Una Normal Climatológica (período base fijo)":
         with col_conf2:
-            # Obtener años disponibles en el histórico completo (df_long) para definir la normal
             all_years = sorted(df_long[Config.YEAR_COL].unique())
             min_y, max_y = all_years[0], all_years[-1]
             
-            # Defaults típicos (1991-2020 es el estándar actual de la OMM)
             def_start = 1991 if 1991 in all_years else min_y
             def_end = 2020 if 2020 in all_years else max_y
             
@@ -942,30 +938,22 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
     # 2. CÁLCULO DE ANOMALÍAS
     # -------------------------------------------------------------------------
     with st.spinner("Calculando anomalías..."):
-        # A. Calcular la Climatología (Promedio Mensual de Referencia)
+        # A. Calcular Climatología
         if reference_method == "Una Normal Climatológica (período base fijo)":
-            # Filtrar df_long solo para el período base
             mask_base = (df_long[Config.YEAR_COL] >= start_base) & (df_long[Config.YEAR_COL] <= end_base)
             df_reference = df_long[mask_base]
             ref_text = f"Normal {start_base}-{end_base}"
         else:
-            # Usar todo el historial disponible
             df_reference = df_long
             ref_text = "Promedio Histórico Total"
             
-        # Agrupar por MES y ESTACIÓN para tener la referencia local exacta
-        # (Si se seleccionaron múltiples estaciones, se calcula la anomalía por estación y luego se promedia o se muestra la regional)
-        
-        # Para simplificar la visualización regional agregada:
-        # 1. Calculamos la serie regional mensual (promedio de estaciones seleccionadas)
+        # 1. Serie regional mensual (promedio de estaciones seleccionadas)
         df_regional = df_monthly_filtered.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
         df_regional[Config.MONTH_COL] = df_regional[Config.DATE_COL].dt.month
         
-        # 2. Calculamos la climatología regional usando las mismas estaciones pero en el periodo base
+        # 2. Climatología regional
         stations_list = df_monthly_filtered[Config.STATION_NAME_COL].unique()
         df_ref_stations = df_reference[df_reference[Config.STATION_NAME_COL].isin(stations_list)]
-        
-        # Climatología mensual (1-12)
         climatology = df_ref_stations.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean().reset_index()
         climatology.rename(columns={Config.PRECIPITATION_COL: 'clim_mean'}, inplace=True)
         
@@ -973,57 +961,40 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
         df_anom = pd.merge(df_regional, climatology, on=Config.MONTH_COL, how='left')
         df_anom['anomalia'] = df_anom[Config.PRECIPITATION_COL] - df_anom['clim_mean']
         
-        # Colores para el gráfico
         df_anom['color'] = np.where(df_anom['anomalia'] >= 0, 'blue', 'red')
 
     # -------------------------------------------------------------------------
-    # 3. VISUALIZACIÓN (PESTAÑAS)
+    # 3. VISUALIZACIÓN
     # -------------------------------------------------------------------------
     tab_ts, tab_enso, tab_table = st.tabs(["Gráfico de Anomalías", "Anomalías por Fase ENSO", "Tabla de Eventos Extremos"])
     
-    # --- A. SERIE TEMPORAL DE ANOMALÍAS ---
+    # --- A. SERIE TEMPORAL ---
     with tab_ts:
-        st.markdown(f"##### Anomalías Mensuales de Precipitación (Ref: {ref_text})")
-        
+        st.markdown(f"##### Anomalías Mensuales (Ref: {ref_text})")
         fig = go.Figure()
         fig.add_trace(go.Bar(
-            x=df_anom[Config.DATE_COL],
-            y=df_anom['anomalia'],
-            marker_color=df_anom['color'],
-            name='Anomalía'
+            x=df_anom[Config.DATE_COL], y=df_anom['anomalia'],
+            marker_color=df_anom['color'], name='Anomalía'
         ))
-        fig.update_layout(
-            yaxis_title="Anomalía de Precipitación (mm)",
-            xaxis_title="Fecha",
-            height=500,
-            showlegend=False
-        )
-        # Línea cero
+        fig.update_layout(yaxis_title="Anomalía (mm)", xaxis_title="Fecha", height=500, showlegend=False)
         fig.add_hline(y=0, line_color="black", line_width=1)
         st.plotly_chart(fig, use_container_width=True)
         
-        # Botón descarga
         csv = df_anom.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Descargar Anomalías (CSV)", csv, "anomalias_precipitacion.csv", "text/csv")
+        st.download_button("📥 Descargar Anomalías (CSV)", csv, "anomalias.csv", "text/csv")
 
-    # --- B. DISTRIBUCIÓN POR FASE ENSO (TU SOLICITUD) ---
+    # --- B. DISTRIBUCIÓN POR FASE ENSO ---
     with tab_enso:
-        st.subheader("Distribución de Anomalías por Fase Climática")
-        
+        st.subheader("Distribución por Fase Climática")
         if df_enso is None or df_enso.empty:
-            st.warning("No hay datos de índices climáticos (ENSO) disponibles.")
+            st.warning("No hay datos ENSO.")
         else:
-            # Selector de Índice
             c_idx, _ = st.columns([1, 2])
-            idx_name = c_idx.selectbox("Seleccionar Índice:", ["ONI (El Niño)", "SOI (Oscilación del Sur)", "IOD (Dipolo Índico)"])
-            
-            # Mapeo de columna
-            idx_col_map = {"ONI (El Niño)": Config.ENSO_ONI_COL, "SOI (Oscilación del Sur)": Config.SOI_COL, "IOD (Dipolo Índico)": Config.IOD_COL}
+            idx_name = c_idx.selectbox("Índice:", ["ONI (El Niño)", "SOI", "IOD"])
+            idx_col_map = {"ONI (El Niño)": Config.ENSO_ONI_COL, "SOI": Config.SOI_COL, "IOD": Config.IOD_COL}
             target_idx_col = idx_col_map[idx_name]
             
             if target_idx_col in df_enso.columns:
-                # Unir anomalías con índice
-                # Asegurar fechas
                 enso_clean = df_enso.copy()
                 if enso_clean[Config.DATE_COL].dtype == 'object':
                     enso_clean[Config.DATE_COL] = enso_clean[Config.DATE_COL].apply(parse_spanish_date)
@@ -1033,66 +1004,58 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
                 df_merged = pd.merge(df_anom, enso_clean[[Config.DATE_COL, target_idx_col]], on=Config.DATE_COL, how='inner')
                 
                 if not df_merged.empty:
-                    # Definir Fases
                     if idx_name == "ONI (El Niño)":
-                        conditions = [df_merged[target_idx_col] >= 0.5, df_merged[target_idx_col] <= -0.5]
+                        conds = [df_merged[target_idx_col] >= 0.5, df_merged[target_idx_col] <= -0.5]
                         choices = ['El Niño', 'La Niña']
-                        colors = {'El Niño': '#d62728', 'La Niña': '#1f77b4', 'Neutral': 'lightgrey'} # Rojo/Azul clásico
-                    elif idx_name == "SOI (Oscilación del Sur)":
-                        conditions = [df_merged[target_idx_col] <= -7, df_merged[target_idx_col] >= 7]
-                        choices = ['El Niño', 'La Niña'] # SOI negativo = Niño
                         colors = {'El Niño': '#d62728', 'La Niña': '#1f77b4', 'Neutral': 'lightgrey'}
-                    else: # IOD
-                        conditions = [df_merged[target_idx_col] >= 0.4, df_merged[target_idx_col] <= -0.4]
+                    elif idx_name == "SOI":
+                        conds = [df_merged[target_idx_col] <= -7, df_merged[target_idx_col] >= 7]
+                        choices = ['El Niño', 'La Niña']
+                        colors = {'El Niño': '#d62728', 'La Niña': '#1f77b4', 'Neutral': 'lightgrey'}
+                    else:
+                        conds = [df_merged[target_idx_col] >= 0.4, df_merged[target_idx_col] <= -0.4]
                         choices = ['Positivo', 'Negativo']
                         colors = {'Positivo': '#d62728', 'Negativo': '#1f77b4', 'Neutral': 'lightgrey'}
                         
-                    df_merged['Fase'] = np.select(conditions, choices, default='Neutral')
+                    df_merged['Fase'] = np.select(conds, choices, default='Neutral')
                     
-                    # GRÁFICOS (Boxplot + Strip)
-                    # Usamos boxplot combinado con strip (puntos) como en la imagen de referencia
                     fig_enso = px.box(
-                        df_merged, 
-                        x='Fase', 
-                        y='anomalia', 
-                        color='Fase',
-                        color_discrete_map=colors,
-                        points="all", # Muestra la nube de puntos como en tu imagen
-                        title=f"Distribución de Anomalías de Precipitación según Fase {idx_name}",
+                        df_merged, x='Fase', y='anomalia', color='Fase', color_discrete_map=colors,
+                        points="all", title=f"Anomalías según Fase {idx_name}",
                         category_orders={"Fase": choices + ["Neutral"]}
                     )
-                    fig_enso.update_layout(height=600, showlegend=False, yaxis_title="Anomalía de Precipitación (mm)")
-                    # Línea cero
+                    fig_enso.update_layout(height=600, showlegend=False, yaxis_title="Anomalía (mm)")
                     fig_enso.add_hline(y=0, line_width=1, line_color="black", line_dash="dot")
-                    
                     st.plotly_chart(fig_enso, use_container_width=True)
-                    
-                    # Estadística rápida
-                    st.markdown("**Promedio de Anomalía por Fase:**")
-                    avg_phase = df_merged.groupby('Fase')['anomalia'].mean().reset_index()
-                    st.dataframe(avg_phase.style.format({"anomalia": "{:.1f} mm"}), use_container_width=False)
-                    
                 else:
-                    st.warning("No hay datos coincidentes entre la precipitación y el índice seleccionado.")
+                    st.warning("No hay datos coincidentes.")
             else:
-                st.error(f"Columna {target_idx_col} no encontrada en datos climáticos.")
+                st.error(f"Columna {target_idx_col} no encontrada.")
 
-    # --- C. TABLA DE EVENTOS EXTREMOS ---
+    # --- C. TABLA DE EXTREMOS (CORREGIDA) ---
     with tab_table:
-        st.subheader("Eventos Extremos (Top Anomalías)")
-        c1, c2 = st.columns(2)
+        st.subheader("Eventos Extremos")
         
+        # Usamos las constantes de Config para seleccionar columnas
+        cols_to_select = [Config.DATE_COL, Config.PRECIPITATION_COL, 'clim_mean', 'anomalia']
+        cols_rename = ['Fecha', 'Ppt Real', 'Ppt Normal', 'Diferencia']
+        
+        c1, c2 = st.columns(2)
         with c1:
-            st.markdown("**🔴 Top 10 Meses Más Secos (Déficit)**")
-            driest = df_anom.nsmallest(10, 'anomalia')[['fecha', 'precipitation', 'clim_mean', 'anomalia']]
-            driest.columns = ['Fecha', 'Ppt Real', 'Ppt Normal', 'Déficit']
-            st.dataframe(driest.style.format("{:.1f}"), use_container_width=True)
+            st.markdown("**🔴 Top 10 Meses Más Secos**")
+            # Corregido: Usamos nombres de columnas seguros
+            driest = df_anom.nsmallest(10, 'anomalia')[cols_to_select]
+            driest.columns = cols_rename
+            # Formatear fecha para que se vea bien
+            driest['Fecha'] = driest['Fecha'].dt.strftime('%Y-%m')
+            st.dataframe(driest.style.format("{:.1f}", subset=['Ppt Real', 'Ppt Normal', 'Diferencia']), use_container_width=True)
             
         with c2:
-            st.markdown("**🔵 Top 10 Meses Más Húmedos (Exceso)**")
-            wettest = df_anom.nlargest(10, 'anomalia')[['fecha', 'precipitation', 'clim_mean', 'anomalia']]
-            wettest.columns = ['Fecha', 'Ppt Real', 'Ppt Normal', 'Exceso']
-            st.dataframe(wettest.style.format("{:.1f}"), use_container_width=True)
+            st.markdown("**🔵 Top 10 Meses Más Húmedos**")
+            wettest = df_anom.nlargest(10, 'anomalia')[cols_to_select]
+            wettest.columns = cols_rename
+            wettest['Fecha'] = wettest['Fecha'].dt.strftime('%Y-%m')
+            st.dataframe(wettest.style.format("{:.1f}", subset=['Ppt Real', 'Ppt Normal', 'Diferencia']), use_container_width=True)
 
 def display_stats_tab(**kwargs):
     st.subheader("📊 Estadísticas Hidrológicas Detalladas")
@@ -1836,6 +1799,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
