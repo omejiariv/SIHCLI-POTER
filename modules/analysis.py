@@ -14,7 +14,7 @@ from shapely.ops import unary_union
 from rasterio.warp import reproject, Resampling
 from rasterio.mask import mask
 from rasterio.transform import Affine
-
+from scipy import stats
 
 @st.cache_data
 def calculate_spi(df, col=Config.PRECIPITATION_COL, window=12):
@@ -594,4 +594,59 @@ def generate_life_zone_raster(dem_path, ppt_path, mask_geom=None, downscale_fact
 
     except Exception as e:
         return None, None, str(e)
+
+def calculate_return_periods(df_long, station_name):
+    """
+    Calcula períodos de retorno usando la distribución de Gumbel sobre máximos anuales.
+    """
+    # 1. Filtrar datos de la estación
+    df_station = df_long[df_long[Config.STATION_NAME_COL] == station_name].copy()
+    
+    if df_station.empty: return None, None
+    
+    # 2. Obtener Máximos Anuales
+    # Agrupamos por año y tomamos el valor máximo de precipitación de ese año
+    annual_max = df_station.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].max().dropna()
+    
+    if len(annual_max) < 10: # Se requieren min 10 años para estadística de extremos
+        return None, "Insuficientes datos anuales (<10 años) para ajuste de Gumbel."
+        
+    # 3. Ajuste Distribución Gumbel
+    # params = (loc, scale)
+    params = stats.gumbel_r.fit(annual_max)
+    
+    # 4. Calcular Valores para Tr específicos
+    tr_list = [2, 5, 10, 25, 50, 100] # Años de retorno
+    probs = [1 - (1/tr) for tr in tr_list]
+    
+    # ppf = Percent point function (inversa de cdf)
+    precip_values = stats.gumbel_r.ppf(probs, *params)
+    
+    df_results = pd.DataFrame({
+        "Período de Retorno (Tr)": tr_list,
+        "Probabilidad Excedencia": [f"{1/tr:.1%}" for tr in tr_list],
+        "Ppt Máxima Esperada (mm)": precip_values
+    })
+    
+    return df_results, {"params": params, "data": annual_max}
+
+def calculate_percentiles_extremes(df_long, station_name, p_low=10, p_high=90):
+    """Identifica eventos por encima/debajo de percentiles."""
+    df_station = df_long[df_long[Config.STATION_NAME_COL] == station_name].copy()
+    if df_station.empty: return None
+    
+    val = df_station[Config.PRECIPITATION_COL].dropna()
+    if val.empty: return None
+    
+    # Calcular umbrales
+    thresh_low = np.percentile(val, p_low)
+    thresh_high = np.percentile(val, p_high)
+    
+    # Filtrar eventos
+    df_station['Tipo Evento'] = 'Normal'
+    df_station.loc[df_station[Config.PRECIPITATION_COL] <= thresh_low, 'Tipo Evento'] = f'Bajo (<P{p_low})'
+    df_station.loc[df_station[Config.PRECIPITATION_COL] >= thresh_high, 'Tipo Evento'] = f'Alto (>P{p_high})'
+    
+    return df_station, thresh_low, thresh_high
+
 
