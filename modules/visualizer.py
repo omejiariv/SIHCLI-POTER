@@ -298,18 +298,11 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 
     mode = st.radio("Modo de Análisis:", ["Regional (Comparativo)", "Por Cuenca Específica"], horizontal=True)
     
-    # --- FUNCIÓN INTERNA DE INTERPOLACIÓN ---
     def run_interpolation(df_data, method, grid_bounds, grid_res=100):
-        # Importar aquí para asegurar disponibilidad
-        from scipy.interpolate import griddata, Rbf
-        
         minx, maxx, miny, maxy = grid_bounds
-        # Crear grilla
         grid_x, grid_y = np.mgrid[minx:maxx:complex(grid_res), miny:maxy:complex(grid_res)]
-        
         points = df_data[['longitude', 'latitude']].values
         values = df_data[Config.PRECIPITATION_COL].values
-        
         try:
             if "Spline" in method:
                 grid_z = griddata(points, values, (grid_x, grid_y), method='cubic')
@@ -321,9 +314,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             return grid_x, grid_y, grid_z
         except Exception: return None, None, None
 
-    # -------------------------------------------------------------------------
-    # MODO 1: REGIONAL (COMPARATIVO)
-    # -------------------------------------------------------------------------
+    # --- MODO 1: REGIONAL ---
     if mode == "Regional (Comparativo)":
         c1, c2 = st.columns(2)
         with c1:
@@ -344,35 +335,18 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 if len(df_map) < 3:
                     col.warning("Datos insuficientes.")
                     return
-                
-                # Calcular Bounds locales
                 pad = 0.05
                 bounds = [df_map.longitude.min()-pad, df_map.longitude.max()+pad, df_map.latitude.min()-pad, df_map.latitude.max()+pad]
-                
                 gx, gy, gz = run_interpolation(df_map, meth, bounds)
                 if gz is not None:
-                    fig = go.Figure(data=go.Contour(
-                        z=gz.T, x=gx[:,0], y=gy[0,:], 
-                        colorscale='Viridis', colorbar=dict(title='mm/año'),
-                        contours=dict(coloring='heatmap', showlabels=True)
-                    ))
+                    fig = go.Figure(data=go.Contour(z=gz.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis', colorbar=dict(title='mm/año')))
                     fig.add_trace(go.Scatter(x=df_map.longitude, y=df_map.latitude, mode='markers', marker=dict(color='red', size=5)))
-                    
-                    # Forzar ejes
-                    fig.update_layout(
-                        title=f"{meth} ({rng[0]}-{rng[1]})", 
-                        height=400, 
-                        margin=dict(l=0,r=0,t=40,b=0),
-                        xaxis_range=[bounds[0], bounds[1]],
-                        yaxis_range=[bounds[2], bounds[3]]
-                    )
+                    fig.update_layout(title=f"{meth} ({rng[0]}-{rng[1]})", height=400, margin=dict(l=0,r=0,t=40,b=0))
                     col.plotly_chart(fig, use_container_width=True)
             plot_map(range1, method1, c1)
             plot_map(range2, method2, c2)
 
-    # -------------------------------------------------------------------------
-    # MODO 2: POR CUENCA (CORREGIDO)
-    # -------------------------------------------------------------------------
+    # --- MODO 2: POR CUENCA (CORREGIDO KEYERROR Y COMPLETADO) ---
     else:
         if gdf_subcuencas.empty:
             st.warning("No hay capa de subcuencas.")
@@ -390,59 +364,59 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 meth = st.selectbox("Método de Interpolación:", ["IDW (Lineal)", "Spline (Cúbico)", "Kriging (Simulado)"], key="meth_c")
 
             if st.button("Analizar Cuenca (Radio 50km)"):
-                with st.spinner("Procesando datos hidrológicos..."):
-                    # 1. Geometría
+                with st.spinner("Procesando datos..."):
+                    # Geometría y Buffer
                     subset = gdf_subcuencas[gdf_subcuencas['nombre'].isin(sel_cuencas)]
                     gdf_union = gpd.GeoDataFrame({'geometry': [subset.unary_union]}, crs=gdf_subcuencas.crs)
-                    
-                    # Buffer 50km (aprox 0.45 grados)
-                    buffer = gdf_union.geometry.buffer(0.45).unary_union
-                    stations_in = gdf_stations[gdf_stations.geometry.intersects(buffer)]
+                    buffer_geom = gdf_union.geometry.buffer(0.5).unary_union 
+                    stations_in = gdf_stations[gdf_stations.geometry.intersects(buffer_geom)]
                     
                     if not stations_in.empty:
                         target_ids = stations_in[Config.STATION_NAME_COL].unique()
-                        mask = (df_long[Config.STATION_NAME_COL].isin(target_ids)) & \
-                               (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
+                        mask = (df_long[Config.STATION_NAME_COL].isin(target_ids)) & (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
                         
-                        df_annual_sums = df_long[mask].groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-                        df_points = df_annual_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+                        # Promedio Anual Real (mm/año)
+                        df_ann = df_long[mask].groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+                        df_points = df_ann.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                         df_map_data = pd.merge(df_points, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
 
                         if len(df_map_data) >= 3:
-                            # CORRECCIÓN DE BOUNDS
-                            b = buffer.bounds # (minx, miny, maxx, maxy)
-                            bounds = [b[0], b[2], b[1], b[3]] 
-                            
-                            gx, gy, gz = run_interpolation(df_map_data, meth, bounds)
-                            
+                            bounds = buffer_geom.bounds
+                            gx, gy, gz = run_interpolation(df_map_data, meth, [bounds[0], bounds[2], bounds[1], bounds[3]])
                             ppt_media = np.nanmean(gz) if gz is not None else df_map_data[Config.PRECIPITATION_COL].mean()
                             
-                            from modules.analysis import calculate_morphometry, calculate_hydrological_balance
                             morph = calculate_morphometry(gdf_union)
                             bal = calculate_hydrological_balance(ppt_media, morph['alt_prom_m'], gdf_union)
                             
+                            # GUARDAR EN SESIÓN (CORRECCIÓN: USAR CLAVES UNIFICADAS)
                             st.session_state['basin_results'] = {
                                 'ready': True, 'gx': gx, 'gy': gy, 'gz': gz, 'df': df_map_data,
-                                'morph': morph, 'bal': bal, 'geom': gdf_union, 'buffer': buffer,
-                                'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}",
-                                'bounds': bounds
+                                'morph': morph, 'bal': bal, 
+                                'gdf_union': gdf_union, # Clave estandarizada
+                                'buffer': buffer_geom,
+                                'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}", 
+                                'bounds': [bounds[0], bounds[2], bounds[1], bounds[3]]
                             }
-                        else: st.error("Insuficientes estaciones (<3) en radio de 50km.")
+                        else: st.error("Insuficientes estaciones (<3).")
                     else: st.error("No hay estaciones cercanas.")
 
             # --- RENDERIZADO ---
             res = st.session_state.get('basin_results')
             if res and res.get('ready'):
-                st.success(f"Análisis Hidrológico **{res.get('periodo')}** completado.")
+                # Validación para evitar crash por datos viejos
+                if 'gdf_union' not in res: 
+                    st.warning("Datos antiguos. Recalcule."); return
 
-                # 1. Mapa Interpolado
+                st.success(f"Análisis **{res.get('periodo')}** completado.")
+
+                # 1. Mapa
                 fig = go.Figure(data=go.Contour(
                     z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:],
                     colorscale='Viridis', colorbar=dict(title='mm/año'), contours=dict(coloring='heatmap', showlabels=True)
                 ))
                 fig.add_trace(go.Scatter(x=res['df'].longitude, y=res['df'].latitude, mode='markers', marker=dict(color='red', size=5), name="Estaciones"))
                 try:
-                    poly = res['geom'].geometry.iloc[0]
+                    poly = res['gdf_union'].geometry.iloc[0]
                     if poly.geom_type == 'Polygon':
                         x, y = poly.exterior.xy
                         fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='white', width=3), name='Cuenca'))
@@ -452,70 +426,23 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='white', width=3), showlegend=False))
                 except: pass
                 
-                fig.update_layout(
-                    height=600, 
-                    title="Superficie de Lluvia (mm/año)",
-                    xaxis_range=[res['bounds'][0], res['bounds'][1]],
-                    yaxis_range=[res['bounds'][2], res['bounds'][3]]
-                )
+                fig.update_layout(height=600, title="Superficie de Lluvia", xaxis_range=[res['bounds'][0], res['bounds'][1]], yaxis_range=[res['bounds'][2], res['bounds'][3]])
                 st.plotly_chart(fig, use_container_width=True)
 
                 # 2. Datos
                 st.markdown("---")
                 b = res['bal']
-                st.markdown(f"#### 💧 Balance Hídrico Estimado ({res['names']})")
-                
-                # CÁLCULO CAUDAL EN L/S (CORREGIDO EL KEYERROR)
-                # Usamos 'Vol' (Millones m3) que viene de analysis.py
-                vol_mm3 = b['Vol']
-                # L/s = (Millones m3 * 10^6 * 1000 L/m3) / (365*24*3600 seg)
-                # L/s = (Vol * 10^9) / 31536000
-                q_ls = (vol_mm3 * 1_000_000_000) / 31536000
+                st.markdown(f"#### 💧 Balance Hídrico")
+                vol_mm3 = b.get('Vol', 0)
+                q_ls = (vol_mm3 * 1_000_000_000) / 31536000 if vol_mm3 > 0 else 0
                 
                 cols = st.columns(5)
-                cols[0].metric("Precipitación Media", f"{b['P']:.0f} mm/año")
-                cols[1].metric("Altitud Media", f"{b['Alt']:.0f} m.s.n.m")
-                cols[2].metric("ET Media", f"{b['ET']:.0f} mm/año")
-                cols[3].metric("Escorrentía (Q)", f"{max(0, b['Q']):.0f} mm/año")
-                cols[4].metric("Caudal Medio", f"{q_ls:.0f} L/s")
-                
-                st.info(f"**Volumen de escorrentía anual estimado:** {b['Vol']:.2f} millones de m³ sobre un área de {b['Area']:.2f} km².")
-
-                # --- CURVA HIPSOMÉTRICA INTEGRADA ---
-                st.markdown("---")
-                st.subheader("⛰️ Curva Hipsométrica")
-                
-                from modules.analysis import calculate_hypsometric_curve
-                hypso = calculate_hypsometric_curve(res['gdf_union'])
-                
-                if hypso:
-                    c_hyp1, c_hyp2 = st.columns([3, 1])
-                    with c_hyp1:
-                        fig_hyp = go.Figure()
-                        fig_hyp.add_trace(go.Scatter(
-                            x=hypso['area_percent'], y=hypso['elevations'], 
-                            mode='lines', fill='tozeroy', name='Perfil'
-                        ))
-                        # Añadir línea de tendencia polinomica
-                        x_trend = np.linspace(0, 100, 50)
-                        y_trend = hypso['poly_model'](x_trend)
-                        fig_hyp.add_trace(go.Scatter(
-                            x=x_trend, y=y_trend, mode='lines', 
-                            line=dict(color='red', dash='dash'), name='Ajuste Polinómico (Grado 3)'
-                        ))
-                        
-                        fig_hyp.update_layout(
-                            title="Curva Hipsométrica",
-                            xaxis_title="% Área Acumulada",
-                            yaxis_title="Elevación (m)",
-                            height=400
-                        )
-                        st.plotly_chart(fig_hyp, use_container_width=True)
-                    
-                    with c_hyp2:
-                        st.markdown("**Ecuación del Ajuste:**")
-                        st.latex(hypso['equation'].replace('x', 'A').replace('y', 'H'))
-                        st.caption("Donde H = Elevación, A = % Área")                
+                cols[0].metric("Ppt Media", f"{b['P']:.0f} mm/año")
+                cols[1].metric("Altitud", f"{b['Alt']:.0f} m")
+                cols[2].metric("ET", f"{b['ET']:.0f} mm/año")
+                cols[3].metric("Q (mm)", f"{max(0, b['Q']):.0f} mm/año")
+                cols[4].metric("Q (L/s)", f"{q_ls:.0f} L/s")
+                st.info(f"**Volumen:** {vol_mm3:.2f} millones de m³.")
                 
                 st.markdown("#### 📐 Morfometría")
                 m = res['morph']
@@ -527,20 +454,34 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 cm[4].metric("Alt Mín", f"{m['alt_min_m']:.0f} m")
                 cm[5].metric("Pendiente", f"{m['pendiente_prom']:.1f} %")
 
-                # 3. Mapa Contexto
+                # 3. HIPSOMETRÍA (RESTAURADA)
                 st.markdown("---")
-                st.subheader("📍 Contexto Espacial (Cuenca + Radio 50km)")
+                st.subheader("⛰️ Curva Hipsométrica")
+                hypso = calculate_hypsometric_curve(res['gdf_union'])
+                if hypso:
+                    ch1, ch2 = st.columns([3, 1])
+                    with ch1:
+                        fig_h = go.Figure()
+                        fig_h.add_trace(go.Scatter(x=hypso['area_percent'], y=hypso['elevations'], fill='tozeroy', name='Perfil'))
+                        x_tr = np.linspace(0, 100, 50)
+                        fig_h.add_trace(go.Scatter(x=x_tr, y=hypso['poly_model'](x_tr), line=dict(dash='dash'), name='Ajuste'))
+                        fig_h.update_layout(title="Curva Hipsométrica", xaxis_title="% Área", yaxis_title="Elevación (m)", height=350)
+                        st.plotly_chart(fig_h, use_container_width=True)
+                    with ch2:
+                        st.latex(hypso['equation'])
+
+                # 4. MAPA CONTEXTO
+                st.markdown("---")
+                st.subheader("📍 Contexto Espacial")
                 minx, maxx, miny, maxy = res['bounds']
                 map_c = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=9, tiles="CartoDB positron")
-                folium.GeoJson(res['geom'], name="Cuenca", style_function=lambda x: {'color':'blue', 'weight':3}).add_to(map_c)
+                folium.GeoJson(res['gdf_union'], name="Cuenca", style_function=lambda x: {'color':'blue', 'weight':3}).add_to(map_c)
                 folium.GeoJson(res['buffer'], name="Radio 50km", style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False}).add_to(map_c)
                 for _, r in res['df'].iterrows():
-                    folium.CircleMarker([r.latitude, r.longitude], radius=3, color='red', fill=True, tooltip=f"{r[Config.STATION_NAME_COL]}: {r[Config.PRECIPITATION_COL]:.0f}").add_to(map_c)
+                    folium.CircleMarker([r.latitude, r.longitude], radius=3, color='red', fill=True).add_to(map_c)
                 st_folium(map_c, height=500, width="100%")
         else:
             st.info("Seleccione cuencas.")
-
-
             
 def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático (Índices)")
@@ -1247,6 +1188,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
