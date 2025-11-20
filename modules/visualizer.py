@@ -447,14 +447,19 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             fig = px.bar(cnt, x="Registros", y="Estación", orientation='h', height=max(500, len(cnt)*25))
             st.plotly_chart(fig, use_container_width=True)
 
-    # PESTAÑA 3: MATRIZ (AQUÍ ESTABA EL ERROR DE SINTAXIS ANTES)
+    # --- PESTAÑA 3: MATRIZ (CORREGIDA) ---
     with tab_matrix:
         if df_long is not None and not gdf_filtered.empty:
             target = gdf_filtered[Config.STATION_NAME_COL].unique()
             sub = df_long[df_long[Config.STATION_NAME_COL].isin(target)]
             piv = sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
-            # CORRECCIÓN FINAL: Cerrar paréntesis correctamente
-            st.dataframe(piv.style.background_gradient(cmap='viridis', axis=None).format("{:.0f}", na_rep="-"), use_container_width=True, height=600)
+            
+            # Esta era la línea rota. Aquí está completa:
+            st.dataframe(
+                piv.style.background_gradient(cmap='viridis', axis=None).format("{:.0f}", na_rep="-"), 
+                use_container_width=True, 
+                height=600
+            )
         else:
             st.warning("No hay datos para la matriz.")
             
@@ -2046,6 +2051,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
