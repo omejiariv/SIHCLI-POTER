@@ -354,10 +354,14 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
             st.warning("Cargue datos para ver alertas históricas.")
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
-    st.subheader("🗺️ Distribución Espacial y Capas")
-    tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad de Datos", "📅 Series Anuales"])
+    st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
     
-    # --- PESTAÑA 1: MAPA ---
+    # Instrucción clara
+    st.info("👆 **Haga clic en cualquier punto del mapa** para ver datos interpolados y pronósticos locales.")
+
+    tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
+    
+    # --- PESTAÑA 1: MAPA + PUNTO INTELIGENTE ---
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
         with col_ctrl:
@@ -366,190 +370,122 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             show_cuencas = st.checkbox("Subcuencas", value=False)
             show_predios = st.checkbox("Predios", value=False)
             
-            # --- CORRECCIÓN DEL MAPA BASE ---
-            # Definimos opciones seguras con sus atribuciones
+            # Mapa base seguro
             base_map_options = {
-                "CartoDB Positron": {"tiles": "CartoDB positron", "attr": None}, # Atribución automática
-                "OpenStreetMap": {"tiles": "OpenStreetMap", "attr": None},       # Atribución automática
+                "CartoDB Positron": {"tiles": "cartodbpositron", "attr": None},
+                "OpenStreetMap": {"tiles": "OpenStreetMap", "attr": None},
                 "Esri Satellite": {
                     "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                    "attr": "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
+                    "attr": "Esri"
                 }
             }
-            
             base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
             selected_tiles = base_map_options[base_map_name]
         
         with col_map:
-            # Centrar mapa
+            # Centrar
             if gdf_filtered is not None and not gdf_filtered.empty:
                 valid_locs = gdf_filtered.dropna(subset=['latitude', 'longitude'])
-                if not valid_locs.empty:
-                    lat_center = valid_locs['latitude'].mean()
-                    lon_center = valid_locs['longitude'].mean()
-                else:
-                    lat_center, lon_center = 6.2, -75.5
+                lat_center = valid_locs['latitude'].mean() if not valid_locs.empty else 6.2
+                lon_center = valid_locs['longitude'].mean() if not valid_locs.empty else -75.5
             else:
                 lat_center, lon_center = 6.2, -75.5
             
-            # Crear mapa pasando 'attr' explícitamente para evitar ValueError
-            m = folium.Map(
-                location=[lat_center, lon_center], 
-                zoom_start=9, 
-                tiles=selected_tiles["tiles"], 
-                attr=selected_tiles["attr"]
-            )
+            m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=selected_tiles["tiles"], attr=selected_tiles["attr"])
             
-            # --- CAPAS GEOMÉTRICAS (BLINDADAS) ---
+            # Capas (Blindadas)
             try:
-                # Municipios
                 if show_munis and not gdf_municipios.empty:
-                    cols = ['geometry']
-                    tooltip = None
-                    if 'nombre' in gdf_municipios.columns:
-                        cols.append('nombre')
-                        tooltip = folium.GeoJsonTooltip(fields=['nombre'])
-                    
-                    g_mun = gdf_municipios[cols].copy()
-                    if 'nombre' in g_mun.columns:
-                        g_mun['nombre'] = g_mun['nombre'].fillna('Sin Nombre').astype(str)
-                    
-                    g_mun['geometry'] = g_mun.geometry.simplify(0.001)
-                    folium.GeoJson(
-                        g_mun, name="Municipios", 
-                        style_function=lambda x: {'color': 'gray', 'weight': 1, 'fillOpacity': 0.05}, 
-                        tooltip=tooltip
-                    ).add_to(m)
-
-                # Subcuencas
+                    g = gdf_municipios.copy(); g['geometry'] = g.geometry.simplify(0.001)
+                    folium.GeoJson(g, name="Municipios", style_function=lambda x:{'color':'gray','weight':1,'fillOpacity':0.05}).add_to(m)
                 if show_cuencas and not gdf_subcuencas.empty:
-                    cols = ['geometry']
-                    tooltip = None
-                    if 'nombre' in gdf_subcuencas.columns:
-                        cols.append('nombre')
-                        tooltip = folium.GeoJsonTooltip(fields=['nombre'])
-
-                    g_cuenca = gdf_subcuencas[cols].copy()
-                    if 'nombre' in g_cuenca.columns:
-                        g_cuenca['nombre'] = g_cuenca['nombre'].fillna('Sin Nombre').astype(str)
-
-                    g_cuenca['geometry'] = g_cuenca.geometry.simplify(0.001)
-                    folium.GeoJson(
-                        g_cuenca, name="Subcuencas", 
-                        style_function=lambda x: {'color': 'blue', 'weight': 2, 'fillOpacity': 0.0}, 
-                        tooltip=tooltip
-                    ).add_to(m)
-
-                # Predios
+                    g = gdf_subcuencas.copy(); g['geometry'] = g.geometry.simplify(0.001)
+                    folium.GeoJson(g, name="Subcuencas", style_function=lambda x:{'color':'blue','weight':2,'fillOpacity':0}).add_to(m)
                 if show_predios and gdf_predios is not None and not gdf_predios.empty:
-                    cols = ['geometry']
-                    tooltip = None
-                    if 'nombre' in gdf_predios.columns:
-                        cols.append('nombre')
-                        tooltip = folium.GeoJsonTooltip(fields=['nombre'])
+                    g = gdf_predios.copy(); g['geometry'] = g.geometry.simplify(0.0001)
+                    folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}).add_to(m)
+            except: pass
 
-                    g_pred = gdf_predios[cols].copy()
-                    if 'nombre' in g_pred.columns:
-                        g_pred['nombre'] = g_pred['nombre'].fillna('Sin Nombre').astype(str)
-
-                    g_pred['geometry'] = g_pred.geometry.simplify(0.0001)
-                    folium.GeoJson(
-                        g_pred, name="Predios", 
-                        style_function=lambda x: {'color': 'orange', 'weight': 2, 'fillOpacity': 0.2}, 
-                        tooltip=tooltip
-                    ).add_to(m)
-            except Exception as e:
-                st.warning(f"Advertencia cargando capas: {e}")
-
-            # Estaciones (Puntos)
-            if gdf_filtered is not None and not gdf_filtered.empty:
+            # Estaciones
+            if gdf_filtered is not None:
                 marker_cluster = MarkerCluster().add_to(m)
-                stations_to_plot = gdf_filtered.dropna(subset=['latitude', 'longitude'])
-                for _, row in stations_to_plot.iterrows():
-                    folium.Marker(
-                        [row['latitude'], row['longitude']], 
-                        tooltip=f"{row[Config.STATION_NAME_COL]}", 
-                        icon=folium.Icon(color="green", icon="cloud")
-                    ).add_to(marker_cluster)
+                for _, row in gdf_filtered.dropna(subset=['latitude', 'longitude']).iterrows():
+                    folium.Marker([row['latitude'], row['longitude']], tooltip=f"{row[Config.STATION_NAME_COL]}", icon=folium.Icon(color="green", icon="cloud")).add_to(marker_cluster)
             
             folium.LayerControl().add_to(m)
-            st_folium(m, width="100%", height=600)
+            
+            # RETORNO DEL MAPA INTERACTIVO (CRÍTICO PARA EL PUNTO INTELIGENTE)
+            map_data = st_folium(m, width="100%", height=600)
+
+    # --- LÓGICA DE PUNTO SELECCIONADO (RESTAURADA) ---
+    if map_data and map_data.get("last_clicked"):
+        clicked = map_data["last_clicked"]
+        clat, clon = clicked["lat"], clicked["lng"]
+        
+        st.markdown("---")
+        st.subheader(f"📍 Análisis de Punto Seleccionado ({clat:.4f}, {clon:.4f})")
+        
+        # Funciones auxiliares locales para análisis rápido
+        def analyze_point(lat, lon, df_l, gdf_s):
+            res = {'Ppt': 0, 'Alt': 1500, 'Zona': 'N/A'}
+            try:
+                # IDW Rápido de precipitación histórica
+                df_avg = df_l.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
+                df_locs = gdf_s.set_index(Config.STATION_NAME_COL)[['latitude', 'longitude']]
+                df_m = pd.concat([df_avg, df_locs], axis=1).dropna()
+                dist = np.sqrt((df_m['latitude']-lat)**2 + (df_m['longitude']-lon)**2).replace(0, 0.0001)
+                weights = 1/dist**2
+                res['Ppt'] = (df_m[Config.PRECIPITATION_COL]*weights).sum()/weights.sum()
+                
+                # Zona de Vida
+                res['Zona'] = classify_holdridge_point(res['Ppt'], res['Alt'])
+            except: pass
+            return res
+
+        with st.spinner("Analizando coordenadas..."):
+            p_data = analyze_point(clat, clon, df_long, gdf_filtered)
+            fc_data = get_weather_forecast_detailed(clat, clon)
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Ppt Histórica (Est.)", f"{p_data['Ppt']:.0f} mm/año")
+            c2.metric("Zona de Vida (Holdridge)", p_data['Zona'])
+            
+            if not fc_data.empty:
+                today = fc_data.iloc[0]
+                c3.metric("Pronóstico Hoy (Lluvia)", f"{today['Ppt. (mm)']} mm")
+                
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                fig.add_trace(go.Scatter(x=fc_data['Fecha'], y=fc_data['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
+                fig.add_trace(go.Bar(x=fc_data['Fecha'], y=fc_data['Ppt. (mm)'], name='Lluvia', marker_color='blue', opacity=0.5), secondary_y=True)
+                fig.update_layout(height=300, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True)
     
-    # --- PESTAÑA 2: DISPONIBILIDAD ---
+    # --- PESTAÑA 2: DISPONIBILIDAD (CORREGIDO KEY) ---
     with tab_avail:
         st.markdown("#### Cantidad de Datos por Estación")
         if df_long is not None and not df_long.empty and not gdf_filtered.empty:
-            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
-            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
-            counts = df_subset.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
-            counts.columns = ["Estación", "Registros"]
+            target = gdf_filtered[Config.STATION_NAME_COL].unique()
+            sub = df_long[df_long[Config.STATION_NAME_COL].isin(target)]
+            cnt = sub.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
+            cnt.columns = ["Estación", "Registros"]
             
-            sort_option = st.radio("Ordenar por:", ["Mayor a Menor", "Menor a Mayor", "Alfabético"], horizontal=True, key="sort_avail_dist")
-            if sort_option == "Mayor a Menor": counts = counts.sort_values("Registros", ascending=True)
-            elif sort_option == "Menor a Mayor": counts = counts.sort_values("Registros", ascending=False)
-            else: counts = counts.sort_values("Estación", ascending=False)
+            # Key única para evitar DuplicateWidgetID
+            sort_opt = st.radio("Ordenar:", ["Mayor a Menor", "Menor a Mayor", "Alfabético"], horizontal=True, key="sort_avail_unique_key_123")
             
-            fig = px.bar(counts, x="Registros", y="Estación", orientation='h', text="Registros", height=max(500, len(counts)*25))
-            fig.update_traces(marker_color='#1f77b4')
+            if "Mayor" in sort_opt: cnt = cnt.sort_values("Registros", ascending=True)
+            elif "Menor" in sort_opt: cnt = cnt.sort_values("Registros", ascending=False)
+            else: cnt = cnt.sort_values("Estación", ascending=False)
+            
+            fig = px.bar(cnt, x="Registros", y="Estación", orientation='h', height=max(500, len(cnt)*25))
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Seleccione estaciones para ver disponibilidad.")
 
-    # --- PESTAÑA 3: SERIES ANUALES (MATRIZ) ---
+    # --- PESTAÑA 3: MATRIZ ---
     with tab_matrix:
-        st.markdown("#### Series de Precipitación Anual por Estación (mm)")
-        if df_long is not None and not df_long.empty and not gdf_filtered.empty:
-            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
-            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
-            # Filtrar anual
-            df_anual_sub = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-            
-            df_pivot = df_anual_sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
-            st.dataframe(
-                df_pivot.style.format("{:.0f}", na_rep="0")
-                .background_gradient(cmap="viridis", axis=None, vmin=0, vmax=df_pivot.max().max())
-                .highlight_null(color='black'),
-                use_container_width=True, height=600
-            )
-        else:
-            st.warning("No hay datos para la matriz anual.")
-    
-    # --- PESTAÑA 2: DISPONIBILIDAD ---
-    with tab_avail:
-        st.markdown("#### Cantidad de Datos por Estación")
-        if df_long is not None and not df_long.empty and not gdf_filtered.empty:
-            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
-            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
-            counts = df_subset.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
-            counts.columns = ["Estación", "Registros"]
-            
-            sort_option = st.radio("Ordenar por:", ["Mayor a Menor", "Menor a Mayor", "Alfabético"], horizontal=True, key="sort_avail_dist")
-            if sort_option == "Mayor a Menor": counts = counts.sort_values("Registros", ascending=True)
-            elif sort_option == "Menor a Mayor": counts = counts.sort_values("Registros", ascending=False)
-            else: counts = counts.sort_values("Estación", ascending=False)
-            
-            fig = px.bar(counts, x="Registros", y="Estación", orientation='h', text="Registros", height=max(500, len(counts)*25))
-            fig.update_traces(marker_color='#1f77b4')
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Seleccione estaciones para ver disponibilidad.")
-
-    # --- PESTAÑA 3: SERIES ANUALES (MATRIZ) ---
-    with tab_matrix:
-        st.markdown("#### Series de Precipitación Anual por Estación (mm)")
-        if df_long is not None and not df_long.empty and not gdf_filtered.empty:
-            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
-            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
-            # Filtrar anual
-            df_anual_sub = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-            
-            df_pivot = df_anual_sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
-            st.dataframe(
-                df_pivot.style.format("{:.0f}", na_rep="0")
-                .background_gradient(cmap="viridis", axis=None, vmin=0, vmax=df_pivot.max().max())
-                .highlight_null(color='black'),
-                use_container_width=True, height=600
-            )
+        if df_long is not None:
+            target = gdf_filtered[Config.STATION_NAME_COL].unique()
+            sub = df_long[df_long[Config.STATION_NAME_COL].isin(target)]
+            piv = sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
+            st.dataframe(piv.style.background_gradient(cmap='viridis', axis=None).format("{:.0f}", na_rep="-"), use_container_width=True, height=600)            )
         else:
             st.warning("No hay datos para la matriz anual.")
             
@@ -2141,6 +2077,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
