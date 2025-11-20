@@ -412,28 +412,21 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
     st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
-    
-    # CSS para reducir tamaño de fuentes en métricas
-    st.markdown("""
-    <style>
-    div[data-testid="stMetricValue"] { font-size: 1.2rem !important; }
-    div[data-testid="stMetricLabel"] { font-size: 0.9rem !important; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
+    st.info("👆 **Haga clic en el mapa** o ingrese coordenadas manualmente para analizar un punto específico.")
 
-    st.info("👆 **Haga clic en el mapa** para identificar Municipio, Cuenca, Cobertura y Clima.")
-
+    # Gestión de estado del punto
     if 'selected_point' not in st.session_state: st.session_state.selected_point = None
 
     tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
     
+    # --- PESTAÑA 1: MAPA ---
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
         with col_ctrl:
             st.markdown("#### Configuración")
             with st.expander("📍 Ingresar Coordenadas", expanded=False):
-                in_lat = st.number_input("Latitud:", value=6.2, format="%.5f")
-                in_lon = st.number_input("Longitud:", value=-75.5, format="%.5f")
+                in_lat = st.number_input("Latitud:", value=6.2, format="%.5f", key="mlat")
+                in_lon = st.number_input("Longitud:", value=-75.5, format="%.5f", key="mlon")
                 if st.button("Analizar Coordenada"):
                     st.session_state.selected_point = {'lat': in_lat, 'lng': in_lon}
 
@@ -443,43 +436,77 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             show_predios = st.checkbox("Predios", value=False)
             
             base_map_options = {
-                "CartoDB Positron": {"tiles":"cartodbpositron", "attr":None},
-                "OpenStreetMap": {"tiles":"OpenStreetMap", "attr":None},
-                "Esri Satellite": {"tiles":"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", "attr":"Esri"}
+                "CartoDB Positron": {"tiles": "cartodbpositron", "attr": None},
+                "OpenStreetMap": {"tiles": "OpenStreetMap", "attr": None},
+                "Esri Satellite": {
+                    "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                    "attr": "Esri"
+                }
             }
             base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
             sel_tile = base_map_options[base_map_name]
         
         with col_map:
+            # Centrar Mapa
             if st.session_state.selected_point:
                 lat_c, lon_c, z = st.session_state.selected_point['lat'], st.session_state.selected_point['lng'], 11
             elif gdf_filtered is not None and not gdf_filtered.empty:
                 v = gdf_filtered.dropna(subset=['latitude'])
                 lat_c, lon_c, z = (v.latitude.mean(), v.longitude.mean(), 9) if not v.empty else (6.2, -75.5, 9)
-            else: lat_c, lon_c, z = 6.2, -75.5, 9
+            else:
+                lat_center, lon_center, z = 6.2, -75.5, 9
             
             m = folium.Map(location=[lat_c, lon_c], zoom_start=z, tiles=sel_tile["tiles"], attr=sel_tile["attr"])
             
-            try:
-                if show_munis and not gdf_municipios.empty:
-                    folium.GeoJson(gdf_municipios[['geometry', 'nombre']].simplify(0.001), name="Muni", style_function=lambda x:{'color':'gray','fillOpacity':0.05}, tooltip=folium.GeoJsonTooltip(['nombre'])).add_to(m)
-                if show_cuencas and not gdf_subcuencas.empty:
-                    folium.GeoJson(gdf_subcuencas[['geometry', 'nombre']].simplify(0.001), name="Cuencas", style_function=lambda x:{'color':'blue','weight':2,'fillOpacity':0}, tooltip=folium.GeoJsonTooltip(['nombre'])).add_to(m)
-                if show_predios and gdf_predios is not None:
-                    folium.GeoJson(gdf_predios[['geometry', 'nombre']].simplify(0.0001), name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}, tooltip=folium.GeoJsonTooltip(['nombre'])).add_to(m)
-            except: pass
+            # --- LÓGICA DE CAPAS SEGURA ---
+            # Función auxiliar para añadir capas sin romper la app
+            def add_layer_safe(gdf, name, color, weight):
+                if gdf is not None and not gdf.empty:
+                    try:
+                        # Simplificar geometría
+                        g = gdf.copy()
+                        g['geometry'] = g.geometry.simplify(0.001)
+                        
+                        # Verificar si existe la columna 'nombre' para el tooltip
+                        tooltip = None
+                        if 'nombre' in g.columns:
+                            # Asegurar que no haya nulos en el nombre
+                            g['nombre'] = g['nombre'].fillna('Sin Nombre').astype(str)
+                            tooltip = folium.GeoJsonTooltip(fields=['nombre'])
+                        
+                        folium.GeoJson(
+                            g, 
+                            name=name, 
+                            style_function=lambda x: {'color': color, 'weight': weight, 'fillOpacity': 0.1},
+                            tooltip=tooltip
+                        ).add_to(m)
+                    except Exception: pass
 
+            if show_munis: add_layer_safe(gdf_municipios, "Municipios", "gray", 1)
+            if show_cuencas: add_layer_safe(gdf_subcuencas, "Subcuencas", "blue", 2)
+            if show_predios: add_layer_safe(gdf_predios, "Predios", "orange", 2)
+
+            # Estaciones
             if gdf_filtered is not None:
-                mc = MarkerCluster().add_to(m)
-                for _, r in gdf_filtered.dropna(subset=['latitude']).iterrows():
-                    folium.Marker([r.latitude, r.longitude], tooltip=r[Config.STATION_NAME_COL], icon=folium.Icon(color="green", icon="cloud")).add_to(mc)
+                marker_cluster = MarkerCluster().add_to(m)
+                for _, row in gdf_filtered.dropna(subset=['latitude', 'longitude']).iterrows():
+                    folium.Marker(
+                        [row['latitude'], row['longitude']], 
+                        tooltip=f"{row[Config.STATION_NAME_COL]}", 
+                        icon=folium.Icon(color="green", icon="cloud")
+                    ).add_to(marker_cluster)
             
             if st.session_state.selected_point:
-                folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Selección", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
+                folium.Marker(
+                    [st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], 
+                    popup="Punto Seleccionado", 
+                    icon=folium.Icon(color="red", icon="info-sign")
+                ).add_to(m)
 
             folium.LayerControl().add_to(m)
-            map_data = st_folium(m, width="100%", height=500)
+            map_data = st_folium(m, width="100%", height=600)
 
+            # Captura de Clic
             if map_data and map_data.get("last_clicked"):
                 clicked = map_data["last_clicked"]
                 if st.session_state.selected_point is None or abs(clicked['lat'] - st.session_state.selected_point['lat']) > 0.0001:
@@ -492,35 +519,29 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
         st.markdown("---")
         st.subheader(f"📍 Análisis de Punto ({clat:.4f}, {clon:.4f})")
         
-        with st.spinner("Generando inteligencia de ubicación..."):
-            # Pasamos las capas para toponimia
+        with st.spinner("Analizando..."):
             p_data = analyze_point_data(clat, clon, df_long, gdf_filtered, gdf_municipios, gdf_subcuencas)
             fc = get_weather_forecast_detailed(clat, clon)
             
-            # CONTENEDOR DE RESULTADOS (FUENTE MÁS PEQUEÑA)
             c1, c2, c3, c4 = st.columns(4)
             c1.markdown(f"**Ubicación:**<br>{p_data['Municipio']}<br><span style='color:gray; font-size:0.8em'>{p_data['Cuenca']}</span>", unsafe_allow_html=True)
             c2.metric("Cobertura", p_data['Cobertura'])
             c3.metric("Zona de Vida", p_data['Zona_Vida'])
-            c4.metric("Ppt Histórica", f"{p_data['Ppt_Media']:.0f} mm")
+            c4.metric("Ppt Histórica", f"{p_data['Ppt_Media']:.0f} mm/año")
 
-            # Segunda Fila
             m1, m2, m3 = st.columns(3)
             m1.metric("Altitud", f"{p_data['Altitud']:.0f} m")
             t_val = p_data['Tendencia']
-            m2.metric("Tendencia", f"{t_val:+.1f} mm", delta_color="normal" if t_val>0 else "inverse")
-            if not fc.empty:
-                m3.metric("Lluvia Hoy", f"{fc.iloc[0]['Ppt. (mm)']} mm")
-            else:
-                m3.metric("Pronóstico", "No disp.")
+            m2.metric("Tendencia", f"{t_val:+.1f} mm/año", delta_color="normal" if t_val>0 else "inverse")
+            if not fc.empty: m3.metric("Lluvia Hoy", f"{fc.iloc[0]['Ppt. (mm)']} mm")
 
-        with st.expander("📜 Fuentes de Datos"):
-            st.markdown("""
-            * **Toponimia:** Capas vectoriales (Municipios/Cuencas) del proyecto.
-            * **Precipitación:** Interpolación IDW de estaciones cercanas (SIHCLI).
-            * **Cobertura:** Raster CORINE Land Cover 2018.
-            * **Pronóstico:** API Open-Meteo (Modelo ICON).
-            """)
+            if not fc.empty:
+                with st.expander("Ver Pronóstico 7 Días", expanded=True):
+                    fig = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig.add_trace(go.Scatter(x=fc['Fecha'], y=fc['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
+                    fig.add_trace(go.Bar(x=fc['Fecha'], y=fc['Ppt. (mm)'], name='Lluvia', marker_color='blue', opacity=0.5), secondary_y=True)
+                    fig.update_layout(height=300, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified", showlegend=True)
+                    st.plotly_chart(fig, use_container_width=True)
                     
     # --- PESTAÑA 2: DISPONIBILIDAD ---
     with tab_avail:
@@ -2137,6 +2158,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
