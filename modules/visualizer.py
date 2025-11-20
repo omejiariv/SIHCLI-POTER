@@ -10,6 +10,7 @@ from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from modules.config import Config
 from shapely.ops import unary_union
+from rasterio.mask import mask
 import pymannkendall as mk
 from statsmodels.tsa.seasonal import seasonal_decompose
 from prophet import Prophet
@@ -1187,34 +1188,150 @@ def display_station_table_tab(**kwargs):
         st.warning("No hay datos para mostrar.")
 
 def display_land_cover_analysis_tab(**kwargs):
-    st.info("Módulo de Coberturas.")
+    st.subheader("🌿 Análisis de Cobertura del Suelo y Escenarios")
+    
+    # 1. Verificar si hay una cuenca seleccionada en memoria
+    res_basin = st.session_state.get('basin_results')
+    
+    if not res_basin or not res_basin.get('ready') or 'gdf_union' not in res_basin:
+        st.info("ℹ️ Para usar este módulo, primero debe ir a **'Mapas Avanzados'**, seleccionar el modo **'Por Cuenca Específica'** y pulsar **'Analizar Cuenca'**.")
+        st.warning("No hay una cuenca activa en memoria.")
+        return
 
+    gdf_basin = res_basin['gdf_union']
+    basin_name = res_basin.get('names', 'Cuenca Seleccionada')
+    ppt_media_anual = res_basin['bal']['P'] # Traemos la lluvia calculada en la otra pestaña
 
+    st.markdown(f"Analizando cobertura para: **{basin_name}**")
+    st.caption(f"Precipitación Media de referencia: {ppt_media_anual:.0f} mm/año")
 
+    # 2. Cargar y Recortar Raster
+    try:
+        if not os.path.exists(Config.LAND_COVER_RASTER_PATH):
+            st.error(f"No se encontró el archivo raster: {Config.LAND_COVER_RASTER_PATH}")
+            return
 
+        with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
+            # Reproyectar cuenca al CRS del raster si es necesario
+            if gdf_basin.crs != src.crs:
+                gdf_basin_proj = gdf_basin.to_crs(src.crs)
+            else:
+                gdf_basin_proj = gdf_basin
 
+            # Recortar (Mask)
+            out_image, out_transform = mask(src, gdf_basin_proj.geometry, crop=True)
+            out_image = out_image[0] # Leer banda 1
 
+        # 3. Procesar Estadísticas de Cobertura
+        # Leyenda CORINE Land Cover (Simplificada para el ejemplo, ajustar según tu raster real)
+        legend = {
+            1: "Zonas Urbanas",
+            2: "Cultivos Transitorios",
+            3: "Pastos",
+            4: "Áreas Agrícolas Heterogéneas",
+            5: "Bosques",
+            6: "Vegetación Herbácea/Arbustiva",
+            7: "Áreas Abiertas/Sin Vegetación",
+            8: "Aguas Continentales"
+        }
+        
+        unique, counts = np.unique(out_image[out_image != src.nodata], return_counts=True)
+        total_pixels = counts.sum()
+        
+        # Calcular área en km2 (aprox según resolución del pixel, ej 25x25m)
+        # Mejor: Usar el área total de la cuenca y repartir por porcentaje
+        area_total_cuenca = res_basin['morph']['area_km2']
+        
+        data = []
+        for val, count in zip(unique, counts):
+            cat_name = legend.get(val, f"Clase {val}")
+            perc = (count / total_pixels) * 100
+            area_cat = (perc / 100) * area_total_cuenca
+            data.append({"ID": val, "Cobertura": cat_name, "Área (km²)": area_cat, "%": perc})
+            
+        df_cover = pd.DataFrame(data).sort_values("%", ascending=False)
 
+        # --- VISUALIZACIÓN ---
+        c1, c2 = st.columns([3, 2])
+        
+        with c1:
+            st.markdown("#### Distribución Actual")
+            st.dataframe(df_cover.style.format({"Área (km²)": "{:.2f}", "%": "{:.1f}%"}), use_container_width=True)
+            
+        with c2:
+            fig_pie = px.pie(df_cover, values='Área (km²)', names='Cobertura', title="Uso del Suelo", hole=0.4)
+            st.plotly_chart(fig_pie, use_container_width=True)
 
+        st.markdown("---")
 
+        # 4. MODELADOR DE ESCENARIOS (Números de Curva CN)
+        st.subheader("🎛️ Simulador de Escorrentía (Método SCS-CN)")
+        st.markdown("Ajuste los porcentajes de cobertura para ver cómo cambia la capacidad de retención de agua de la cuenca.")
 
+        with st.expander("Configuración de Números de Curva (CN)", expanded=False):
+            col_cn1, col_cn2, col_cn3 = st.columns(3)
+            cn_bosque = col_cn1.number_input("CN Bosque", 30, 100, 55)
+            cn_pasto = col_cn2.number_input("CN Pasto", 30, 100, 75)
+            cn_cultivo = col_cn3.number_input("CN Cultivo", 30, 100, 85)
+            cn_urbano = col_cn1.number_input("CN Urbano", 30, 100, 95)
+            cn_suelo = col_cn2.number_input("CN Suelo Desnudo", 30, 100, 90)
+        
+        st.write("Defina el **Escenario Futuro** (% del área de la cuenca):")
+        
+        # Sliders inteligentes (intentar sumar 100%)
+        s1, s2, s3 = st.columns(3)
+        p_bosque = s1.slider("% Bosque", 0, 100, 40)
+        p_pasto = s2.slider("% Pasto", 0, 100, 30)
+        p_cultivo = s3.slider("% Cultivo", 0, 100, 20)
+        
+        s4, s5, s6 = st.columns(3)
+        p_urbano = s4.slider("% Urbano", 0, 100, 5)
+        p_suelo = s5.slider("% Suelo Desnudo", 0, 100, 5)
+        
+        total_p = p_bosque + p_pasto + p_cultivo + p_urbano + p_suelo
+        
+        col_res_sim = st.container()
+        
+        if total_p != 100:
+            col_res_sim.warning(f"⚠️ La suma de porcentajes es {total_p}%. Debe ser 100%.")
+        else:
+            # CÁLCULO CN PONDERADO
+            cn_composite = (
+                (p_bosque * cn_bosque) + 
+                (p_pasto * cn_pasto) + 
+                (p_cultivo * cn_cultivo) + 
+                (p_urbano * cn_urbano) + 
+                (p_suelo * cn_suelo)
+            ) / 100
+            
+            # Estimación de Escorrentía (Método SCS anual simplificado)
+            # S = (25400 / CN) - 254  (en mm)
+            # Q = (P - 0.2S)^2 / (P + 0.8S)
+            
+            S = (25400 / cn_composite) - 254
+            
+            # Validación física P > 0.2S
+            if ppt_media_anual > 0.2 * S:
+                Q_escenario = ((ppt_media_anual - 0.2 * S)**2) / (ppt_media_anual + 0.8 * S)
+            else:
+                Q_escenario = 0
+            
+            vol_escenario = (Q_escenario * area_total_cuenca) / 1000 # Mm3
+            
+            # Mostrar Resultados
+            col_res_sim.success("Escenario Válido")
+            m1, m2, m3 = col_res_sim.columns(3)
+            m1.metric("CN Ponderado", f"{cn_composite:.1f}")
+            m2.metric("Escorrentía Estimada (Q)", f"{Q_escenario:.0f} mm/año")
+            m3.metric("Volumen Total", f"{vol_escenario:.2f} Mm³")
+            
+            # Comparación visual
+            fig_sim = go.Figure()
+            fig_sim.add_trace(go.Bar(y=['Escenario Actual', 'Escenario Simulado'], 
+                                     x=[res_basin['bal']['Q_mm'], Q_escenario], 
+                                     orientation='h', marker_color=['blue', 'green']))
+            fig_sim.update_layout(title="Comparación de Escorrentía (mm/año)", height=300)
+            col_res_sim.plotly_chart(fig_sim, use_container_width=True)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    except Exception as e:
+        st.error(f"Error procesando cobertura: {e}")
