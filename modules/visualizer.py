@@ -37,85 +37,98 @@ def display_current_filters(stations, regions, municipios, years):
         if len(stations) < 10:
             st.caption(f"Selección: {', '.join(stations)}")
 
-def analyze_point_data(lat, lon, df_long, gdf_stations):
+def analyze_point_data(lat, lon, df_long, gdf_stations, gdf_municipios, gdf_subcuencas):
     """
-    Genera un reporte completo para una coordenada arbitraria.
-    CORREGIDO: Ppt anual real y Leyenda de Coberturas completa.
+    Analiza un punto geográfico:
+    1. Toponimia (Municipio/Cuenca).
+    2. Datos Históricos (Interpolados).
+    3. Variables Ambientales (Raster).
     """
     results = {}
+    point_geom = Point(lon, lat) # Ojo: Shapely usa (lon, lat)
     
-    # 1. INTERPOLACIÓN DE LLUVIA (CORREGIDA: SUMA ANUAL)
+    # 1. CONTEXTO GEOGRÁFICO (TOPONIMIA)
+    results['Municipio'] = "Desconocido"
+    results['Cuenca'] = "Fuera de cuencas principales"
+    
     try:
-        # Calcular Distancias
+        # Buscar Municipio
+        if gdf_municipios is not None and not gdf_municipios.empty:
+            # Asumiendo CRS WGS84 (EPSG:4326)
+            matches = gdf_municipios[gdf_municipios.contains(point_geom)]
+            if not matches.empty:
+                results['Municipio'] = matches.iloc[0].get('nombre', 'Sin Nombre')
+        
+        # Buscar Cuenca Hidrográfica
+        if gdf_subcuencas is not None and not gdf_subcuencas.empty:
+            matches_c = gdf_subcuencas[gdf_subcuencas.contains(point_geom)]
+            if not matches_c.empty:
+                results['Cuenca'] = matches_c.iloc[0].get('nombre', 'Sin Nombre')
+    except Exception as e:
+        print(f"Error espacial: {e}")
+
+    # 2. INTERPOLACIÓN DE LLUVIA
+    try:
         df_locs = gdf_stations.set_index(Config.STATION_NAME_COL)[['latitude', 'longitude']].copy()
         df_locs['dist'] = np.sqrt((df_locs['latitude'] - lat)**2 + (df_locs['longitude'] - lon)**2)
-        nearest = df_locs.nsmallest(5, 'dist') # 5 vecinas
+        nearest = df_locs.nsmallest(5, 'dist')
         nearest['weights'] = 1 / (nearest['dist']**2).replace(0, 0.00001)
         
-        # Calcular Ppt ANUAL de las vecinas
-        # Paso A: Filtrar datos de las vecinas
+        # Ppt Anual
         df_vecinas = df_long[df_long[Config.STATION_NAME_COL].isin(nearest.index)]
-        
-        # Paso B: Sumar por año (Total Anual Real)
         annual_sums = df_vecinas.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-        
-        # Paso C: Promediar los años (Media Multianual en mm/año)
         avg_annual_ppt = annual_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
         
-        # Paso D: Interpolar
         df_calc = pd.concat([avg_annual_ppt, nearest['weights']], axis=1, join='inner')
-        ppt_est = (df_calc[Config.PRECIPITATION_COL] * df_calc['weights']).sum() / df_calc['weights'].sum()
+        results['Ppt_Media'] = (df_calc[Config.PRECIPITATION_COL] * df_calc['weights']).sum() / df_calc['weights'].sum()
         
-        results['Ppt_Media'] = ppt_est
-
-        # TENDENCIA (Pendiente de Sen Interpolada)
+        # Tendencia
         slopes = []
         for stn in nearest.index:
             df_st = df_long[df_long[Config.STATION_NAME_COL] == stn]
-            # Tendencia sobre totales anuales
             df_ann = df_st.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum()
             if len(df_ann) > 10:
                 try: slopes.append(mk.original_test(df_ann).slope)
                 except: slopes.append(0.0)
             else: slopes.append(0.0)
-        
         results['Tendencia'] = np.average(slopes, weights=nearest['weights'].values[:len(slopes)])
         
-    except Exception: 
+    except: 
         results['Ppt_Media'] = 0
         results['Tendencia'] = 0
 
-    # 2. ALTITUD (DEM)
+    # 3. RASTERS (ALTITUD Y COBERTURA)
+    results['Altitud'] = 1500 # Default
+    results['Cobertura'] = "No disponible" # Mensaje por defecto
+    
     try:
+        import rasterio
+        # Altitud
         if os.path.exists(Config.DEM_FILE_PATH):
-            import rasterio
             with rasterio.open(Config.DEM_FILE_PATH) as src:
-                vals = list(src.sample([(lon, lat)]))
-                alt = vals[0][0]
-                results['Altitud'] = alt if alt > -1000 else 1500
-        else: results['Altitud'] = 1500
-    except: results['Altitud'] = 1500
-
-    # 3. COBERTURA (LEYENDA COMPLETA)
-    try:
+                val = list(src.sample([(lon, lat)]))[0][0]
+                if val > -1000: results['Altitud'] = val
+        
+        # Cobertura
         if os.path.exists(Config.LAND_COVER_RASTER_PATH):
-            import rasterio
             with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
-                vals = list(src.sample([(lon, lat)]))
-                cov_id = int(vals[0][0])
+                val = list(src.sample([(lon, lat)]))[0][0]
                 
-                # LEYENDA CORINE COMPLETA
+                # Leyenda completa
                 legend = {
                     1: "Zonas Urbanas", 2: "Cultivos Transitorios", 3: "Pastos", 
                     4: "Áreas Agrícolas Heterogéneas", 5: "Bosques", 
                     6: "Vegetación Herbácea/Arbustiva", 7: "Áreas Abiertas", 
                     8: "Aguas Continentales", 9: "Bosque Fragmentado",
-                    10: "Vegetación Secundaria", 11: "Zonas Degradadas", 
-                    12: "Humedales"
+                    10: "Vegetación Secundaria", 11: "Zonas Degradadas", 12: "Humedales"
                 }
-                results['Cobertura'] = legend.get(cov_id, f"Clase {cov_id}")
-        else: results['Cobertura'] = "N/A"
-    except: results['Cobertura'] = "N/A"
+                # Si es nodata o 0
+                if val != src.nodata and val != 0:
+                    results['Cobertura'] = legend.get(int(val), f"Clase {val}")
+                else:
+                    results['Cobertura'] = "Fuera de rango / Sin Datos"
+    except Exception as e:
+        results['Cobertura'] = f"Error Raster ({str(e)})"
 
     # 4. ZONA DE VIDA
     results['Zona_Vida'] = classify_holdridge_point(results['Ppt_Media'], results['Altitud'])
@@ -398,21 +411,28 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
     st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
-    st.info("👆 **Haga clic en el mapa** o ingrese coordenadas manualmente para analizar un punto específico.")
+    
+    # CSS para reducir tamaño de fuentes en métricas
+    st.markdown("""
+    <style>
+    div[data-testid="stMetricValue"] { font-size: 1.2rem !important; }
+    div[data-testid="stMetricLabel"] { font-size: 0.9rem !important; font-weight: bold; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    if 'selected_point' not in st.session_state:
-        st.session_state.selected_point = None
+    st.info("👆 **Haga clic en el mapa** para identificar Municipio, Cuenca, Cobertura y Clima.")
+
+    if 'selected_point' not in st.session_state: st.session_state.selected_point = None
 
     tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
     
-    # --- MAPA ---
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
         with col_ctrl:
             st.markdown("#### Configuración")
             with st.expander("📍 Ingresar Coordenadas", expanded=False):
-                in_lat = st.number_input("Latitud:", value=6.2, format="%.5f", min_value=-90.0, max_value=90.0, key="mlat")
-                in_lon = st.number_input("Longitud:", value=-75.5, format="%.5f", min_value=-180.0, max_value=180.0, key="mlon")
+                in_lat = st.number_input("Latitud:", value=6.2, format="%.5f")
+                in_lon = st.number_input("Longitud:", value=-75.5, format="%.5f")
                 if st.button("Analizar Coordenada"):
                     st.session_state.selected_point = {'lat': in_lat, 'lng': in_lon}
 
@@ -420,37 +440,32 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             show_munis = st.checkbox("Municipios", value=True)
             show_cuencas = st.checkbox("Subcuencas", value=False)
             show_predios = st.checkbox("Predios", value=False)
-            base_map = st.selectbox("Mapa Base:", ["CartoDB Positron", "OpenStreetMap", "Esri Satellite"])
             
-            # Mapeo seguro de tiles
-            tiles_dict = {
+            base_map_options = {
                 "CartoDB Positron": {"tiles":"cartodbpositron", "attr":None},
                 "OpenStreetMap": {"tiles":"OpenStreetMap", "attr":None},
                 "Esri Satellite": {"tiles":"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", "attr":"Esri"}
             }
-            sel_tile = tiles_dict[base_map]
+            base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
+            sel_tile = base_map_options[base_map_name]
         
         with col_map:
-            # Centrar
             if st.session_state.selected_point:
-                lat_c, lon_c, z_start = st.session_state.selected_point['lat'], st.session_state.selected_point['lng'], 11
+                lat_c, lon_c, z = st.session_state.selected_point['lat'], st.session_state.selected_point['lng'], 11
             elif gdf_filtered is not None and not gdf_filtered.empty:
                 v = gdf_filtered.dropna(subset=['latitude'])
-                lat_c, lon_c, z_start = (v.latitude.mean(), v.longitude.mean(), 9) if not v.empty else (6.2, -75.5, 9)
-            else: lat_c, lon_c, z_start = 6.2, -75.5, 9
+                lat_c, lon_c, z = (v.latitude.mean(), v.longitude.mean(), 9) if not v.empty else (6.2, -75.5, 9)
+            else: lat_c, lon_c, z = 6.2, -75.5, 9
             
-            m = folium.Map(location=[lat_c, lon_c], zoom_start=z_start, tiles=sel_tile["tiles"], attr=sel_tile["attr"])
+            m = folium.Map(location=[lat_c, lon_c], zoom_start=z, tiles=sel_tile["tiles"], attr=sel_tile["attr"])
             
             try:
                 if show_munis and not gdf_municipios.empty:
-                    g = gdf_municipios.copy(); g['geometry'] = g.geometry.simplify(0.001)
-                    folium.GeoJson(g, name="Municipios", style_function=lambda x:{'color':'gray','weight':1,'fillOpacity':0.05}).add_to(m)
+                    folium.GeoJson(gdf_municipios[['geometry', 'nombre']].simplify(0.001), name="Muni", style_function=lambda x:{'color':'gray','fillOpacity':0.05}, tooltip=folium.GeoJsonTooltip(['nombre'])).add_to(m)
                 if show_cuencas and not gdf_subcuencas.empty:
-                    g = gdf_subcuencas.copy(); g['geometry'] = g.geometry.simplify(0.001)
-                    folium.GeoJson(g, name="Subcuencas", style_function=lambda x:{'color':'blue','weight':2,'fillOpacity':0}).add_to(m)
-                if show_predios and gdf_predios is not None and not gdf_predios.empty:
-                    g = gdf_predios.copy(); g['geometry'] = g.geometry.simplify(0.0001)
-                    folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}).add_to(m)
+                    folium.GeoJson(gdf_subcuencas[['geometry', 'nombre']].simplify(0.001), name="Cuencas", style_function=lambda x:{'color':'blue','weight':2,'fillOpacity':0}, tooltip=folium.GeoJsonTooltip(['nombre'])).add_to(m)
+                if show_predios and gdf_predios is not None:
+                    folium.GeoJson(gdf_predios[['geometry', 'nombre']].simplify(0.0001), name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}, tooltip=folium.GeoJsonTooltip(['nombre'])).add_to(m)
             except: pass
 
             if gdf_filtered is not None:
@@ -459,10 +474,10 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     folium.Marker([r.latitude, r.longitude], tooltip=r[Config.STATION_NAME_COL], icon=folium.Icon(color="green", icon="cloud")).add_to(mc)
             
             if st.session_state.selected_point:
-                folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Punto", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
+                folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Selección", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
 
             folium.LayerControl().add_to(m)
-            map_data = st_folium(m, width="100%", height=600)
+            map_data = st_folium(m, width="100%", height=500)
 
             if map_data and map_data.get("last_clicked"):
                 clicked = map_data["last_clicked"]
@@ -474,48 +489,37 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
     if st.session_state.selected_point:
         clat, clon = st.session_state.selected_point['lat'], st.session_state.selected_point['lng']
         st.markdown("---")
-        st.subheader(f"📍 Análisis de Punto Seleccionado ({clat:.4f}, {clon:.4f})")
+        st.subheader(f"📍 Análisis de Punto ({clat:.4f}, {clon:.4f})")
         
-        with st.spinner("Calculando..."):
-            # 1. Datos Estáticos
-            p_data = analyze_point_data(clat, clon, df_long, gdf_filtered)
-            # 2. Pronóstico
+        with st.spinner("Generando inteligencia de ubicación..."):
+            # Pasamos las capas para toponimia
+            p_data = analyze_point_data(clat, clon, df_long, gdf_filtered, gdf_municipios, gdf_subcuencas)
             fc = get_weather_forecast_detailed(clat, clon)
             
-            # VARIABLES ADICIONALES
-            rad_hoy = "N/A"; pres_hoy = "N/A"; wind_hoy = "N/A"; et_hoy = "N/A"
-            if not fc.empty:
-                today = fc.iloc[0]
-                rad_hoy = f"{today['Radiación SW (MJ/m²)']} MJ/m²"
-                pres_hoy = f"{today['Presión (hPa)']} hPa"
-                wind_hoy = f"{today['Viento Máx (km/h)']} km/h"
-                et_hoy = f"{today['ET₀ (mm)']} mm"
-
-            # FILA 1: Geografía y Clima Histórico
+            # CONTENEDOR DE RESULTADOS (FUENTE MÁS PEQUEÑA)
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Altitud", f"{p_data['Altitud']:.0f} m")
-            c2.metric("Ppt Histórica", f"{p_data['Ppt_Media']:.0f} mm/año")
-            t_val = p_data['Tendencia']
-            c3.metric("Tendencia", f"{t_val:+.1f} mm/año", delta_color="normal" if t_val>0 else "inverse")
-            c4.metric("Zona de Vida", p_data['Zona_Vida'])
-            
-            st.info(f"**Cobertura del Suelo:** {p_data['Cobertura']}")
-            
-            # FILA 2: Meteorología Hoy (Variables Adicionales)
-            st.markdown("##### 🌦️ Condiciones Meteorológicas Actuales (Estimadas)")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Radiación Solar", rad_hoy)
-            m2.metric("Presión Atm.", pres_hoy)
-            m3.metric("Viento Máx", wind_hoy)
-            m4.metric("Evapotranspiración (ET₀)", et_hoy)
+            c1.markdown(f"**Ubicación:**<br>{p_data['Municipio']}<br><span style='color:gray; font-size:0.8em'>{p_data['Cuenca']}</span>", unsafe_allow_html=True)
+            c2.metric("Cobertura", p_data['Cobertura'])
+            c3.metric("Zona de Vida", p_data['Zona_Vida'])
+            c4.metric("Ppt Histórica", f"{p_data['Ppt_Media']:.0f} mm")
 
+            # Segunda Fila
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Altitud", f"{p_data['Altitud']:.0f} m")
+            t_val = p_data['Tendencia']
+            m2.metric("Tendencia", f"{t_val:+.1f} mm", delta_color="normal" if t_val>0 else "inverse")
             if not fc.empty:
-                with st.expander("Ver Pronóstico 7 Días", expanded=True):
-                    fig = make_subplots(specs=[[{"secondary_y": True}]])
-                    fig.add_trace(go.Scatter(x=fc['Fecha'], y=fc['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
-                    fig.add_trace(go.Bar(x=fc['Fecha'], y=fc['Ppt. (mm)'], name='Lluvia', marker_color='blue', opacity=0.5), secondary_y=True)
-                    fig.update_layout(height=300, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified")
-                    st.plotly_chart(fig, use_container_width=True)
+                m3.metric("Lluvia Hoy", f"{fc.iloc[0]['Ppt. (mm)']} mm")
+            else:
+                m3.metric("Pronóstico", "No disp.")
+
+        with st.expander("📜 Fuentes de Datos"):
+            st.markdown("""
+            * **Toponimia:** Capas vectoriales (Municipios/Cuencas) del proyecto.
+            * **Precipitación:** Interpolación IDW de estaciones cercanas (SIHCLI).
+            * **Cobertura:** Raster CORINE Land Cover 2018.
+            * **Pronóstico:** API Open-Meteo (Modelo ICON).
+            """)
                     
     # --- PESTAÑA 2: DISPONIBILIDAD ---
     with tab_avail:
@@ -2132,6 +2136,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
