@@ -365,24 +365,45 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             show_munis = st.checkbox("Municipios", value=True)
             show_cuencas = st.checkbox("Subcuencas", value=False)
             show_predios = st.checkbox("Predios", value=False)
-            base_map = st.selectbox("Mapa Base:", ["CartoDB positron", "OpenStreetMap", "Stamen Terrain"])
+            
+            # --- CORRECCIÓN DEL MAPA BASE ---
+            # Definimos opciones seguras con sus atribuciones
+            base_map_options = {
+                "CartoDB Positron": {"tiles": "CartoDB positron", "attr": None}, # Atribución automática
+                "OpenStreetMap": {"tiles": "OpenStreetMap", "attr": None},       # Atribución automática
+                "Esri Satellite": {
+                    "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                    "attr": "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
+                }
+            }
+            
+            base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
+            selected_tiles = base_map_options[base_map_name]
         
         with col_map:
             # Centrar mapa
             if gdf_filtered is not None and not gdf_filtered.empty:
                 valid_locs = gdf_filtered.dropna(subset=['latitude', 'longitude'])
-                lat_center = valid_locs['latitude'].mean() if not valid_locs.empty else 6.2
-                lon_center = valid_locs['longitude'].mean() if not valid_locs.empty else -75.5
+                if not valid_locs.empty:
+                    lat_center = valid_locs['latitude'].mean()
+                    lon_center = valid_locs['longitude'].mean()
+                else:
+                    lat_center, lon_center = 6.2, -75.5
             else:
                 lat_center, lon_center = 6.2, -75.5
             
-            m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=base_map)
+            # Crear mapa pasando 'attr' explícitamente para evitar ValueError
+            m = folium.Map(
+                location=[lat_center, lon_center], 
+                zoom_start=9, 
+                tiles=selected_tiles["tiles"], 
+                attr=selected_tiles["attr"]
+            )
             
             # --- CAPAS GEOMÉTRICAS (BLINDADAS) ---
             try:
                 # Municipios
                 if show_munis and not gdf_municipios.empty:
-                    # Verificar si existe 'nombre'
                     cols = ['geometry']
                     tooltip = None
                     if 'nombre' in gdf_municipios.columns:
@@ -453,6 +474,45 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             
             folium.LayerControl().add_to(m)
             st_folium(m, width="100%", height=600)
+    
+    # --- PESTAÑA 2: DISPONIBILIDAD ---
+    with tab_avail:
+        st.markdown("#### Cantidad de Datos por Estación")
+        if df_long is not None and not df_long.empty and not gdf_filtered.empty:
+            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
+            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
+            counts = df_subset.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
+            counts.columns = ["Estación", "Registros"]
+            
+            sort_option = st.radio("Ordenar por:", ["Mayor a Menor", "Menor a Mayor", "Alfabético"], horizontal=True, key="sort_avail_dist")
+            if sort_option == "Mayor a Menor": counts = counts.sort_values("Registros", ascending=True)
+            elif sort_option == "Menor a Mayor": counts = counts.sort_values("Registros", ascending=False)
+            else: counts = counts.sort_values("Estación", ascending=False)
+            
+            fig = px.bar(counts, x="Registros", y="Estación", orientation='h', text="Registros", height=max(500, len(counts)*25))
+            fig.update_traces(marker_color='#1f77b4')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Seleccione estaciones para ver disponibilidad.")
+
+    # --- PESTAÑA 3: SERIES ANUALES (MATRIZ) ---
+    with tab_matrix:
+        st.markdown("#### Series de Precipitación Anual por Estación (mm)")
+        if df_long is not None and not df_long.empty and not gdf_filtered.empty:
+            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
+            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
+            # Filtrar anual
+            df_anual_sub = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+            
+            df_pivot = df_anual_sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
+            st.dataframe(
+                df_pivot.style.format("{:.0f}", na_rep="0")
+                .background_gradient(cmap="viridis", axis=None, vmin=0, vmax=df_pivot.max().max())
+                .highlight_null(color='black'),
+                use_container_width=True, height=600
+            )
+        else:
+            st.warning("No hay datos para la matriz anual.")
     
     # --- PESTAÑA 2: DISPONIBILIDAD ---
     with tab_avail:
@@ -2081,6 +2141,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
