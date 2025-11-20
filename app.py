@@ -150,6 +150,7 @@ def main():
         "🌊 ENSO",
         "🏜️ Sequía (SPI)",
         "🌍 Mapas Avanzados",
+        "🌿 Cobertura",
         "🌱 Zonas de Vida",
         "🌡️ Cambio Climático",
         "🛰️ Tiempo Real",
@@ -196,17 +197,19 @@ def main():
     with tabs[9]: # Sequía
         display_drought_analysis_tab(**display_args)
 
-    with tabs[10]: # Mapas Avanzados (Interpolación)
+    with tabs[10]: # Mapas Avanzados
         display_advanced_maps_tab(**display_args)
 
-    with tabs[11]: # Zonas de Vida
-        display_life_zones_tab(**display_args)
-        # display_land_cover_analysis_tab(**display_args) # Opcional si hay raster
+    with tabs[11]: # Cobertura
+        display_land_cover_analysis_tab(**display_args)
 
-    with tabs[12]: # Escenarios
+    with tabs[12]: # Zonas de Vida
+        display_life_zones_tab(**display_args)
+
+    with tabs[13]: # Escenarios
         display_climate_scenarios_tab(**display_args)
 
-    with tabs[13]: # Tiempo Real (Satélite/Pronóstico)
+    with tabs[14]: # Tiempo Real (Satélite/Pronóstico)
         st.subheader("Herramientas de Tiempo Real")
         sub1, sub2 = st.tabs(["Pronóstico 7 Días", "Satélite"])
         with sub1:
@@ -214,7 +217,7 @@ def main():
         with sub2:
             display_satellite_imagery_tab(gdf_filtered)
 
-    with tabs[14]: # Reporte PDF
+    with tabs[15]: # Reporte PDF
         st.header("Generar Reporte PDF")
         col_pdf_1, col_pdf_2 = st.columns([1, 3])
         with col_pdf_1:
@@ -243,3 +246,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
