@@ -768,7 +768,7 @@ def display_trends_and_forecast_tab(**kwargs):
                         z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:],
                         colorscale='RdBu', # Rojo=Negativo (Disminuye lluvia), Azul=Positivo (Aumenta)
                         colorbar=dict(title='Tendencia (mm/año)'),
-                        midpoint=0 # Centrar el blanco en 0 cambio
+                        zmid=0 # Centrar el blanco en 0 cambio
                     ))
                     fig.add_trace(go.Scatter(
                         x=df_trend.lon, y=df_trend.lat, mode='markers', 
@@ -1247,6 +1247,7 @@ def display_station_table_tab(**kwargs):
 
 def display_land_cover_analysis_tab(**kwargs):
     st.info("Módulo de Coberturas.")
+
 
 
 
