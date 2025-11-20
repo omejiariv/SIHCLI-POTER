@@ -26,6 +26,17 @@ from modules.analysis import generate_life_zone_raster
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
 
+def display_current_filters(stations, regions, municipios, years):
+    """Muestra un resumen colapsable de los filtros activos en toda la app."""
+    with st.expander("ℹ️ Resumen de Filtros Activos (Sidebar)", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(f"**Período:** {years[0]} - {years[1]}")
+        c2.markdown(f"**Regiones:** {', '.join(regions) if regions else 'Todas'}")
+        c3.markdown(f"**Municipios:** {', '.join(municipios) if municipios else 'Todos'}")
+        c4.markdown(f"**Estaciones:** {len(stations)} seleccionadas")
+        if len(stations) < 10:
+            st.caption(f"Selección: {', '.join(stations)}")
+
 def analyze_point_data(lat, lon, df_long, gdf_stations):
     """Genera un reporte completo para una coordenada arbitraria."""
     results = {}
@@ -355,12 +366,14 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
     st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
-    st.info("👆 **Haga clic en cualquier punto del mapa** para ver datos interpolados y pronósticos locales.")
     
-    tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
+    tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad de Datos", "📅 Series Anuales"])
     
-    # PESTAÑA 1: MAPA
+    # --- PESTAÑA 1: MAPA + PUNTO INTELIGENTE (TODO DENTRO) ---
     with tab_map:
+        # 1. Instrucción (Solo aquí)
+        st.info("👆 **Haga clic en cualquier punto del mapa** para ver datos interpolados y pronósticos locales.")
+        
         col_ctrl, col_map = st.columns([1, 3])
         with col_ctrl:
             st.markdown("#### Capas")
@@ -370,12 +383,17 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             
             base_map_options = {
                 "CartoDB Positron": {"tiles": "cartodbpositron", "attr": None},
-                "OpenStreetMap": {"tiles": "OpenStreetMap", "attr": None}
+                "OpenStreetMap": {"tiles": "OpenStreetMap", "attr": None},
+                "Esri Satellite": {
+                    "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                    "attr": "Esri"
+                }
             }
             base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
             selected_tiles = base_map_options[base_map_name]
         
         with col_map:
+            # Centrar
             if gdf_filtered is not None and not gdf_filtered.empty:
                 valid_locs = gdf_filtered.dropna(subset=['latitude', 'longitude'])
                 lat_center = valid_locs['latitude'].mean() if not valid_locs.empty else 6.2
@@ -385,18 +403,20 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             
             m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=selected_tiles["tiles"], attr=selected_tiles["attr"])
             
+            # Capas
             try:
                 if show_munis and not gdf_municipios.empty:
                     g = gdf_municipios.copy(); g['geometry'] = g.geometry.simplify(0.001)
-                    folium.GeoJson(g, name="Municipios", style_function=lambda x:{'color':'gray','weight':1,'fillOpacity':0.05}).add_to(m)
+                    folium.GeoJson(g, name="Municipios", style_function=lambda x:{'color':'gray','weight':1,'fillOpacity':0.05}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
                 if show_cuencas and not gdf_subcuencas.empty:
                     g = gdf_subcuencas.copy(); g['geometry'] = g.geometry.simplify(0.001)
-                    folium.GeoJson(g, name="Subcuencas", style_function=lambda x:{'color':'blue','weight':2,'fillOpacity':0}).add_to(m)
+                    folium.GeoJson(g, name="Subcuencas", style_function=lambda x:{'color':'blue','weight':2,'fillOpacity':0}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
                 if show_predios and gdf_predios is not None and not gdf_predios.empty:
                     g = gdf_predios.copy(); g['geometry'] = g.geometry.simplify(0.0001)
-                    folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}).add_to(m)
+                    folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
             except: pass
 
+            # Estaciones
             if gdf_filtered is not None:
                 marker_cluster = MarkerCluster().add_to(m)
                 for _, row in gdf_filtered.dropna(subset=['latitude', 'longitude']).iterrows():
@@ -405,64 +425,83 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             folium.LayerControl().add_to(m)
             map_data = st_folium(m, width="100%", height=600)
 
-    # --- LÓGICA DE PUNTO SELECCIONADO (Verificar que esté presente) ---
-    if 'map_data' in locals() and map_data and map_data.get("last_clicked"):
-        clicked = map_data["last_clicked"]
-        clat, clon = clicked["lat"], clicked["lng"]
-        
-        st.markdown("---")
-        st.subheader(f"📍 Análisis de Punto Seleccionado ({clat:.4f}, {clon:.4f})")
-        
-        with st.spinner("Analizando coordenadas..."):
-            # IDW Rápido
-            try:
-                df_avg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
-                # Unir para tener coords
-                gdf_s = gdf_filtered.set_index(Config.STATION_NAME_COL)
-                df_m = pd.concat([df_avg, gdf_s[['latitude', 'longitude']]], axis=1, join='inner').dropna()
-                dist = np.sqrt((df_m['latitude']-clat)**2 + (df_m['longitude']-clon)**2).replace(0, 0.0001)
-                weights = 1/dist**2
-                ppt_est = (df_m[Config.PRECIPITATION_COL]*weights).sum()/weights.sum()
-            except: ppt_est = 0
+        # --- RESULTADO DEL PUNTO (AHORA DENTRO DE LA PESTAÑA MAPA) ---
+        if map_data and map_data.get("last_clicked"):
+            clicked = map_data["last_clicked"]
+            clat, clon = clicked["lat"], clicked["lng"]
             
-            fc_data = get_weather_forecast_detailed(clat, clon)
+            st.markdown("---")
+            st.markdown(f"#### 📍 Análisis de Punto Seleccionado ({clat:.4f}, {clon:.4f})")
             
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Ppt Histórica Estimada", f"{ppt_est:.0f} mm/año")
-            c2.metric("Zona de Vida (Est.)", classify_holdridge_point(ppt_est, 1500)) # 1500m default si no hay DEM
-            
-            if not fc_data.empty:
-                td = fc_data.iloc[0]
-                c3.metric("Pronóstico Hoy", f"{td['Ppt. (mm)']} mm")
+            with st.spinner("Analizando coordenadas..."):
+                # Lógica IDW local
+                try:
+                    df_avg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
+                    gdf_s = gdf_filtered.set_index(Config.STATION_NAME_COL)
+                    # Usar solo estaciones con coordenadas válidas para la interpolación
+                    df_m = pd.concat([df_avg, gdf_s[['latitude', 'longitude']]], axis=1, join='inner').dropna()
+                    
+                    if not df_m.empty:
+                        dist = np.sqrt((df_m['latitude']-clat)**2 + (df_m['longitude']-clon)**2).replace(0, 0.0001)
+                        weights = 1/dist**2
+                        ppt_est = (df_m[Config.PRECIPITATION_COL]*weights).sum()/weights.sum()
+                    else: ppt_est = 0
+                except: ppt_est = 0
+                
+                # Pronóstico
+                fc_data = get_weather_forecast_detailed(clat, clon)
+                
+                # Mostrar resultados
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Ppt Histórica Estimada", f"{ppt_est:.0f} mm/año")
+                c2.metric("Zona de Vida (Est.)", classify_holdridge_point(ppt_est, 1500))
+                
+                if not fc_data.empty:
+                    today = fc_data.iloc[0]
+                    c3.metric("Pronóstico Hoy (Lluvia)", f"{today['Ppt. (mm)']} mm")
+                    
+                    # Gráfico mini
+                    fig = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig.add_trace(go.Scatter(x=fc_data['Fecha'], y=fc_data['T. Máx (°C)'], name='T Max', line=dict(color='red')), secondary_y=False)
+                    fig.add_trace(go.Bar(x=fc_data['Fecha'], y=fc_data['Ppt. (mm)'], name='Lluvia', marker_color='blue', opacity=0.5), secondary_y=True)
+                    fig.update_layout(height=250, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified", showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
 
-    # PESTAÑA 2: DISPONIBILIDAD
+    # --- PESTAÑA 2: DISPONIBILIDAD (SINCRONIZADA) ---
     with tab_avail:
-        if df_long is not None:
-            cnt = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
-            cnt.columns = ["Estación", "Registros"]
-            # Key única para evitar error de widget duplicado
-            sort = st.radio("Ordenar:", ["Alfabetico", "Mayor", "Menor"], horizontal=True, key="sort_avail_dist_tab")
-            if sort == "Mayor": cnt = cnt.sort_values("Registros", ascending=False)
-            elif sort == "Menor": cnt = cnt.sort_values("Registros")
+        st.markdown("#### Cantidad de Datos por Estación (Selección Actual)")
+        # Usamos gdf_filtered para asegurar que son LAS MISMAS del sidebar
+        if df_long is not None and not df_long.empty and not gdf_filtered.empty:
+            target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
+            df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
             
-            fig = px.bar(cnt, x="Registros", y="Estación", orientation='h', height=max(500, len(cnt)*25))
-            st.plotly_chart(fig, use_container_width=True)
+            if not df_subset.empty:
+                counts = df_subset.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
+                counts.columns = ["Estación", "Registros"]
+                
+                sort_opt = st.radio("Ordenar:", ["Mayor a Menor", "Menor a Mayor", "Alfabético"], horizontal=True, key="sort_avail_sync")
+                
+                if "Mayor" in sort_opt: counts = counts.sort_values("Registros", ascending=True)
+                elif "Menor" in sort_opt: counts = counts.sort_values("Registros", ascending=False)
+                else: counts = counts.sort_values("Estación", ascending=False)
+                
+                fig = px.bar(counts, x="Registros", y="Estación", orientation='h', height=max(500, len(counts)*25))
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Las estaciones seleccionadas no tienen datos de precipitación en el histórico.")
+        else:
+            st.info("Seleccione estaciones en el sidebar para ver su disponibilidad.")
 
-    # --- PESTAÑA 3: MATRIZ (CORREGIDA) ---
+    # --- PESTAÑA 3: MATRIZ ---
     with tab_matrix:
         if df_long is not None and not gdf_filtered.empty:
             target = gdf_filtered[Config.STATION_NAME_COL].unique()
             sub = df_long[df_long[Config.STATION_NAME_COL].isin(target)]
-            piv = sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
-            
-            # Esta era la línea rota. Aquí está completa:
-            st.dataframe(
-                piv.style.background_gradient(cmap='viridis', axis=None).format("{:.0f}", na_rep="-"), 
-                use_container_width=True, 
-                height=600
-            )
-        else:
-            st.warning("No hay datos para la matriz.")
+            if not sub.empty:
+                piv = sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
+                st.dataframe(piv.style.background_gradient(cmap='viridis', axis=None).format("{:.0f}", na_rep="-"), use_container_width=True, height=600)
+            else: st.warning("Sin datos para matriz.")
+        else: st.warning("No hay datos.")
             
 def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analysis, **kwargs):
     st.subheader("📊 Análisis Gráfico Detallado")
@@ -2052,6 +2091,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
