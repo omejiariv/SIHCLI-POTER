@@ -405,14 +405,15 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             folium.LayerControl().add_to(m)
             map_data = st_folium(m, width="100%", height=600)
 
-    # LÓGICA DE PUNTO INTELIGENTE (FUERA DE LAS PESTAÑAS)
-    if map_data and map_data.get("last_clicked"):
+    # --- LÓGICA DE PUNTO SELECCIONADO (Verificar que esté presente) ---
+    if 'map_data' in locals() and map_data and map_data.get("last_clicked"):
         clicked = map_data["last_clicked"]
         clat, clon = clicked["lat"], clicked["lng"]
+        
         st.markdown("---")
         st.subheader(f"📍 Análisis de Punto Seleccionado ({clat:.4f}, {clon:.4f})")
         
-        with st.spinner("Analizando..."):
+        with st.spinner("Analizando coordenadas..."):
             # IDW Rápido
             try:
                 df_avg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
@@ -2051,6 +2052,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
