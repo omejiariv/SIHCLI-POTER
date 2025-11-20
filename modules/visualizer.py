@@ -354,13 +354,10 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
             st.warning("Cargue datos para ver alertas históricas.")
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
-    st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
+    st.subheader("🗺️ Distribución Espacial y Capas")
+    tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad de Datos", "📅 Series Anuales"])
     
-    # Instrucciones
-    st.info("👆 **Haga clic en cualquier punto del mapa** para generar una 'Estación Virtual' con datos interpolados y pronósticos.")
-
-    tab_map, tab_avail = st.tabs(["Mapa Interactivo", "Disponibilidad de Datos"])
-    
+    # --- PESTAÑA 1: MAPA ---
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
         with col_ctrl:
@@ -371,152 +368,130 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             base_map = st.selectbox("Mapa Base:", ["CartoDB positron", "OpenStreetMap", "Stamen Terrain"])
         
         with col_map:
-            # Centrar
+            # Centrar mapa
             if gdf_filtered is not None and not gdf_filtered.empty:
-                lat_center = gdf_filtered.geometry.y.mean()
-                lon_center = gdf_filtered.geometry.x.mean()
+                valid_locs = gdf_filtered.dropna(subset=['latitude', 'longitude'])
+                lat_center = valid_locs['latitude'].mean() if not valid_locs.empty else 6.2
+                lon_center = valid_locs['longitude'].mean() if not valid_locs.empty else -75.5
             else:
                 lat_center, lon_center = 6.2, -75.5
-
+            
             m = folium.Map(location=[lat_center, lon_center], zoom_start=9, tiles=base_map)
             
-            # Capas
+            # --- CAPAS GEOMÉTRICAS (BLINDADAS) ---
             try:
+                # Municipios
                 if show_munis and not gdf_municipios.empty:
-                    folium.GeoJson(gdf_municipios[['geometry', 'nombre']].simplify(0.001), name="Municipios", style_function=lambda x:{'color':'gray','fillOpacity':0.05}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
-                if show_cuencas and not gdf_subcuencas.empty:
-                    folium.GeoJson(gdf_subcuencas[['geometry', 'nombre']].simplify(0.001), name="Subcuencas", style_function=lambda x:{'color':'blue','fillOpacity':0}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
-                if show_predios and gdf_predios is not None and not gdf_predios.empty:
-                    folium.GeoJson(gdf_predios[['geometry', 'nombre']].simplify(0.0001), name="Predios", style_function=lambda x:{'color':'orange','fillOpacity':0.2}, tooltip=folium.GeoJsonTooltip(fields=['nombre'])).add_to(m)
-            except: pass
+                    # Verificar si existe 'nombre'
+                    cols = ['geometry']
+                    tooltip = None
+                    if 'nombre' in gdf_municipios.columns:
+                        cols.append('nombre')
+                        tooltip = folium.GeoJsonTooltip(fields=['nombre'])
+                    
+                    g_mun = gdf_municipios[cols].copy()
+                    if 'nombre' in g_mun.columns:
+                        g_mun['nombre'] = g_mun['nombre'].fillna('Sin Nombre').astype(str)
+                    
+                    g_mun['geometry'] = g_mun.geometry.simplify(0.001)
+                    folium.GeoJson(
+                        g_mun, name="Municipios", 
+                        style_function=lambda x: {'color': 'gray', 'weight': 1, 'fillOpacity': 0.05}, 
+                        tooltip=tooltip
+                    ).add_to(m)
 
-            # Estaciones
-            if gdf_filtered is not None:
+                # Subcuencas
+                if show_cuencas and not gdf_subcuencas.empty:
+                    cols = ['geometry']
+                    tooltip = None
+                    if 'nombre' in gdf_subcuencas.columns:
+                        cols.append('nombre')
+                        tooltip = folium.GeoJsonTooltip(fields=['nombre'])
+
+                    g_cuenca = gdf_subcuencas[cols].copy()
+                    if 'nombre' in g_cuenca.columns:
+                        g_cuenca['nombre'] = g_cuenca['nombre'].fillna('Sin Nombre').astype(str)
+
+                    g_cuenca['geometry'] = g_cuenca.geometry.simplify(0.001)
+                    folium.GeoJson(
+                        g_cuenca, name="Subcuencas", 
+                        style_function=lambda x: {'color': 'blue', 'weight': 2, 'fillOpacity': 0.0}, 
+                        tooltip=tooltip
+                    ).add_to(m)
+
+                # Predios
+                if show_predios and gdf_predios is not None and not gdf_predios.empty:
+                    cols = ['geometry']
+                    tooltip = None
+                    if 'nombre' in gdf_predios.columns:
+                        cols.append('nombre')
+                        tooltip = folium.GeoJsonTooltip(fields=['nombre'])
+
+                    g_pred = gdf_predios[cols].copy()
+                    if 'nombre' in g_pred.columns:
+                        g_pred['nombre'] = g_pred['nombre'].fillna('Sin Nombre').astype(str)
+
+                    g_pred['geometry'] = g_pred.geometry.simplify(0.0001)
+                    folium.GeoJson(
+                        g_pred, name="Predios", 
+                        style_function=lambda x: {'color': 'orange', 'weight': 2, 'fillOpacity': 0.2}, 
+                        tooltip=tooltip
+                    ).add_to(m)
+            except Exception as e:
+                st.warning(f"Advertencia cargando capas: {e}")
+
+            # Estaciones (Puntos)
+            if gdf_filtered is not None and not gdf_filtered.empty:
                 marker_cluster = MarkerCluster().add_to(m)
-                for _, row in gdf_filtered.dropna(subset=['latitude', 'longitude']).iterrows():
+                stations_to_plot = gdf_filtered.dropna(subset=['latitude', 'longitude'])
+                for _, row in stations_to_plot.iterrows():
                     folium.Marker(
                         [row['latitude'], row['longitude']], 
-                        tooltip=f"{row[Config.STATION_NAME_COL]}",
+                        tooltip=f"{row[Config.STATION_NAME_COL]}", 
                         icon=folium.Icon(color="green", icon="cloud")
                     ).add_to(marker_cluster)
             
-            # --- CAPTURA DE CLIC ---
-            map_data = st_folium(m, width="100%", height=500)
-
-    # --- LÓGICA DE PUNTO SELECCIONADO ---
-    if map_data and map_data.get("last_clicked"):
-        clicked = map_data["last_clicked"]
-        clat, clon = clicked["lat"], clicked["lng"]
-        
-        st.markdown("---")
-        st.subheader(f"📍 Análisis de Estación Virtual ({clat:.4f}, {clon:.4f})")
-        
-        with st.spinner("Analizando punto..."):
-            # 1. Calcular datos estáticos
-            point_data = analyze_point_data(clat, clon, df_long, gdf_filtered)
-            
-            # 2. Obtener Pronóstico
-            fc_data = get_weather_forecast_detailed(clat, clon)
-            
-            # Visualización
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Altitud (DEM)", f"{point_data['Altitud']:.0f} m")
-            c2.metric("Ppt Histórica (Est.)", f"{point_data['Ppt_Media']:.0f} mm/año")
-            c3.metric("Zona de Vida", point_data['Zona_Vida'])
-            c4.metric("Cobertura", point_data['Cobertura'])
-            
-            if not fc_data.empty:
-                st.markdown("#### 🌦️ Pronóstico Meteorológico Local (7 días)")
-                today = fc_data.iloc[0]
-                k1, k2, k3 = st.columns(3)
-                k1.metric("Temp. Hoy (Max/Min)", f"{today['T. Máx (°C)']}/{today['T. Mín (°C)']} °C")
-                k2.metric("Lluvia Hoy", f"{today['Ppt. (mm)']} mm")
-                k3.metric("Viento", f"{today['Viento Máx (km/h)']} km/h")
-                
-                # Gráfico Climograma
-                fig = make_subplots(specs=[[{"secondary_y": True}]])
-                fig.add_trace(go.Scatter(x=fc_data['Fecha'], y=fc_data['T. Máx (°C)'], name='T Max', line=dict(color='red')), secondary_y=False)
-                fig.add_trace(go.Bar(x=fc_data['Fecha'], y=fc_data['Ppt. (mm)'], name='Lluvia', marker_color='blue', opacity=0.5), secondary_y=True)
-                fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0), hovermode="x unified")
-                st.plotly_chart(fig, use_container_width=True)
+            folium.LayerControl().add_to(m)
+            st_folium(m, width="100%", height=600)
     
-    # -------------------------------------------------------------------------
-    # PESTAÑA 2: DISPONIBILIDAD (CON ORDENAMIENTO)
-    # -------------------------------------------------------------------------
+    # --- PESTAÑA 2: DISPONIBILIDAD ---
     with tab_avail:
         st.markdown("#### Cantidad de Datos por Estación")
-        
         if df_long is not None and not df_long.empty and not gdf_filtered.empty:
-            # 1. Filtrar datos para las estaciones seleccionadas
             target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
             df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
-            
-            # 2. Contar
             counts = df_subset.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
             counts.columns = ["Estación", "Registros"]
             
-            # 3. Lógica de Ordenamiento
-            sort_option = st.radio(
-                "Ordenar por:", 
-                ["Mayor a Menor", "Menor a Mayor", "Alfabético"], 
-                horizontal=True,
-                key="sort_avail"
-            )
+            sort_option = st.radio("Ordenar por:", ["Mayor a Menor", "Menor a Mayor", "Alfabético"], horizontal=True, key="sort_avail_dist")
+            if sort_option == "Mayor a Menor": counts = counts.sort_values("Registros", ascending=True)
+            elif sort_option == "Menor a Mayor": counts = counts.sort_values("Registros", ascending=False)
+            else: counts = counts.sort_values("Estación", ascending=False)
             
-            if sort_option == "Mayor a Menor":
-                counts = counts.sort_values("Registros", ascending=True) # Ascendente para que en h-bar quede el mayor arriba
-            elif sort_option == "Menor a Mayor":
-                counts = counts.sort_values("Registros", ascending=False)
-            else:
-                counts = counts.sort_values("Estación", ascending=False) # Alfabético inverso para graficar de A-Z arriba-abajo
-            
-            # 4. Graficar
-            fig = px.bar(
-                counts, 
-                x="Registros", 
-                y="Estación", 
-                orientation='h', 
-                text="Registros",
-                height=max(500, len(counts) * 25) # Altura dinámica
-            )
+            fig = px.bar(counts, x="Registros", y="Estación", orientation='h', text="Registros", height=max(500, len(counts)*25))
             fig.update_traces(marker_color='#1f77b4')
-            fig.update_layout(xaxis_title="Número de Meses con Datos", yaxis_title="")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Seleccione estaciones para ver disponibilidad.")
 
-    # -------------------------------------------------------------------------
-    # PESTAÑA 3: SERIES ANUALES (MATRIZ DE CALOR) - NUEVA
-    # -------------------------------------------------------------------------
+    # --- PESTAÑA 3: SERIES ANUALES (MATRIZ) ---
     with tab_matrix:
         st.markdown("#### Series de Precipitación Anual por Estación (mm)")
-        st.info("Tabla cruzada de precipitación total anual. Los colores indican la intensidad (Oscuro = Menos lluvia, Claro/Amarillo = Más lluvia).")
-
         if df_long is not None and not df_long.empty and not gdf_filtered.empty:
-            # 1. Filtrar y Agrupar Anual
             target_stations = gdf_filtered[Config.STATION_NAME_COL].unique()
             df_subset = df_long[df_long[Config.STATION_NAME_COL].isin(target_stations)]
+            # Filtrar anual
+            df_anual_sub = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
             
-            # Pivote: Indice=Estación, Columnas=Año, Valor=Suma Precipitación
-            df_pivot = df_subset.pivot_table(
-                index=Config.STATION_NAME_COL, 
-                columns=Config.YEAR_COL, 
-                values=Config.PRECIPITATION_COL, 
-                aggfunc='sum'
-            )
-            
-            # 2. Estilizar como Heatmap (Gradiente)
-            # Usamos 'viridis' para simular el estilo de la imagen (morado -> amarillo)
+            df_pivot = df_anual_sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
             st.dataframe(
-                df_pivot.style
-                .format("{:.0f}", na_rep="0")
+                df_pivot.style.format("{:.0f}", na_rep="0")
                 .background_gradient(cmap="viridis", axis=None, vmin=0, vmax=df_pivot.max().max())
-                .highlight_null(color='black'), # Nulos/Ceros oscuros
-                use_container_width=True,
-                height=600
+                .highlight_null(color='black'),
+                use_container_width=True, height=600
             )
         else:
-            st.warning("No hay datos para generar la matriz anual.")
+            st.warning("No hay datos para la matriz anual.")
             
 def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analysis, **kwargs):
     st.subheader("📊 Análisis Gráfico Detallado")
@@ -2106,6 +2081,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
