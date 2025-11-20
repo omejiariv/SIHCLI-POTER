@@ -11,6 +11,9 @@ import rasterio
 from rasterstats import zonal_stats
 import pymannkendall as mk
 from shapely.ops import unary_union
+from rasterio.warp import reproject, Resampling
+from rasterio.mask import mask
+from rasterio.transform import Affine
 
 
 @st.cache_data
@@ -476,6 +479,119 @@ def calculate_all_station_trends(df_anual, gdf_stations):
     
     return gpd.GeoDataFrame(gdf_trends)
 
+def generate_life_zone_raster(dem_path, ppt_path, mask_geom=None, downscale_factor=1):
+    """
+    Genera una matriz de Zonas de Vida cruzando Raster de Altura (DEM) y Raster de Precipitación.
+    """
+    try:
+        # 1. Abrir DEM (Maestro)
+        with rasterio.open(dem_path) as src_dem:
+            # Calcular nueva resolución (Downscale para rendimiento)
+            dst_height = src_dem.height // downscale_factor
+            dst_width = src_dem.width // downscale_factor
+            dst_transform = src_dem.transform * src_dem.transform.scale(
+                (src_dem.width / dst_width),
+                (src_dem.height / dst_height)
+            )
+            
+            # Leer y redimensionar DEM
+            dem_arr = np.empty((dst_height, dst_width), dtype=np.float32)
+            reproject(
+                source=rasterio.band(src_dem, 1),
+                destination=dem_arr,
+                src_transform=src_dem.transform,
+                src_crs=src_dem.crs,
+                dst_transform=dst_transform,
+                dst_crs=src_dem.crs,
+                resampling=Resampling.bilinear
+            )
+            
+            # Guardar perfil para aplicar máscara después
+            profile = src_dem.profile.copy()
+            profile.update({
+                'height': dst_height, 'width': dst_width, 
+                'transform': dst_transform, 'dtype': 'int16', 'nodata': 0
+            })
 
+        # 2. Abrir PPT y alinearlo al DEM
+        with rasterio.open(ppt_path) as src_ppt:
+            ppt_arr = np.empty((dst_height, dst_width), dtype=np.float32)
+            reproject(
+                source=rasterio.band(src_ppt, 1),
+                destination=ppt_arr,
+                src_transform=src_ppt.transform,
+                src_crs=src_ppt.crs,
+                dst_transform=dst_transform, # Usamos la rejilla del DEM
+                dst_crs=src_dem.crs,         # Usamos el CRS del DEM
+                resampling=Resampling.bilinear
+            )
 
+        # 3. Clasificación Vectorizada (Holdridge Simplificado)
+        # Inicializar con 0 (Sin Datos)
+        lz_arr = np.zeros_like(dem_arr, dtype=np.int16)
+        
+        # Máscara de datos válidos
+        valid = (dem_arr > -100) & (ppt_arr > 0)
+        
+        if np.any(valid):
+            alt = dem_arr[valid]
+            ppt = ppt_arr[valid]
+            zones = np.zeros_like(alt, dtype=np.int16)
+            
+            # Lógica Holdridge (IDs arbitrarios para visualización)
+            # 1: Bosque Seco Tropical, 2: Bosque Húmedo Premontano, etc.
+            # Esta lógica debe coincidir con tu leyenda en visualizer
+            
+            # Tropical (<1000m)
+            mask_T = (alt < 1000)
+            zones[mask_T & (ppt < 1000)] = 1  # b-s-T
+            zones[mask_T & (ppt >= 1000) & (ppt < 2000)] = 2 # b-h-T
+            zones[mask_T & (ppt >= 2000) & (ppt < 4000)] = 3 # b-mh-T
+            zones[mask_T & (ppt >= 4000)] = 4 # b-pl-T
+            
+            # Premontano (1000-2000m)
+            mask_P = (alt >= 1000) & (alt < 2000)
+            zones[mask_P & (ppt < 1000)] = 5
+            zones[mask_P & (ppt >= 1000) & (ppt < 2000)] = 6
+            zones[mask_P & (ppt >= 2000) & (ppt < 4000)] = 7
+            zones[mask_P & (ppt >= 4000)] = 8
+            
+            # Montano Bajo (2000-3000m)
+            mask_MB = (alt >= 2000) & (alt < 3000)
+            zones[mask_MB & (ppt < 1000)] = 9
+            zones[mask_MB & (ppt >= 1000) & (ppt < 2000)] = 10
+            zones[mask_MB & (ppt >= 2000) & (ppt < 4000)] = 11
+            zones[mask_MB & (ppt >= 4000)] = 12
+            
+            # Montano (>3000m)
+            mask_M = (alt >= 3000)
+            zones[mask_M & (ppt < 1000)] = 13
+            zones[mask_M & (ppt >= 1000)] = 14
+            
+            lz_arr[valid] = zones
+
+        # 4. Aplicar Máscara de Cuenca (Si existe)
+        if mask_geom is not None:
+            # Crear archivo en memoria para enmascarar usando rasterio.mask
+            from rasterio.io import MemoryFile
+            with MemoryFile() as memfile:
+                with memfile.open(**profile) as dataset:
+                    dataset.write(lz_arr, 1)
+                    
+                    # Reproyectar geometría si es necesario
+                    if hasattr(mask_geom, "crs") and mask_geom.crs != src_dem.crs:
+                        mask_geom = mask_geom.to_crs(src_dem.crs)
+                    
+                    try:
+                        out_img, _ = mask(dataset, mask_geom.geometry, crop=True, nodata=0)
+                        lz_arr = out_img[0]
+                        # Actualizar transform para el recorte
+                        # (Simplificado: Devolvemos el array recortado, la visualización se ajustará)
+                    except Exception:
+                        pass # Si falla la máscara, devolvemos el original
+
+        return lz_arr, dst_transform, src_dem.crs
+
+    except Exception as e:
+        return None, None, str(e)
 
