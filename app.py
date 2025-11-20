@@ -247,20 +247,26 @@ def main():
 if __name__ == "__main__":
     main()
 
-# CSS para separar pestañas (añadir margen a los botones)
+# --- Estilos CSS para separar pestañas ---
 st.markdown("""
 <style>
-    /* Estilo para los botones de las pestañas principales */
-    .stTabs [data-baseweb="tab-list"] button {
-        margin-right: 8px; /* Espacio a la derecha */
-        padding-left: 15px; /* Más padding para que el contenido no se pegue al borde */
-        padding-right: 15px;
+    /* Separación entre botones de pestañas */
+    div[data-baseweb="tab-list"] {
+        gap: 8px;
     }
-    /* Estilo para los botones de las sub-pestañas */
-    .stTabs [data-baseweb="tab-panel"] .stTabs [data-baseweb="tab-list"] button {
-        margin-right: 5px; /* Espacio un poco menor para sub-pestañas */
-        padding-left: 10px;
-        padding-right: 10px;
+    /* Estilo opcional para que parezcan botones individuales */
+    div[data-baseweb="tab"] {
+        background-color: #f0f2f6;
+        border-radius: 4px 4px 0 0;
+        padding-left: 16px;
+        padding-right: 16px;
+        border: 1px solid #e0e0e0;
+        border-bottom: none;
+    }
+    /* Pestaña activa */
+    div[aria-selected="true"] {
+        background-color: white;
+        border-top: 2px solid #1f77b4;
     }
 </style>
 """, unsafe_allow_html=True)
