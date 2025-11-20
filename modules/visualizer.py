@@ -1657,13 +1657,13 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
     
     if not selected_station: return
 
-    # 2. Pestañas Internas
-    tab_idx, tab_freq, tab_perc = st.tabs([
+    # 2. Definición de Pestañas (AQUÍ ESTABA EL ERROR)
+    tab1, tab2, tab3 = st.tabs([
         "Índices Estandarizados (SPI/SPEI)", 
         "Frecuencia de Máximos (Gumbel)", 
-        "Umbrales y Percentiles"
+        "Umbrales Percentiles"
     ])
-
+    
     # -------------------------------------------------------------------------
     # SUB-PESTAÑA 1: SPI / SPEI (Lo que ya teníamos)
     # -------------------------------------------------------------------------
@@ -2096,6 +2096,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
