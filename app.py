@@ -247,3 +247,20 @@ def main():
 if __name__ == "__main__":
     main()
 
+# CSS para separar pestañas (añadir margen a los botones)
+st.markdown("""
+<style>
+    /* Estilo para los botones de las pestañas principales */
+    .stTabs [data-baseweb="tab-list"] button {
+        margin-right: 8px; /* Espacio a la derecha */
+        padding-left: 15px; /* Más padding para que el contenido no se pegue al borde */
+        padding-right: 15px;
+    }
+    /* Estilo para los botones de las sub-pestañas */
+    .stTabs [data-baseweb="tab-panel"] .stTabs [data-baseweb="tab-list"] button {
+        margin-right: 5px; /* Espacio un poco menor para sub-pestañas */
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
