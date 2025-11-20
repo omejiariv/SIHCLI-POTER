@@ -1,6 +1,7 @@
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pandas as pd
 import geopandas as gpd
 import numpy as np
@@ -25,24 +26,43 @@ from modules.analysis import generate_life_zone_raster
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
 
-def get_weather_forecast_simple(lat, lon):
+def get_weather_forecast_detailed(lat, lon):
+    """
+    Obtiene pronóstico detallado de Open-Meteo con 9 variables agrometeorológicas.
+    """
     try:
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
-            "latitude": lat, "longitude": lon,
-            "daily": ["temperature_2m_max", "temperature_2m_min", "precipitation_sum"],
+            "latitude": lat,
+            "longitude": lon,
+            "daily": [
+                "temperature_2m_max", "temperature_2m_min", "precipitation_sum",
+                "relative_humidity_2m_mean", "surface_pressure_mean",
+                "et0_fao_evapotranspiration", "shortwave_radiation_sum", "wind_speed_10m_max"
+            ],
             "timezone": "auto"
         }
         response = requests.get(url, params=params, timeout=5)
-        data = response.json().get('daily', {})
-        if not data: return pd.DataFrame()
-        return pd.DataFrame({
-            'Fecha': data.get('time', []),
-            'Temp. Máx (°C)': data.get('temperature_2m_max', []),
-            'Temp. Mín (°C)': data.get('temperature_2m_min', []),
-            'Lluvia (mm)': data.get('precipitation_sum', [])
+        data = response.json()
+        
+        daily = data.get('daily', {})
+        if not daily: return pd.DataFrame()
+
+        # Crear DataFrame
+        df = pd.DataFrame({
+            'Fecha': pd.to_datetime(daily.get('time', [])),
+            'T. Máx (°C)': daily.get('temperature_2m_max', []),
+            'T. Mín (°C)': daily.get('temperature_2m_min', []),
+            'Ppt. (mm)': daily.get('precipitation_sum', []),
+            'HR Media (%)': daily.get('relative_humidity_2m_mean', []),
+            'Presión (hPa)': daily.get('surface_pressure_mean', []),
+            'ET₀ (mm)': daily.get('et0_fao_evapotranspiration', []),
+            'Radiación SW (MJ/m²)': daily.get('shortwave_radiation_sum', []),
+            'Viento Máx (km/h)': daily.get('wind_speed_10m_max', [])
         })
-    except: return pd.DataFrame()
+        return df
+    except Exception:
+        return pd.DataFrame()
         
 def create_enso_chart(enso_data):
     """
@@ -147,16 +167,138 @@ def display_welcome_tab():
     st.info("Sistema de Información Hidroclimática Integrada")
     st.markdown(Config.WELCOME_TEXT)
 
-def display_alerts_tab(df_long, **kwargs):
-    st.subheader("🚨 Monitor de Alertas")
-    if df_long is not None and not df_long.empty:
-        umbral = st.slider("Umbral de Lluvia Mensual (mm)", 100, 1000, 300)
-        alertas = df_long[df_long[Config.PRECIPITATION_COL] > umbral]
-        st.metric("Eventos Extremos Detectados", len(alertas))
-        if not alertas.empty:
-            st.dataframe(alertas.sort_values(Config.PRECIPITATION_COL, ascending=False).head(50), use_container_width=True)
-    else:
-        st.warning("No hay datos para alertas.")
+# 2. NUEVA PESTAÑA UNIFICADA: MONITOREO Y TIEMPO REAL
+# -----------------------------------------------------------------------------
+
+def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
+    st.header("🚨 Centro de Monitoreo y Tiempo Real")
+    st.info("Tablero unificado para la detección de eventos extremos históricos y pronóstico operativo a corto plazo.")
+
+    # Pestañas Internas
+    tab_forecast, tab_sat, tab_alerts = st.tabs([
+        "🌦️ Pronóstico Semanal Detallado", 
+        "🛰️ Satélite en Vivo", 
+        "📊 Monitor de Alertas Históricas"
+    ])
+
+    # --- SUB-PESTAÑA 1: PRONÓSTICO SEMANAL POTENCIADO ---
+    with tab_forecast:
+        if gdf_filtered is None or gdf_filtered.empty:
+            st.warning("Seleccione estaciones en el sidebar.")
+        else:
+            # Selector de estación
+            stations_list = sorted(gdf_filtered[Config.STATION_NAME_COL].unique())
+            sel_station = st.selectbox("Consultar Pronóstico para:", stations_list)
+            
+            if sel_station:
+                # Obtener coords
+                st_data = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == sel_station].iloc[0]
+                lat, lon = st_data['latitude'], st_data['longitude']
+                
+                with st.spinner(f"Conectando con satélites para {sel_station}..."):
+                    df_fc = get_weather_forecast_detailed(lat, lon)
+                
+                if not df_fc.empty:
+                    # A. TARJETAS DE RESUMEN (HOY)
+                    today = df_fc.iloc[0]
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("🌡️ Temp. Máx/Mín", f"{today['T. Máx (°C)']} / {today['T. Mín (°C)']} °C")
+                    c2.metric("💧 Lluvia Hoy", f"{today['Ppt. (mm)']} mm")
+                    c3.metric("💨 Viento Máx", f"{today['Viento Máx (km/h)']} km/h")
+                    c4.metric("☀️ Radiación", f"{today['Radiación SW (MJ/m²)']} MJ/m²")
+                    
+                    st.markdown("---")
+
+                    # B. GRÁFICOS INTERACTIVOS (DASHBOARD)
+                    
+                    # 1. Climograma (Temp + Lluvia)
+                    fig_main = make_subplots(specs=[[{"secondary_y": True}]])
+                    # Rango Temperatura
+                    fig_main.add_trace(go.Scatter(
+                        x=df_fc['Fecha'], y=df_fc['T. Máx (°C)'], name='Máxima',
+                        line=dict(color='#ff7f0e', width=2), mode='lines+markers'
+                    ), secondary_y=False)
+                    fig_main.add_trace(go.Scatter(
+                        x=df_fc['Fecha'], y=df_fc['T. Mín (°C)'], name='Mínima',
+                        line=dict(color='#1f77b4', width=2), mode='lines+markers',
+                        fill='tonexty', fillcolor='rgba(31, 119, 180, 0.1)'
+                    ), secondary_y=False)
+                    # Barras Lluvia
+                    fig_main.add_trace(go.Bar(
+                        x=df_fc['Fecha'], y=df_fc['Ppt. (mm)'], name='Lluvia',
+                        marker_color='rgba(44, 160, 44, 0.6)'
+                    ), secondary_y=True)
+                    
+                    fig_main.update_layout(title="Climograma Semanal", height=450, hovermode="x unified", legend=dict(orientation="h", y=1.1))
+                    fig_main.update_yaxes(title_text="Temperatura (°C)", secondary_y=False)
+                    fig_main.update_yaxes(title_text="Precipitación (mm)", secondary_y=True, showgrid=False)
+                    st.plotly_chart(fig_main, use_container_width=True)
+                    
+                    # 2. Paneles Secundarios
+                    c_g1, c_g2 = st.columns(2)
+                    
+                    with c_g1:
+                        # Atmósfera (HR + Presión)
+                        fig_atm = make_subplots(specs=[[{"secondary_y": True}]])
+                        fig_atm.add_trace(go.Scatter(x=df_fc['Fecha'], y=df_fc['HR Media (%)'], name='Humedad', line=dict(color='teal')), secondary_y=False)
+                        fig_atm.add_trace(go.Scatter(x=df_fc['Fecha'], y=df_fc['Presión (hPa)'], name='Presión', line=dict(color='purple', dash='dot')), secondary_y=True)
+                        fig_atm.update_layout(title="Atmósfera", height=350, legend=dict(orientation="h"))
+                        fig_atm.update_yaxes(title_text="Humedad (%)", secondary_y=False)
+                        fig_atm.update_yaxes(title_text="Presión (hPa)", secondary_y=True, showgrid=False)
+                        st.plotly_chart(fig_atm, use_container_width=True)
+                        
+                    with c_g2:
+                        # Energía y Agua (Radiación + ET0)
+                        fig_nrg = make_subplots(specs=[[{"secondary_y": True}]])
+                        fig_nrg.add_trace(go.Bar(x=df_fc['Fecha'], y=df_fc['Radiación SW (MJ/m²)'], name='Radiación', marker_color='gold'), secondary_y=False)
+                        fig_nrg.add_trace(go.Scatter(x=df_fc['Fecha'], y=df_fc['ET₀ (mm)'], name='Evapotranspiración', line=dict(color='green')), secondary_y=True)
+                        fig_nrg.update_layout(title="Ciclo Energético", height=350, legend=dict(orientation="h"))
+                        fig_nrg.update_yaxes(title_text="Rad (MJ/m²)", secondary_y=False)
+                        fig_nrg.update_yaxes(title_text="ET₀ (mm)", secondary_y=True, showgrid=False)
+                        st.plotly_chart(fig_nrg, use_container_width=True)
+
+                    # C. TABLA DE DATOS
+                    with st.expander("📋 Ver Tabla de Datos Completa", expanded=False):
+                        df_table = df_fc.copy()
+                        df_table['Fecha'] = df_table['Fecha'].dt.strftime('%Y-%m-%d')
+                        st.dataframe(df_table, use_container_width=True)
+
+                else:
+                    st.error("Error al obtener datos de Open-Meteo.")
+
+    # --- SUB-PESTAÑA 2: SATÉLITE (LO QUE YA TENÍAMOS) ---
+    with tab_sat:
+        st.markdown("#### Imágenes Satelitales en Tiempo Real")
+        wms_url = "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?"
+        try:
+            m = folium.Map(location=[6.2, -75.5], zoom_start=6)
+            folium.raster_layers.WmsTileLayer(
+                url=wms_url, layers='xc04', fmt='image/png', name='Infrarrojo GOES',
+                attr='IEM/NOAA', transparent=True, overlay=True
+            ).add_to(m)
+            st_folium(m, height=600, width="100%")
+        except: st.error("Error cargando capa satelital.")
+
+    # --- SUB-PESTAÑA 3: ALERTAS HISTÓRICAS (LO QUE ERA LA PESTAÑA 1 ANTES) ---
+    with tab_alerts:
+        if df_long is not None and not df_long.empty:
+            umbral = st.slider("Umbral de Lluvia Mensual para Alerta (mm):", 100, 1000, 300)
+            alertas = df_long[df_long[Config.PRECIPITATION_COL] > umbral]
+            
+            kpi1, kpi2 = st.columns(2)
+            kpi1.metric("Eventos Extremos Históricos", len(alertas))
+            kpi2.metric("% del Total de Registros", f"{(len(alertas)/len(df_long)*100):.1f}%")
+            
+            if not alertas.empty:
+                top_st = alertas[Config.STATION_NAME_COL].value_counts().head(10).reset_index()
+                top_st.columns = ["Estación", "Eventos"]
+                fig_a = px.bar(top_st, x="Eventos", y="Estación", orientation='h', title="Estaciones con más eventos extremos", color="Eventos", color_continuous_scale='Reds')
+                st.plotly_chart(fig_a, use_container_width=True)
+                
+                st.markdown("##### Registro de Alertas")
+                st.dataframe(alertas.sort_values(Config.PRECIPITATION_COL, ascending=False).head(100), use_container_width=True)
+        else:
+            st.warning("Cargue datos para ver alertas históricas.")
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
     st.subheader("🗺️ Distribución Espacial y Datos Históricos")
@@ -1882,6 +2024,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
