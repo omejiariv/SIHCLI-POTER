@@ -12,11 +12,16 @@ def create_sidebar(gdf_stations, df_long):
         st.title("Panel de Control")
 
         # --- 1. Filtros de Procesamiento ---
-        with st.expander("🛠️ Procesamiento y Limpieza", expanded=False):
+        with st.expander("🛠️ Procesamiento y Calidad", expanded=False):
             run_complete_series = st.checkbox("Interpolación (Rellenar huecos)", value=False)
             exclude_nulls = st.checkbox("Excluir datos nulos (NaN)", value=False)
             exclude_zeros = st.checkbox("Excluir valores cero (0)", value=False)
             
+            st.markdown("---")
+            # NUEVO: FILTRO POR % DE DATOS
+            min_pct = st.slider("Mínimo % de Datos Disponibles:", 0, 100, 0, 
+                                help="Filtra estaciones que tengan al menos este porcentaje de datos en el histórico.")
+
             if run_complete_series != st.session_state.get('apply_interpolation'):
                 st.session_state['apply_interpolation'] = run_complete_series
                 st.rerun()
@@ -26,12 +31,28 @@ def create_sidebar(gdf_stations, df_long):
         # --- 2. Filtros de Ubicación ---
         st.markdown("### 📍 Filtros de Ubicación")
         
+        # Lógica de Filtrado Inicial (Antes de mostrar opciones)
+        # 1. Calcular porcentajes si es necesario
+        valid_stations_by_pct = gdf_stations[Config.STATION_NAME_COL].unique()
+        
+        if min_pct > 0 and df_long is not None:
+            # Contar registros por estación
+            counts = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count()
+            # Calcular total teórico de meses (aprox)
+            n_years = df_long[Config.YEAR_COL].max() - df_long[Config.YEAR_COL].min() + 1
+            total_months = n_years * 12
+            # Calcular %
+            pcts = (counts / total_months) * 100
+            # Filtrar
+            valid_stations_by_pct = pcts[pcts >= min_pct].index.tolist()
+
         # A. Filtro por Altitud
         altitude_options = ["Todos", "0-500", "500-1000", "1000-1500", "1500-2000", "2000-3000", ">3000"]
         selected_alt_range = st.selectbox("Filtrar por Altitud (m):", altitude_options)
         
-        # Aplicar filtro base
-        gdf_filtered_base = gdf_stations.copy()
+        # Aplicar filtros base (Geografía + Calidad)
+        gdf_filtered_base = gdf_stations[gdf_stations[Config.STATION_NAME_COL].isin(valid_stations_by_pct)].copy()
+        
         if selected_alt_range != "Todos":
             if ">" in selected_alt_range:
                 min_alt = int(selected_alt_range.replace(">", ""))
@@ -58,26 +79,24 @@ def create_sidebar(gdf_stations, df_long):
         if selected_municipios:
             gdf_filtered_base = gdf_filtered_base[gdf_filtered_base[Config.MUNICIPALITY_COL].isin(selected_municipios)]
 
-        # D. Selección de Estaciones (CON TU REQUERIMIENTO)
+        # D. Selección de Estaciones
         available_stations = sorted(gdf_filtered_base[Config.STATION_NAME_COL].astype(str).unique())
         
         with st.expander(f"Estaciones ({len(available_stations)} disp.)", expanded=True):
-            # Opción Seleccionar Todas
             select_all = st.checkbox("Seleccionar Todas las visibles")
             
             if select_all:
                 default_stations = available_stations
                 if len(available_stations) > 50:
-                    st.caption("⚠️ Seleccionar muchas estaciones puede lentificar los gráficos.")
+                    st.caption("⚠️ Muchas estaciones seleccionadas. El rendimiento puede variar.")
             else:
-                # Default inteligente: primeras 3
                 default_stations = available_stations[:3] if len(available_stations) > 0 else []
 
             stations_for_analysis = st.multiselect(
                 "Seleccione específicas:",
                 options=available_stations,
                 default=default_stations,
-                label_visibility="collapsed" # Ocultar label repetido
+                label_visibility="collapsed"
             )
 
         gdf_final = gdf_stations[gdf_stations[Config.STATION_NAME_COL].isin(stations_for_analysis)]
@@ -94,7 +113,6 @@ def create_sidebar(gdf_stations, df_long):
             year_range = (2000, 2024)
 
         # FILTRADO MAESTRO
-        # Usamos copy() para evitar SettingWithCopyWarning
         mask = (
             (df_long[Config.YEAR_COL] >= year_range[0]) & 
             (df_long[Config.YEAR_COL] <= year_range[1]) &
