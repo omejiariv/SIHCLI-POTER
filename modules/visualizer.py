@@ -471,6 +471,17 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         st.plotly_chart(fig_h, use_container_width=True)
                     with ch2:
                         st.latex(hypso['equation'])
+                        
+                        # NUEVA NOTA EXPLICATIVA
+                        with st.expander("ℹ️ Explicación de la Ecuación"):
+                            st.markdown("""
+                            Esta ecuación polinómica modela la relación entre la **Elevación (H)** y el **% de Área Acumulada (A)**.
+                            
+                            * **H**: Altitud en metros sobre el nivel del mar.
+                            * **A**: Porcentaje del área de la cuenca que está *por encima* de esa altitud (0-100).
+                            
+                            Los coeficientes indican la concavidad/convexidad de la cuenca, lo que influye en su respuesta hidrológica (erosión vs. sedimentación).
+                            """)
 
                 # 4. MAPA CONTEXTO
                 st.markdown("---")
@@ -1449,5 +1460,6 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
