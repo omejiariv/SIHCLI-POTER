@@ -44,7 +44,8 @@ class Config:
     # Archivos Raster (Necesarios para Zonas de Vida y Cobertura)
     # Asegúrate de que estos archivos existan en la carpeta 'data'
     LAND_COVER_RASTER_PATH = os.path.join(DATA_DIR, 'Cob25m_WGS84.tif')
-    DEM_FILE_PATH = os.path.join(DATA_DIR, 'DemAntioquiaWgs84.tif') # Opcional si usas morfometría vectorial
+    DEM_FILE_PATH = os.path.join(DATA_DIR, 'DemAntioquia_EPSG3116.tif') 
+    PRECIP_RASTER_PATH = os.path.join(DATA_DIR, 'PPAMAnt.tif')
     
     # --- TEXTOS ---
     WELCOME_TEXT = """
@@ -82,3 +83,4 @@ class Config:
         for k in keys:
             if k not in st.session_state:
                 st.session_state[k] = None
+
