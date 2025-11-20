@@ -6,6 +6,7 @@ import geopandas as gpd
 import numpy as np
 import folium
 import requests
+import os
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 from modules.config import Config
@@ -821,60 +822,165 @@ def display_stats_tab(**kwargs):
 
 def display_correlation_tab(**kwargs):
     st.subheader("🔗 Análisis de Correlación")
+    
+    # Recuperar datos
     df_monthly = kwargs.get('df_monthly_filtered')
     df_enso = kwargs.get('df_enso')
     
+    # Validaciones
     if df_monthly is None or df_monthly.empty:
-        st.warning("Faltan datos de precipitación.")
+        st.warning("Faltan datos de precipitación para el análisis.")
         return
-    if df_enso is None or df_enso.empty:
-        st.warning("Faltan datos ENSO.")
-        return
+    
+    # Crear pestañas
+    tab1, tab2 = st.tabs(["Fenómenos Globales (ENSO)", "Matriz entre Estaciones"])
 
-    try:
-        # Copias para no alterar originales
-        ppt_data = df_monthly.copy()
-        enso_data = df_enso.copy()
-        
-        # 1. Normalizar Fechas (CRÍTICO)
-        ppt_data[Config.DATE_COL] = pd.to_datetime(ppt_data[Config.DATE_COL], errors='coerce')
-        
-        # Parseo inteligente para ENSO (soporta 'ene-70')
-        if enso_data[Config.DATE_COL].dtype == 'object':
-            enso_data[Config.DATE_COL] = enso_data[Config.DATE_COL].astype(str).apply(parse_spanish_date)
+    # -------------------------------------------------------------------------
+    # PESTAÑA 1: RELACIÓN LLUVIA REGIONAL VS ENSO (ONI)
+    # -------------------------------------------------------------------------
+    with tab1:
+        if df_enso is None or df_enso.empty:
+            st.warning("No se han cargado datos del índice ENSO.")
         else:
-            enso_data[Config.DATE_COL] = pd.to_datetime(enso_data[Config.DATE_COL], errors='coerce')
-            
-        # Eliminar fechas inválidas
-        ppt_data = ppt_data.dropna(subset=[Config.DATE_COL])
-        enso_data = enso_data.dropna(subset=[Config.DATE_COL])
+            st.markdown("##### Correlación: Índice Oceánico El Niño (ONI) vs. Precipitación")
+            st.info("Analiza cómo la temperatura superficial del mar afecta la lluvia en la zona seleccionada.")
 
-        # 2. Agrupar y Unir
-        regional_ppt = ppt_data.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        
-        # El merge ahora funcionará porque ambas son datetime64[ns]
-        merged = pd.merge(regional_ppt, enso_data, on=Config.DATE_COL, how='inner')
-        
-        if len(merged) > 12:
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                if Config.ENSO_ONI_COL in merged.columns:
-                    fig = px.scatter(
-                        merged, x=Config.ENSO_ONI_COL, y=Config.PRECIPITATION_COL, trendline="ols",
-                        title="Lluvia vs. ONI", opacity=0.6
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+            try:
+                # 1. Preparar copias de datos para no alterar los originales
+                ppt_data = df_monthly.copy()
+                enso_data = df_enso.copy()
+                
+                # 2. Asegurar formato de fecha en Precipitación
+                ppt_data[Config.DATE_COL] = pd.to_datetime(ppt_data[Config.DATE_COL], errors='coerce')
+
+                # 3. Asegurar formato de fecha en ENSO (Manejo de 'ene-70', etc.)
+                # Usamos la función auxiliar parse_spanish_date si existe, o lógica inline
+                if enso_data[Config.DATE_COL].dtype == 'object':
+                    # Intento de conversión directa primero
+                    enso_data[Config.DATE_COL] = pd.to_datetime(enso_data[Config.DATE_COL], errors='coerce')
+                    
+                    # Si falló (quedaron NaTs), intentamos el parseo manual de español
+                    if enso_data[Config.DATE_COL].isnull().any():
+                        def manual_spanish_parse(x):
+                            if isinstance(x, str):
+                                x = x.lower().strip()
+                                trans = {
+                                    'ene': 'Jan', 'feb': 'Feb', 'mar': 'Mar', 'abr': 'Apr',
+                                    'may': 'May', 'jun': 'Jun', 'jul': 'Jul', 'ago': 'Aug',
+                                    'sep': 'Sep', 'oct': 'Oct', 'nov': 'Nov', 'dic': 'Dec'
+                                }
+                                for es, en in trans.items():
+                                    if es in x:
+                                        x = x.replace(es, en)
+                                        break
+                                try: return pd.to_datetime(x, format='%b-%y')
+                                except: return pd.NaT
+                            return x
+                        
+                        # Recargar columna original para parsear
+                        enso_original = df_enso.copy()
+                        enso_data[Config.DATE_COL] = enso_original[Config.DATE_COL].apply(manual_spanish_parse)
+
+                # 4. Limpiar fechas nulas en ambos lados
+                ppt_data = ppt_data.dropna(subset=[Config.DATE_COL])
+                enso_data = enso_data.dropna(subset=[Config.DATE_COL])
+
+                # 5. Calcular Promedio Regional de Lluvia (una sola serie de tiempo)
+                regional_ppt = ppt_data.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+                
+                # 6. Unir las dos series por fecha
+                merged = pd.merge(regional_ppt, enso_data, on=Config.DATE_COL, how='inner')
+                
+                if len(merged) > 12:
+                    c1, c2 = st.columns([2, 1])
+                    
+                    # Gráfico de Dispersión
+                    with c1:
+                        if Config.ENSO_ONI_COL in merged.columns:
+                            fig = px.scatter(
+                                merged, 
+                                x=Config.ENSO_ONI_COL, 
+                                y=Config.PRECIPITATION_COL, 
+                                trendline="ols",
+                                title="Dispersión: ONI vs Lluvia Regional",
+                                labels={
+                                    Config.ENSO_ONI_COL: "Anomalía ONI (°C)", 
+                                    Config.PRECIPITATION_COL: "Lluvia Mensual Promedio (mm)"
+                                },
+                                opacity=0.6
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning(f"No se encontró la columna '{Config.ENSO_ONI_COL}' en los datos ENSO.")
+
+                    # Métricas Estadísticas
+                    with c2:
+                        if Config.ENSO_ONI_COL in merged.columns:
+                            corr = merged[Config.ENSO_ONI_COL].corr(merged[Config.PRECIPITATION_COL])
+                            st.markdown("#### Estadísticas")
+                            st.metric("Correlación (Pearson)", f"{corr:.2f}")
+                            
+                            if abs(corr) > 0.5:
+                                st.success("Existe una **fuerte** correlación.")
+                            elif abs(corr) > 0.3:
+                                st.info("Existe una correlación **moderada**.")
+                            else:
+                                st.warning("La correlación es **débil** o inexistente.")
+                                
+                            st.caption(f"Basado en {len(merged)} meses coincidentes.")
                 else:
-                    st.warning("Columna ONI no encontrada en datos unidos.")
-            with col2:
-                if Config.ENSO_ONI_COL in merged.columns:
-                    corr = merged[Config.ENSO_ONI_COL].corr(merged[Config.PRECIPITATION_COL])
-                    st.metric("Correlación Pearson", f"{corr:.2f}")
-        else:
-            st.warning(f"Datos insuficientes tras la unión ({len(merged)} meses). Verifique rangos de fecha.")
+                    st.warning("No hay suficientes datos coincidentes en el tiempo entre la Lluvia y el ENSO para calcular la correlación.")
+            
+            except Exception as e:
+                st.error(f"Error en el cálculo de correlación ENSO: {e}")
 
-    except Exception as e:
-        st.error(f"Error en correlación: {e}")
+    # -------------------------------------------------------------------------
+    # PESTAÑA 2: MATRIZ DE CORRELACIÓN ENTRE ESTACIONES
+    # -------------------------------------------------------------------------
+    with tab2:
+        st.markdown("##### Matriz de Correlación de Precipitación entre Estaciones")
+        st.info("Muestra qué tan similar es el comportamiento de la lluvia entre las diferentes estaciones seleccionadas. (1.0 = Idéntico, 0.0 = Sin relación).")
+        
+        try:
+            # 1. Pivotear datos: Fechas en filas, Estaciones en columnas
+            # Esto crea una tabla donde cada columna es una estación
+            df_pivot = df_monthly.pivot_table(
+                index=Config.DATE_COL, 
+                columns=Config.STATION_NAME_COL, 
+                values=Config.PRECIPITATION_COL
+            )
+            
+            # Validar que haya suficientes datos
+            if df_pivot.shape[1] < 2:
+                st.warning("Se necesitan al menos 2 estaciones seleccionadas para calcular una matriz de correlación.")
+            else:
+                # 2. Calcular Matriz de Correlación (Pearson)
+                corr_matrix = df_pivot.corr()
+                
+                # 3. Heatmap Interactivo
+                fig_corr = px.imshow(
+                    corr_matrix,
+                    text_auto=".2f",
+                    aspect="auto",
+                    color_continuous_scale="RdBu", # Rojo a Azul
+                    zmin=-1, zmax=1,
+                    title="Mapa de Calor de Correlaciones"
+                )
+                fig_corr.update_layout(height=700)
+                st.plotly_chart(fig_corr, use_container_width=True)
+                
+                # 4. Botón de Descarga (CSV)
+                csv_corr = corr_matrix.to_csv().encode('utf-8')
+                st.download_button(
+                    label="📥 Descargar Matriz de Correlación (CSV)",
+                    data=csv_corr,
+                    file_name="matriz_correlacion_estaciones.csv",
+                    mime="text/csv",
+                    key="dl_corr_matrix"
+                )
+                
+        except Exception as e:
+            st.error(f"Error generando la matriz de correlación: {e}")
         
 def display_enso_tab(**kwargs):
     st.subheader("🌊 Fenómeno ENSO")
@@ -1188,39 +1294,38 @@ def display_station_table_tab(**kwargs):
         st.warning("No hay datos para mostrar.")
 
 def display_land_cover_analysis_tab(**kwargs):
-    st.subheader("🌿 Análisis de Cobertura del Suelo y Escenarios")
+    st.subheader("🌿 Análisis de Cobertura del Suelo")
     
-    # 1. Verificar si hay una cuenca seleccionada en memoria
+    # Verificar Cuenca
     res_basin = st.session_state.get('basin_results')
-    
     if not res_basin or not res_basin.get('ready') or 'gdf_union' not in res_basin:
-        st.info("ℹ️ Para usar este módulo, primero debe ir a **'Mapas Avanzados'**, seleccionar el modo **'Por Cuenca Específica'** y pulsar **'Analizar Cuenca'**.")
-        st.warning("No hay una cuenca activa en memoria.")
+        st.info("ℹ️ Primero analice una cuenca en la pestaña **'Mapas Avanzados'**.")
         return
 
     gdf_basin = res_basin['gdf_union']
-    basin_name = res_basin.get('names', 'Cuenca Seleccionada')
-    ppt_media_anual = res_basin['bal']['P'] # Traemos la lluvia calculada en la otra pestaña
+    basin_name = res_basin.get('names', 'Cuenca')
+    ppt_anual = res_basin['bal']['P']
 
-    st.markdown(f"Analizando cobertura para: **{basin_name}**")
-    st.caption(f"Precipitación Media de referencia: {ppt_media_anual:.0f} mm/año")
+    st.markdown(f"Cuenca: **{basin_name}** (Ppt ref: {ppt_anual:.0f} mm/año)")
 
-    # 2. Cargar y Recortar Raster
     try:
+        # CORRECCIÓN: Verificar existencia con os
         if not os.path.exists(Config.LAND_COVER_RASTER_PATH):
-            st.error(f"No se encontró el archivo raster: {Config.LAND_COVER_RASTER_PATH}")
+            st.error(f"⚠️ Archivo raster no encontrado en: `{Config.LAND_COVER_RASTER_PATH}`")
+            st.caption("Asegúrate de que el archivo .tif esté en la carpeta 'data' del repositorio.")
             return
 
-        with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
-            # Reproyectar cuenca al CRS del raster si es necesario
-            if gdf_basin.crs != src.crs:
-                gdf_basin_proj = gdf_basin.to_crs(src.crs)
-            else:
-                gdf_basin_proj = gdf_basin
+        import rasterio
+        from rasterio.mask import mask
 
-            # Recortar (Mask)
-            out_image, out_transform = mask(src, gdf_basin_proj.geometry, crop=True)
-            out_image = out_image[0] # Leer banda 1
+        with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
+            # Reproyectar si es necesario
+            if gdf_basin.crs != src.crs:
+                gdf_basin = gdf_basin.to_crs(src.crs)
+            
+            # Recortar
+            out_image, out_transform = mask(src, gdf_basin.geometry, crop=True)
+            data = out_image[0] # Leer banda 1
 
         # 3. Procesar Estadísticas de Cobertura
         # Leyenda CORINE Land Cover (Simplificada para el ejemplo, ajustar según tu raster real)
@@ -1335,4 +1440,5 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
