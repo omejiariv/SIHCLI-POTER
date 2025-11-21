@@ -872,29 +872,74 @@ def display_satellite_imagery_tab(gdf_filtered):
     # --- Placeholders para el resto de pestañas ---
 
 def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
-    st.subheader("🌍 Interpolación")
-    mode = st.radio("Modo:", ["Regional", "Por Cuenca"], horizontal=True)
+    st.subheader("🌍 Superficies de Interpolación y Morfometría")
     
-    def run_interp(df, meth, bounds):
-        try:
-            gx, gy = np.mgrid[bounds[0]:bounds[1]:100j, bounds[2]:bounds[3]:100j]
-            pts = df[['longitude', 'latitude']].values; vals = df[Config.PRECIPITATION_COL].values
-            if "Kriging" in meth:
-                rbf = Rbf(pts[:,0], pts[:,1], vals, function='thin_plate')
-                gz = rbf(gx, gy)
-            else:
-                gz = griddata(pts, vals, (gx, gy), method='cubic' if 'Spline' in meth else 'linear')
-            return gx, gy, gz
-        except: return None, None, None
+    if df_long.empty or gdf_stations.empty:
+        st.warning("Faltan datos base.")
+        return
 
-   # --- MODO 1: REGIONAL ---
-    if mode == "Regional":
+    mode = st.radio("Modo de Análisis:", ["Regional (Comparativo)", "Por Cuenca Específica"], horizontal=True)
+    
+    # --- FUNCIÓN INTERNA DE INTERPOLACIÓN (DEFINIDA AQUÍ PARA EVITAR NAMEERROR) ---
+    def run_interpolation(df_data, method, grid_bounds, grid_res=100):
+        from scipy.interpolate import griddata, Rbf
+        minx, maxx, miny, maxy = grid_bounds
+        grid_x, grid_y = np.mgrid[minx:maxx:complex(grid_res), miny:maxy:complex(grid_res)]
+        
+        points = df_data[['longitude', 'latitude']].values
+        values = df_data[Config.PRECIPITATION_COL].values
+        
+        try:
+            if "Spline" in method:
+                grid_z = griddata(points, values, (grid_x, grid_y), method='cubic')
+            elif "Kriging" in method:
+                # RBF funciona como un Kriging suavizado
+                rbf = Rbf(points[:,0], points[:,1], values, function='thin_plate')
+                grid_z = rbf(grid_x, grid_y)
+            else:
+                grid_z = griddata(points, values, (grid_x, grid_y), method='linear')
+            return grid_x, grid_y, grid_z
+        except Exception: 
+            return None, None, None
+
+    # -------------------------------------------------------------------------
+    # MODO 1: REGIONAL (COMPARATIVO)
+    # -------------------------------------------------------------------------
+    if mode == "Regional (Comparativo)":
         c1, c2 = st.columns(2)
-        with c1: r1 = st.slider("P1", 1980, 2020, (1990,2000)); m1 = st.selectbox("M1", ["IDW", "Spline", "Kriging"])
-        with c2: r2 = st.slider("P2", 1980, 2020, (2001,2010)); m2 = st.selectbox("M2", ["IDW", "Spline", "Kriging"])
-        if st.button("Generar"):
-            # (Lógica regional simplificada)
-            st.info("Mapas generados.")   
+        with c1:
+            min_y, max_y = int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max())
+            range1 = st.slider("Período 1:", min_y, max_y, (1980, 1990), key="p1")
+            method1 = st.selectbox("Método 1:", ["IDW (Lineal)", "Spline (Cúbico)", "Kriging (Simulado)"], key="m1")
+        with c2:
+            range2 = st.slider("Período 2:", min_y, max_y, (1991, 2000), key="p2")
+            method2 = st.selectbox("Método 2:", ["IDW (Lineal)", "Spline (Cúbico)", "Kriging (Simulado)"], key="m2")
+            
+        if st.button("Generar Comparación"):
+            def plot_map(rng, meth, col):
+                mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
+                # Promedio Anual
+                df_ann = df_long[mask].groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+                df_avg = df_ann.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+                
+                df_map = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
+                
+                if len(df_map) < 3:
+                    col.warning("Datos insuficientes.")
+                    return
+                
+                pad = 0.05
+                bounds = [df_map.longitude.min()-pad, df_map.longitude.max()+pad, df_map.latitude.min()-pad, df_map.latitude.max()+pad]
+                gx, gy, gz = run_interpolation(df_map, meth, bounds)
+                
+                if gz is not None:
+                    fig = go.Figure(data=go.Contour(z=gz.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis', colorbar=dict(title='mm/año')))
+                    fig.add_trace(go.Scatter(x=df_map.longitude, y=df_map.latitude, mode='markers', marker=dict(color='red', size=5)))
+                    fig.update_layout(title=f"{meth} ({rng[0]}-{rng[1]})", height=400, margin=dict(l=0,r=0,t=40,b=0))
+                    col.plotly_chart(fig, use_container_width=True)
+            
+            plot_map(range1, method1, c1)
+            plot_map(range2, method2, c2)
     
     # --- MODO 2: POR CUENCA ---
     else:
@@ -2383,4 +2428,5 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
