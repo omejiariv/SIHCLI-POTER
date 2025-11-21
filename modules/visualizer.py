@@ -21,7 +21,7 @@ from scipy import stats
 from scipy.interpolate import griddata
 from scipy.interpolate import Rbf
 from modules.analysis import estimate_temperature, calculate_water_balance_turc, classify_holdridge_point, calculate_morphometry, calculate_hydrological_balance, calculate_hypsometric_curve, calculate_spei
-from modules.analysis import generate_life_zone_raster
+from modules.analysis import generate_life_zone_raster, calculate_return_periods, calculate_percentiles_extremes, calculate_duration_curve
 
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
@@ -2287,6 +2287,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
