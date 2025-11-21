@@ -880,7 +880,9 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 
     mode = st.radio("Modo de Análisis:", ["Regional (Comparativo)", "Por Cuenca Específica"], horizontal=True)
     
+    # --- FUNCIÓN INTERNA DE INTERPOLACIÓN ---
     def run_interpolation(df_data, method, grid_bounds, grid_res=100):
+        from scipy.interpolate import griddata, Rbf
         minx, maxx, miny, maxy = grid_bounds
         grid_x, grid_y = np.mgrid[minx:maxx:complex(grid_res), miny:maxy:complex(grid_res)]
         points = df_data[['longitude', 'latitude']].values
@@ -928,7 +930,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             plot_map(range1, method1, c1)
             plot_map(range2, method2, c2)
 
-    # --- MODO 2: POR CUENCA (CON CURVA DE DURACIÓN) ---
+    # --- MODO 2: POR CUENCA ---
     else:
         if gdf_subcuencas.empty: st.warning("No hay capa de subcuencas."); return
         
@@ -944,60 +946,70 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 meth = st.selectbox("Método de Interpolación:", ["IDW (Lineal)", "Spline (Cúbico)", "Kriging (Simulado)"], key="meth_c")
 
             if st.button("Analizar Cuenca (Radio 50km)"):
-                with st.spinner("Procesando hidrología..."):
+                with st.spinner("Procesando datos hidrológicos..."):
                     # A. Geometría
                     subset = gdf_subcuencas[gdf_subcuencas['nombre'].isin(sel_cuencas)]
                     gdf_union = gpd.GeoDataFrame({'geometry': [subset.unary_union]}, crs=gdf_subcuencas.crs)
-                    buffer_geom = gdf_union.geometry.buffer(0.5).unary_union 
+                    
+                    # Buffer 50km (aprox 0.45 grados)
+                    buffer_geom = gdf_union.geometry.buffer(0.45).unary_union 
                     stations_in = gdf_stations[gdf_stations.geometry.intersects(buffer_geom)]
                     
                     if not stations_in.empty:
                         target_ids = stations_in[Config.STATION_NAME_COL].unique()
-                        mask_time = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
-                        mask_st = df_long[Config.STATION_NAME_COL].isin(target_ids)
+                        mask = (df_long[Config.STATION_NAME_COL].isin(target_ids)) & \
+                               (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
                         
-                        df_subset = df_long[mask_time & mask_st].copy()
-                        
-                        # 1. Datos para Mapa (Promedio Anual)
+                        df_subset = df_long[mask].copy()
+                        # Promedio Anual Real (mm/año)
                         df_ann = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
                         df_points = df_ann.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                         df_map_data = pd.merge(df_points, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
 
-                        # 2. Datos para Curva de Duración (Serie de Tiempo Mensual de la Cuenca)
-                        # Promedio de todas las estaciones del buffer para cada mes
-                        basin_series_monthly = df_subset.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
-
                         if len(df_map_data) >= 3:
-                            # Interpolación
                             bounds = buffer_geom.bounds
                             gx, gy, gz = run_interpolation(df_map_data, meth, [bounds[0], bounds[2], bounds[1], bounds[3]])
+                            ppt_media = np.nanmean(gz) if gz is not None else df_map_data[Config.PRECIPITATION_COL].mean()
                             
-                            ppt_media_anual = np.nanmean(gz) if gz is not None else df_map_data[Config.PRECIPITATION_COL].mean()
-                            
-                            # Balance
                             morph = calculate_morphometry(gdf_union)
-                            bal = calculate_hydrological_balance(ppt_media_anual, morph['alt_prom_m'], gdf_union)
+                            bal = calculate_hydrological_balance(ppt_media, morph['alt_prom_m'], gdf_union)
                             
-                            # CÁLCULO DE CURVA DE DURACIÓN (FDC)
-                            # Coeficiente de Escorrentía (C = Q / P)
-                            runoff_c = bal['Q_mm'] / bal['P'] if bal['P'] > 0 else 0
-                            fdc_df = calculate_duration_curve(basin_series_monthly, runoff_c, morph['area_km2'])
+                            # --- CÁLCULO CURVA DURACIÓN (FDC) ---
+                            # Serie temporal MENSUAL PROMEDIO de la cuenca (para ver variabilidad en el tiempo)
+                            basin_ts = df_subset.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
                             
+                            # CORRECCIÓN KEYERROR 'Q_mm': Usamos .get() para buscar 'Q' o 'Q_mm'
+                            q_val = bal.get('Q_mm', bal.get('Q', 0))
+                            p_val = bal.get('P', 0)
+                            
+                            # Coeficiente Escorrentía (C)
+                            runoff_c = q_val / p_val if p_val > 0 else 0.4 # Default 0.4 si falla
+                            
+                            try:
+                                # Importar aquí por seguridad si no está arriba
+                                from modules.analysis import calculate_duration_curve 
+                                fdc_df = calculate_duration_curve(basin_ts, runoff_c, morph['area_km2'])
+                            except:
+                                fdc_df = pd.DataFrame()
+
                             st.session_state['basin_results'] = {
                                 'ready': True, 'gx': gx, 'gy': gy, 'gz': gz, 'df': df_map_data,
                                 'morph': morph, 'bal': bal, 'geom': gdf_union, 'buffer': buffer_geom,
-                                'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}",
+                                'names': ", ".join(sel_cuencas), 'periodo': f"{rng[0]}-{rng[1]}", 'method': meth,
                                 'bounds': [bounds[0], bounds[2], bounds[1], bounds[3]],
-                                'fdc_data': fdc_df # Guardamos los datos de la curva
+                                'fdc_data': fdc_df
                             }
-                        else: st.error("Insuficientes estaciones (<3).")
+                        else: st.error("Insuficientes estaciones (<3) en radio de 50km.")
                     else: st.error("No hay estaciones cercanas.")
 
             # --- RENDERIZADO ---
             res = st.session_state.get('basin_results')
             if res and res.get('ready'):
-                # 1. Mapa
-                st.success(f"Análisis Hidrológico completado para: **{res['names']}**")
+                if 'bounds' not in res: st.warning("Datos antiguos. Recalcule."); return
+
+                st.success(f"Análisis **{res.get('periodo')}** completado.")
+
+                # 1. Mapa Interpolado
                 fig = go.Figure(data=go.Contour(
                     z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:],
                     colorscale='Viridis', colorbar=dict(title='mm/año'), contours=dict(coloring='heatmap', showlabels=True)
@@ -1005,77 +1017,99 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 fig.add_trace(go.Scatter(x=res['df'].longitude, y=res['df'].latitude, mode='markers', marker=dict(color='red', size=5), name="Estaciones"))
                 try:
                     poly = res['geom'].geometry.iloc[0]
-                    xs, ys = poly.exterior.xy if poly.geom_type == 'Polygon' else poly.geoms[0].exterior.xy
-                    fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='white', width=2), name='Cuenca'))
+                    if poly.geom_type == 'Polygon':
+                        x, y = poly.exterior.xy
+                        fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='white', width=2), name='Cuenca'))
                 except: pass
-                fig.update_layout(height=500, title="Superficie de Lluvia (mm/año)", xaxis_range=[res['bounds'][0], res['bounds'][1]], yaxis_range=[res['bounds'][2], res['bounds'][3]])
+                
+                fig.update_layout(height=600, title="Superficie de Lluvia (mm/año)", xaxis_range=[res['bounds'][0], res['bounds'][1]], yaxis_range=[res['bounds'][2], res['bounds'][3]])
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 2. Balance
+                # 2. Datos
                 st.markdown("---")
                 b = res['bal']
-                st.subheader("💧 Balance Hídrico y Caudales")
-                cols = st.columns(4)
-                cols[0].metric("Ppt Media", f"{b['P']:.0f} mm/año")
-                cols[1].metric("Escorrentía (Q)", f"{max(0, b['Q']):.0f} mm/año")
+                st.markdown(f"#### 💧 Balance Hídrico")
                 
-                # Caudal Medio en L/s (Calculado desde el volumen anual)
-                q_med_m3s = (b['Q_m3_año'] * 1e6) / (365*24*3600)
-                cols[2].metric("Caudal Medio", f"{q_med_m3s:.2f} m³/s")
-                cols[3].metric("Volumen", f"{b['Q_m3_año']:.2f} Mm³")
+                # CORRECCIÓN DE CLAVES PARA VISUALIZACIÓN
+                vol_val = b.get('Vol', b.get('Q_m3_año', 0))
+                q_val = b.get('Q_mm', b.get('Q', 0))
+                
+                q_ls = (vol_val * 1_000_000_000) / 31536000 if vol_val > 0 else 0
+                
+                cols = st.columns(5)
+                cols[0].metric("Ppt Media", f"{b['P']:.0f} mm/año")
+                cols[1].metric("Altitud", f"{b['Alt']:.0f} m")
+                cols[2].metric("ET", f"{b['ET']:.0f} mm/año")
+                cols[3].metric("Q (mm)", f"{max(0, q_val):.0f} mm/año")
+                cols[4].metric("Q (L/s)", f"{q_ls:.0f} L/s")
+                st.info(f"**Volumen:** {vol_val:.2f} millones de m³.")
 
-                # --- NUEVO: GRÁFICO CURVA DE DURACIÓN (FDC) ---
-                fdc = res.get('fdc_data')
-                if fdc is not None and not fdc.empty:
-                    st.markdown("#### 📉 Curva de Duración de Caudales (Estimada)")
+                # 3. CURVA DE DURACIÓN DE CAUDALES (FDC) - NUEVO
+                if 'fdc_data' in res and not res['fdc_data'].empty:
+                    st.markdown("---")
+                    st.subheader("📉 Curva de Duración de Caudales (FDC)")
+                    st.info("Muestra el porcentaje del tiempo que el caudal iguala o excede un valor específico.")
                     
+                    fdc = res['fdc_data']
                     fig_fdc = go.Figure()
                     fig_fdc.add_trace(go.Scatter(
                         x=fdc["Probabilidad Excedencia (%)"], 
                         y=fdc["Caudal (m³/s)"],
-                        mode='lines', 
-                        fill='tozeroy',
-                        line=dict(color='#1f77b4', width=3),
-                        name='Curva Duración'
+                        mode='lines', fill='tozeroy', line=dict(color='#1f77b4', width=3)
                     ))
-                    
-                    # Métricas clave (Q95, Q50)
-                    q95 = fdc.iloc[int(len(fdc)*0.95)]["Caudal (m³/s)"]
-                    q50 = fdc.iloc[int(len(fdc)*0.50)]["Caudal (m³/s)"]
-                    
-                    fig_fdc.add_vline(x=95, line_dash="dash", annotation_text=f"Q95: {q95:.2f} m³/s")
-                    fig_fdc.add_vline(x=50, line_dash="dash", annotation_text=f"Q50: {q50:.2f} m³/s")
+                    # Puntos Clave Q95 (Ecológico) y Q50 (Medio)
+                    try:
+                        q95 = fdc.iloc[int(len(fdc)*0.95)]["Caudal (m³/s)"]
+                        q50 = fdc.iloc[int(len(fdc)*0.50)]["Caudal (m³/s)"]
+                        fig_fdc.add_vline(x=95, line_dash="dash", annotation_text=f"Q95: {q95:.2f}")
+                        fig_fdc.add_vline(x=50, line_dash="dash", annotation_text=f"Q50: {q50:.2f}")
+                    except: pass
                     
                     fig_fdc.update_layout(
-                        xaxis_title="Probabilidad de Excedencia (%)",
-                        yaxis_title="Caudal (m³/s)",
-                        title="Probabilidad de Disponibilidad Hídrica",
+                        xaxis_title="Probabilidad de Excedencia (%)", 
+                        yaxis_title="Caudal (m³/s)", 
                         height=400,
-                        hovermode="x unified"
+                        title="Disponibilidad Hídrica en el Tiempo"
                     )
                     st.plotly_chart(fig_fdc, use_container_width=True)
-                    
-                    with st.expander("Ver tabla de probabilidad de caudales"):
-                        st.dataframe(fdc, use_container_width=True)
 
-                # 3. Morfometría
-                st.markdown("---")
-                st.subheader("📐 Morfometría y Ubicación")
+                # 4. Morfometría
+                st.markdown("#### 📐 Morfometría")
                 m = res['morph']
-                cm = st.columns(4)
+                cm = st.columns(6)
                 cm[0].metric("Área", f"{m['area_km2']:.2f} km²")
-                cm[1].metric("Índice Forma", f"{m['indice_forma']:.2f}")
-                cm[2].metric("Altitud Media", f"{m['alt_prom_m']:.0f} m")
-                cm[3].metric("Pendiente", f"{m['pendiente_prom']:.1f} %")
+                cm[1].metric("Perímetro", f"{m['perimetro_km']:.2f} km")
+                cm[2].metric("Índice Forma", f"{m['indice_forma']:.2f}")
+                cm[3].metric("Alt Máx", f"{m['alt_max_m']:.0f} m")
+                cm[4].metric("Alt Mín", f"{m['alt_min_m']:.0f} m")
+                cm[5].metric("Pendiente", f"{m['pendiente_prom']:.1f} %")
                 
-                # Mapa Contexto
+                # 5. Hipsometría
+                hypso = calculate_hypsometric_curve(res['geom'])
+                if hypso:
+                    st.markdown("---")
+                    st.subheader("⛰️ Curva Hipsométrica")
+                    c_h1, c_h2 = st.columns([3, 1])
+                    with c_h1:
+                        fig_h = go.Figure()
+                        fig_h.add_trace(go.Scatter(x=hypso['area_percent'], y=hypso['elevations'], fill='tozeroy', name='Perfil'))
+                        x_tr = np.linspace(0, 100, 50)
+                        fig_h.add_trace(go.Scatter(x=x_tr, y=hypso['poly_model'](x_tr), line=dict(dash='dash'), name='Ajuste'))
+                        fig_h.update_layout(title="Curva Hipsométrica", xaxis_title="% Área", yaxis_title="Elevación (m)", height=350)
+                        st.plotly_chart(fig_h, use_container_width=True)
+                    with c_h2:
+                        st.latex(hypso['equation'])
+
+                # 6. Mapa Contexto
+                st.markdown("---")
+                st.subheader("📍 Contexto Espacial")
                 minx, maxx, miny, maxy = res['bounds']
-                map_c = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=9)
-                folium.GeoJson(res['geom'], style_function=lambda x: {'color':'blue', 'weight':3}).add_to(map_c)
-                folium.GeoJson(res['buffer'], style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False}).add_to(map_c)
+                map_c = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=9, tiles="CartoDB positron")
+                folium.GeoJson(res['geom'], name="Cuenca", style_function=lambda x: {'color':'blue', 'weight':3}).add_to(map_c)
+                folium.GeoJson(res['buffer'], name="Radio 50km", style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False}).add_to(map_c)
                 for _, r in res['df'].iterrows():
                     folium.CircleMarker([r.latitude, r.longitude], radius=3, color='red', fill=True).add_to(map_c)
-                st_folium(map_c, height=400, width="100%")
+                st_folium(map_c, height=500, width="100%")
         else:
             st.info("Seleccione cuencas.")
             
@@ -2295,6 +2329,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
