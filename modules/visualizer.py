@@ -1072,9 +1072,8 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 m = folium.Map(location=[(my+My)/2, (mx+Mx)/2], zoom_start=9)
                 folium.GeoJson(res['gdf_union'], style_function=lambda x:{'color':'blue'}).add_to(m)
                 folium.GeoJson(res['buffer'], style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m)
-                for _, r in res['df'].iterrows():
-                    folium.CircleMarker([r.latitude, r.longitude], radius=3, color='red', fill=True).add_to(m)
                 st_folium(m, height=400, width="100%")
+
         else:
             st.info("Seleccione cuencas.")
             
@@ -2276,6 +2275,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
