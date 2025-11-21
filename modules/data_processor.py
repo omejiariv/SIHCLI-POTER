@@ -47,14 +47,16 @@ def load_and_process_all_data():
             else:
                 gdf_stations = df_est.copy()
 
-            # --- CORRECCIÓN CRÍTICA: ETIQUETA ÚNICA ---
-            # Crear nueva columna con nombre único
-            gdf_stations['station_label'] = gdf_stations['nom_est'].astype(str).str.strip() + " [" + gdf_stations['id_estacion'].astype(str) + "]"
-            
-            # Eliminar columnas conflictivas ANTES de renombrar
-            # Esto previene que 'nom_est' choque con el nuevo nombre
-            cols_to_drop = ['nom_est'] 
-            gdf_stations.drop(columns=[c for c in cols_to_drop if c in gdf_stations.columns], inplace=True)
+            # --- CORRECCIÓN INTELIGENTE DE ETIQUETAS ---
+
+            def create_label(row):
+                nom = str(row['nom_est']).strip()
+                cod = str(row['id_estacion']).strip()
+                if cod in nom:
+                    return nom # Ya tiene el código, no lo añadimos de nuevo
+                return f"{nom} [{cod}]" # No lo tiene, lo añadimos
+
+            gdf_stations['station_label'] = gdf_stations.apply(create_label, axis=1)
 
             # Renombrar usando el mapa de configuración
             # station_label -> STATION_NAME_COL
@@ -139,3 +141,4 @@ def complete_series(df):
     df = df.sort_values(Config.DATE_COL)
     df[Config.PRECIPITATION_COL] = df[Config.PRECIPITATION_COL].interpolate(method='linear', limit_direction='both')
     return df
+
