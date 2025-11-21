@@ -1274,45 +1274,108 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             los caudales otorgados, el caudal ecológico y las perspectivas del cambio climatico).
                             """)
 
-                # 5. Mapa Contexto
+                # 5. Mapa Contexto (ENRIQUECIDO)
                 st.markdown("---")
-                st.subheader("📍 Contexto Espacial")
-                mx, Mx, my, My = res['bounds']
-                m = folium.Map(location=[(my+My)/2, (mx+Mx)/2], zoom_start=9, tiles="CartoDB positron")
+                st.subheader("📍 Contexto Espacial (Cuenca + Radio 50km)")
                 
-                # Capa Cuenca
+                minx, maxx, miny, maxy = res['bounds']
+                m = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=9, tiles="CartoDB positron")
+                
+                # Capas de Geometría
                 folium.GeoJson(
                     res['gdf_union'], 
-                    name="Cuenca Objetivo",
-                    style_function=lambda x: {'color':'blue', 'weight':3, 'fillOpacity':0.1}
+                    name="Cuenca Objetivo", 
+                    style_function=lambda x: {'color':'blue', 'weight':3, 'fillOpacity':0.1},
+                    tooltip="Cuenca Analizada"
                 ).add_to(m)
                 
-                # Capa Buffer
                 folium.GeoJson(
                     res['buffer'], 
-                    name="Radio de Búsqueda (50km)",
-                    style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False}
+                    name="Radio 50km", 
+                    style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False},
+                    tooltip="Área de Influencia"
                 ).add_to(m)
                 
-                # Capa Estaciones (RECUPERADA)
-                if 'df' in res:
-                    for _, r in res['df'].iterrows():
-                        # Recuperar nombre y valor de forma segura
-                        st_name = r.get(Config.STATION_NAME_COL, 'Estación')
-                        ppt_val = r.get(Config.PRECIPITATION_COL, 0)
+                # --- ESTACIONES CON POPUP AVANZADO ---
+                if 'df' in res and not res['df'].empty:
+                    # 1. Preparar datos para el popup
+                    stations_list = res['df'][Config.STATION_NAME_COL].unique()
+                    
+                    # Filtrar histórico para calcular estadísticas
+                    # Usamos df_long (disponible en el scope)
+                    stats_sub = df_long[df_long[Config.STATION_NAME_COL].isin(stations_list)].copy()
+                    
+                    # A. Años con datos > 0
+                    years_count = stats_sub[stats_sub[Config.PRECIPITATION_COL] > 0].groupby(Config.STATION_NAME_COL)[Config.YEAR_COL].nunique()
+                    
+                    # B. Promedio Mensual
+                    monthly_mean = stats_sub.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
+                    
+                    # C. Promedio Anual (Suma anual -> Promedio)
+                    ann_sums = stats_sub.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+                    annual_mean = ann_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
+
+                    # D. Cruce Espacial para saber Subcuenca (On-the-fly)
+                    # Convertimos estaciones a GDF temporal para cruzar con subcuencas
+                    try:
+                        import geopandas as gpd
+                        pts_geom = gpd.points_from_xy(res['df'].longitude, res['df'].latitude)
+                        gdf_temp = gpd.GeoDataFrame(res['df'], geometry=pts_geom, crs="EPSG:4326")
+                        
+                        # Spatial Join con todas las subcuencas disponibles
+                        if gdf_subcuencas is not None:
+                            gdf_joined = gpd.sjoin(gdf_temp, gdf_subcuencas[['geometry', 'nombre']], how='left', predicate='within')
+                            # Crear mapa de ID -> Subcuenca
+                            basin_map = gdf_joined.set_index(Config.STATION_NAME_COL)['nombre'].to_dict()
+                        else:
+                            basin_map = {}
+                    except:
+                        basin_map = {}
+
+                    # 2. Dibujar Marcadores
+                    for _, row in res['df'].iterrows():
+                        st_name = row[Config.STATION_NAME_COL]
+                        
+                        # Recuperar valores
+                        mun = row.get(Config.MUNICIPALITY_COL, 'N/A')
+                        alt = row.get(Config.ALTITUDE_COL, 'N/A')
+                        subcuenca = basin_map.get(st_name, "Fuera de red")
+                        
+                        val_anual = annual_mean.get(st_name, 0)
+                        val_mensual = monthly_mean.get(st_name, 0)
+                        n_years = years_count.get(st_name, 0)
+
+                        # HTML Popup Estilizado
+                        html = f"""
+                        <div style='font-family:sans-serif; font-size:12px; min-width:220px'>
+                            <h5 style='margin:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:4px'>{st_name}</h5>
+                            <div style='margin-top:5px; line-height:1.4'>
+                                <b>Municipio:</b> {mun}<br>
+                                <b>Subcuenca:</b> {subcuenca}<br>
+                                <b>Altitud:</b> {alt} msnm
+                            </div>
+                            <div style='background-color:#f8f9fa; padding:5px; margin-top:5px; border-radius:4px'>
+                                <b>Ppt Media Anual:</b> {val_anual:,.0f} mm<br>
+                                <b>Ppt Media Mensual:</b> {val_mensual:.1f} mm<br>
+                                <b>Años Activos:</b> {n_years}
+                            </div>
+                        </div>
+                        """
                         
                         folium.CircleMarker(
-                            [r['latitude'], r['longitude']], 
-                            radius=4, 
-                            color='red', 
-                            fill=True, 
+                            location=[row['latitude'], row['longitude']],
+                            radius=5,
+                            color='darkred',
+                            fill=True,
                             fillColor='red',
-                            fillOpacity=1,
-                            tooltip=f"{st_name}: {ppt_val:.0f} mm"
+                            fillOpacity=0.8,
+                            weight=1,
+                            tooltip=f"{st_name} ({val_anual:.0f} mm)",
+                            popup=folium.Popup(html, max_width=300)
                         ).add_to(m)
-                
+
                 folium.LayerControl().add_to(m)
-                st_folium(m, height=400, width="100%")
+                st_folium(m, height=500, width="100%")
 
         else:
             st.info("Seleccione cuencas.")
@@ -2515,6 +2578,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
