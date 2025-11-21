@@ -587,6 +587,58 @@ def generate_life_zone_raster(dem_path, ppt_path, mask_geom=None, downscale_fact
     except Exception as e:
         return None, None, str(e)
 
+# --- NUEVA FUNCIÓN: ÍNDICES CLIMÁTICOS ---
+def calculate_climatic_indices(series_mensual, alt_m):
+    """Calcula Índices de Aridez (Martonne) y Erosividad (Fournier)."""
+    if series_mensual.empty: return {}
+    
+    # Datos base
+    P_anual = series_mensual.sum() # Total anual promedio (si la serie es un año promedio)
+    # Si la serie es histórica completa, tomamos el promedio de las sumas anuales
+    # Asumimos que 'series_mensual' aquí es el ciclo anual promedio (12 meses) o una serie larga
+    # Para robustez, recalculamos P_anual como (promedio_mensual * 12)
+    P_total = series_mensual.mean() * 12 
+    T_media = estimate_temperature(alt_m)
+    
+    # 1. Índice de Martonne (Aridez)
+    # I_M = P / (T + 10)
+    im = P_total / (T_media + 10)
+    
+    if im < 5: im_cat = "Desierto Absoluto"
+    elif im < 10: im_cat = "Árido"
+    elif im < 20: im_cat = "Semiárido"
+    elif im < 30: im_cat = "Mediterráneo / Semihúmedo"
+    elif im < 60: im_cat = "Húmedo"
+    else: im_cat = "Perhúmedo"
+    
+    # 2. Índice de Fournier Modificado (Erosividad - MFI)
+    # MFI = Sum(pi^2) / P_total
+    # pi = precipitación del mes i
+    # Si la serie es larga, agrupamos por mes primero para tener el ciclo promedio
+    try:
+        # Intentar agrupar si tiene índice fecha, sino usar directo
+        if isinstance(series_mensual.index, pd.DatetimeIndex):
+            monthly_means = series_mensual.groupby(series_mensual.index.month).mean()
+        else:
+            monthly_means = series_mensual # Asumimos que ya son 12 valores
+            
+        sum_p2 = (monthly_means ** 2).sum()
+        mfi = sum_p2 / P_total if P_total > 0 else 0
+        
+        if mfi < 60: mfi_cat = "Muy Baja"
+        elif mfi < 90: mfi_cat = "Baja"
+        elif mfi < 120: mfi_cat = "Moderada"
+        elif mfi < 160: mfi_cat = "Alta"
+        else: mfi_cat = "Muy Alta"
+    except:
+        mfi = 0; mfi_cat = "N/A"
+        
+    return {
+        "martonne_val": im, "martonne_class": im_cat,
+        "fournier_val": mfi, "fournier_class": mfi_cat,
+        "temp_media": T_media
+    }
+
 def calculate_return_periods(df_long, station_name):
     """
     Calcula períodos de retorno usando la distribución de Gumbel sobre máximos anuales.
@@ -704,3 +756,4 @@ def calculate_duration_curve(series_mensual, runoff_coeff, area_km2):
         "trend_x": trend_x,
         "trend_y": trend_y
     }
+
