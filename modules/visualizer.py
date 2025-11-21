@@ -1040,6 +1040,66 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 c2.metric("Caudal (Q)", f"{b.get('Q_mm',0):.0f} mm")
                 c3.metric("Volumen", f"{b.get('Vol',0):.2f} Mm³")
 
+                # --- CURVA HIPSOMÉTRICA (RESTAURADA) ---
+                # Calculamos la curva usando la geometría de la cuenca
+                hypso = calculate_hypsometric_curve(res['gdf_union'])
+                
+                if hypso:
+                    st.markdown("---")
+                    st.subheader("⛰️ Curva Hipsométrica")
+                    
+                    c_h1, c_h2 = st.columns([3, 1])
+                    
+                    # Columna Izquierda: Gráfico
+                    with c_h1:
+                        fig_h = go.Figure()
+                        # Perfil Real (Área acumulada)
+                        fig_h.add_trace(go.Scatter(
+                            x=hypso['area_percent'], 
+                            y=hypso['elevations'], 
+                            mode='lines', 
+                            fill='tozeroy', 
+                            name='Perfil Hipsométrico',
+                            line=dict(color='#2ca02c', width=2)
+                        ))
+                        # Ajuste Polinómico (Línea roja discontinua)
+                        x_tr = np.linspace(0, 100, 50)
+                        y_tr = hypso['poly_model'](x_tr)
+                        fig_h.add_trace(go.Scatter(
+                            x=x_tr, 
+                            y=y_tr, 
+                            mode='lines', 
+                            line=dict(color='red', dash='dash'), 
+                            name='Ajuste Polinómico (Grado 3)'
+                        ))
+                        
+                        fig_h.update_layout(
+                            title="Distribución de Altitud vs. Área Acumulada",
+                            xaxis_title="% Área Acumulada",
+                            yaxis_title="Elevación (m.s.n.m)",
+                            height=350,
+                            margin=dict(l=0, r=0, t=30, b=0),
+                            hovermode="x unified"
+                        )
+                        st.plotly_chart(fig_h, use_container_width=True)
+                    
+                    # Columna Derecha: Ecuación y Explicación
+                    with c_h2:
+                        st.markdown("**Modelo Matemático:**")
+                        # Reemplazamos X por A (Área) para mayor claridad
+                        if hypso.get('equation'):
+                            st.latex(hypso['equation'].replace('x', 'A'))
+                        
+                        with st.expander("ℹ️ Interpretación"):
+                            st.markdown("""
+                            **Curva Hipsométrica:**
+                            Relación entre la altitud y la superficie acumulada de la cuenca.
+                            
+                            * **Eje Y:** Altitud.
+                            * **Eje X:** % de área que se encuentra *por encima* de esa altitud.
+                            * **Utilidad:** Indica la madurez geológica de la cuenca (erosión potencial) y su comportamiento hidrológico.
+                            """)                
+
                 # 3. ÍNDICES CLIMÁTICOS (CON CAJAS INFORMATIVAS)
                 st.markdown("---")
                 st.subheader("⚠️ Índices de Riesgo Climático")
@@ -2294,6 +2354,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
