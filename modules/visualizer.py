@@ -931,7 +931,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             plot_map(range2, method2, c2)
 
     # --- MODO 2: POR CUENCA ---
-else: # MODO CUENCA
+    else: # MODO CUENCA
         if gdf_subcuencas.empty: st.warning("No hay capa de subcuencas."); return
         sel_cuencas = st.multiselect("Seleccione Subcuencas:", sorted(gdf_subcuencas['nombre'].unique()))
         
@@ -2381,6 +2381,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
