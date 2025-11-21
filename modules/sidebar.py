@@ -31,26 +31,21 @@ def create_sidebar(gdf_stations, df_long):
         # --- 2. Filtros de Ubicación ---
         st.markdown("### 📍 Filtros de Ubicación")
         
-        # Lógica de Filtrado Inicial (Antes de mostrar opciones)
-        # 1. Calcular porcentajes si es necesario
+        # Lógica de Filtrado Inicial
         valid_stations_by_pct = gdf_stations[Config.STATION_NAME_COL].unique()
         
         if min_pct > 0 and df_long is not None:
-            # Contar registros por estación
             counts = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count()
-            # Calcular total teórico de meses (aprox)
             n_years = df_long[Config.YEAR_COL].max() - df_long[Config.YEAR_COL].min() + 1
             total_months = n_years * 12
-            # Calcular %
             pcts = (counts / total_months) * 100
-            # Filtrar
             valid_stations_by_pct = pcts[pcts >= min_pct].index.tolist()
 
         # A. Filtro por Altitud
         altitude_options = ["Todos", "0-500", "500-1000", "1000-1500", "1500-2000", "2000-3000", ">3000"]
         selected_alt_range = st.selectbox("Filtrar por Altitud (m):", altitude_options)
         
-        # Aplicar filtros base (Geografía + Calidad)
+        # Aplicar filtros base
         gdf_filtered_base = gdf_stations[gdf_stations[Config.STATION_NAME_COL].isin(valid_stations_by_pct)].copy()
         
         if selected_alt_range != "Todos":
@@ -129,12 +124,11 @@ def create_sidebar(gdf_stations, df_long):
             [Config.STATION_NAME_COL, Config.YEAR_COL]
         )[Config.PRECIPITATION_COL].sum().reset_index()
 
-        return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
-                "Histórico", selected_regions, selected_municipios, [], year_range)
-
-        # ... (código existente del sidebar) ...
-        
+        # --- BOTÓN LIMPIAR CACHÉ (MOVÍDO AQUÍ, ANTES DEL RETURN) ---
         st.divider()
         if st.button("🧹 Limpiar Caché y Recargar"):
             st.cache_data.clear()
             st.rerun()
+
+        return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
+                "Histórico", selected_regions, selected_municipios, [], year_range)
