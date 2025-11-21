@@ -513,7 +513,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
                     st.rerun()
 
-# --- RESULTADOS DEL PUNTO (BLOQUE RESTAURADO COMPLETO) ---
+    # --- RESULTADOS DEL PUNTO (BLOQUE RESTAURADO COMPLETO) ---
     if st.session_state.selected_point:
         clat, clon = st.session_state.selected_point['lat'], st.session_state.selected_point['lng']
         st.markdown("---")
@@ -2181,6 +2181,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
