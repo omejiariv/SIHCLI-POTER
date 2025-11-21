@@ -1040,16 +1040,37 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 c2.metric("Caudal (Q)", f"{b.get('Q_mm',0):.0f} mm")
                 c3.metric("Volumen", f"{b.get('Vol',0):.2f} Mm³")
 
-                # 3. Índices Climáticos
+                # 3. ÍNDICES CLIMÁTICOS (CON CAJAS INFORMATIVAS)
                 st.markdown("---")
+                st.subheader("⚠️ Índices de Riesgo Climático")
                 idx = res.get('indices', {})
                 k1, k2 = st.columns(2)
+                
                 with k1:
-                    st.metric(f"Aridez: {idx.get('martonne_class','')}", f"{idx.get('martonne_val',0):.1f}")
-                    with st.expander("ℹ️ Info Martonne"): st.write("Indica déficit/exceso hídrico.")
+                    st.markdown("**Índice de Aridez (Martonne)**")
+                    val_m = idx.get('martonne_val', 0)
+                    st.metric(idx.get('martonne_class', 'N/A'), f"{val_m:.1f}", delta="Clasificación")
+                    with st.expander("ℹ️ Información"):
+                        st.markdown("""
+                        **Índice de Martonne ($I_M$):** Clasifica el clima según la disponibilidad de agua anual.
+                        * **< 10:** Desértico (Déficit hídrico severo).
+                        * **10-20:** Semiárido (Necesidad de riego).
+                        * **20-30:** Mediterráneo.
+                        * **> 30:** Húmedo / Perhúmedo (Excedente hídrico).
+                        """)
+                
                 with k2:
-                    st.metric(f"Erosividad: {idx.get('fournier_class','')}", f"{idx.get('fournier_val',0):.1f}")
-                    with st.expander("ℹ️ Info Fournier"): st.write("Riesgo de erosión por lluvia.")
+                    st.markdown("**Índice de Erosividad (Fournier)**")
+                    val_f = idx.get('fournier_val', 0)
+                    st.metric(idx.get('fournier_class', 'N/A'), f"{val_f:.1f}", delta="Agresividad Lluvia")
+                    with st.expander("ℹ️ Información"):
+                        st.markdown("""
+                        **Índice de Fournier Modificado ($IFM$):** Estima el riesgo de erosión del suelo por impacto de la lluvia.
+                        * **< 60:** Muy Baja.
+                        * **60-90:** Baja.
+                        * **90-120:** Moderada.
+                        * **> 120:** Alta/Muy Alta (Requiere medidas de conservación).
+                        """)
 
                 # 4. FDC
                 if res.get('fdc_data'):
@@ -2273,6 +2294,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
