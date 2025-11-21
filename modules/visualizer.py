@@ -335,47 +335,77 @@ def get_iri_enso_forecast():
 def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
     st.header("🚨 Centro de Monitoreo y Tiempo Real")
     
-    # DEFINICIÓN DE PESTAÑAS (NOMBRES UNIFICADOS)
     tab_fc, tab_sat, tab_alert = st.tabs(["🌦️ Pronóstico Semanal", "🛰️ Satélite en Vivo", "📊 Alertas Históricas"])
 
-    # --- PESTAÑA 1: PRONÓSTICO ---
+    # --- SUB-PESTAÑA 1: PRONÓSTICO COMPLETO (RESTAURADO) ---
     with tab_fc:
         if gdf_filtered is None or gdf_filtered.empty: st.warning("Seleccione estaciones."); return
         sel_st = st.selectbox("Estación:", sorted(gdf_filtered[Config.STATION_NAME_COL].unique()))
+        
         if sel_st:
             st_dat = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == sel_st].iloc[0]
-            with st.spinner("Consultando satélites..."):
-                # Coordenadas seguras
+            with st.spinner("Consultando satélites y modelos meteorológicos..."):
                 lat = st_dat['latitude'] if 'latitude' in st_dat else st_dat.geometry.y
                 lon = st_dat['longitude'] if 'longitude' in st_dat else st_dat.geometry.x
                 df = get_weather_forecast_detailed(lat, lon)
             
             if not df.empty:
+                # 1. TARJETAS DE RESUMEN (HOY)
                 td = df.iloc[0]
-                c1,c2,c3,c4 = st.columns(4)
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("T. Máx/Mín", f"{td['T. Máx (°C)']}/{td['T. Mín (°C)']}°C")
                 c2.metric("Lluvia Hoy", f"{td['Ppt. (mm)']}mm")
-                c3.metric("Viento", f"{td['Viento Máx (km/h)']}km/h")
+                c3.metric("Viento Máx", f"{td['Viento Máx (km/h)']}km/h")
                 c4.metric("Radiación", f"{td['Radiación SW (MJ/m²)']}MJ/m²")
                 
+                # 2. GRÁFICO PRINCIPAL (Climograma)
+                st.markdown("#### 🌡️ Temperatura y Precipitación")
                 fig = make_subplots(specs=[[{"secondary_y": True}]])
                 fig.add_trace(go.Scatter(x=df['Fecha'], y=df['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
                 fig.add_trace(go.Scatter(x=df['Fecha'], y=df['T. Mín (°C)'], name='Min', line=dict(color='blue'), fill='tonexty'), secondary_y=False)
                 fig.add_trace(go.Bar(x=df['Fecha'], y=df['Ppt. (mm)'], name='Ppt', marker_color='green', opacity=0.6), secondary_y=True)
-                st.plotly_chart(fig, use_container_width=True)
-                with st.expander("Ver Tabla Detallada"): st.dataframe(df, use_container_width=True)
+                fig.update_layout(height=400, hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True) # Plotly siempre usa container_width, eso está bien
 
-    # --- PESTAÑA 2: SATÉLITE (YA CON EL FIX DE USE_CONTAINER_WIDTH) ---
+                # 3. GRÁFICOS SECUNDARIOS (LO QUE FALTABA)
+                st.markdown("#### 🍃 Condiciones Atmosféricas")
+                col_g1, col_g2 = st.columns(2)
+                
+                with col_g1:
+                    # Humedad y Presión
+                    fig_atm = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_atm.add_trace(go.Scatter(x=df['Fecha'], y=df['HR Media (%)'], name='Humedad', line=dict(color='teal')), secondary_y=False)
+                    fig_atm.add_trace(go.Scatter(x=df['Fecha'], y=df['Presión (hPa)'], name='Presión', line=dict(color='purple', dash='dot')), secondary_y=True)
+                    fig_atm.update_layout(title="Humedad y Presión", height=350, legend=dict(orientation="h"))
+                    fig_atm.update_yaxes(title_text="HR (%)", secondary_y=False)
+                    fig_atm.update_yaxes(title_text="hPa", secondary_y=True, showgrid=False)
+                    st.plotly_chart(fig_atm, use_container_width=True)
+
+                with col_g2:
+                    # Energía y Agua (Radiación + ET0)
+                    fig_nrg = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_nrg.add_trace(go.Bar(x=df['Fecha'], y=df['Radiación SW (MJ/m²)'], name='Radiación', marker_color='gold'), secondary_y=False)
+                    fig_nrg.add_trace(go.Scatter(x=df['Fecha'], y=df['ET₀ (mm)'], name='Evapotranspiración', line=dict(color='green')), secondary_y=True)
+                    fig_nrg.update_layout(title="Energía y Ciclo del Agua", height=350, legend=dict(orientation="h"))
+                    fig_nrg.update_yaxes(title_text="MJ/m²", secondary_y=False)
+                    fig_nrg.update_yaxes(title_text="mm", secondary_y=True, showgrid=False)
+                    st.plotly_chart(fig_nrg, use_container_width=True)
+
+                # 4. TABLA DETALLADA
+                with st.expander("Ver Tabla de Datos Completa"): 
+                    st.dataframe(df, use_container_width=True)
+
+    # --- SUB-PESTAÑA 2: SATÉLITE (CON CORRECCIÓN DE VERSIÓN) ---
     with tab_sat:
         st.subheader("Observación Satelital")
         sat_mode = st.radio("Modo:", ["Animación (Visible)", "Mapa Interactivo (Infrarrojo)"], horizontal=True)
         
         if sat_mode == "Animación (Visible)":
-            # Aquí es donde fallaba antes, ahora funcionará gracias al update
+            # AQUÍ ESTÁ LA CORRECCIÓN CLAVE: use_column_width
             st.image(
                 "https://cdn.star.nesdis.noaa.gov/GOES16/ABI/GIFS/GOES16-ABI-GEOCOLOR-1000x1000.gif", 
                 caption="GOES-16 GeoColor (Tiempo Real)", 
-                use_container_width=True 
+                use_column_width=True 
             )
         else:
             try:
@@ -388,8 +418,8 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
                 st_folium(m, height=600, width="100%")
             except: st.error("Error satélite.")
 
-    # --- PESTAÑA 3: ALERTAS (CORREGIDO EL NOMBRE DE VARIABLE) ---
-    with tab_alert: # <--- ANTES DECÍA tab_alerts (PLURAL) Y DABA ERROR
+    # --- SUB-PESTAÑA 3: ALERTAS ---
+    with tab_alert:
         if df_long is not None:
             umb = st.slider("Umbral (mm):", 0, 1000, 300)
             alts = df_long[df_long[Config.PRECIPITATION_COL] > umb]
@@ -2226,6 +2256,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
