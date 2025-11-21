@@ -394,7 +394,7 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
             except: st.error("Error cargando capas WMS.")
                 
     # --- SUB-PESTAÑA 3: ALERTAS HISTÓRICAS (LO QUE ERA LA PESTAÑA 1 ANTES) ---
-    with tab_alerts:
+    with tab_alert:
         if df_long is not None and not df_long.empty:
             umbral = st.slider("Umbral de Lluvia Mensual para Alerta (mm):", 100, 1000, 300)
             alertas = df_long[df_long[Config.PRECIPITATION_COL] > umbral]
@@ -2243,6 +2243,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
