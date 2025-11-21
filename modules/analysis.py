@@ -641,39 +641,41 @@ def calculate_percentiles_extremes(df_long, station_name, p_low=10, p_high=90):
     
     return df_station, thresh_low, thresh_high
 
-def calculate_duration_curve(series, runoff_coeff=1.0, area_km2=1.0):
-    """
-    Calcula la Curva de Duración de Caudales (FDC) a partir de una serie de precipitación.
-    Transforma P (mm/mes) a Q (m3/s) usando el coeficiente de escorrentía y el área.
-    """
-    if series.empty: return None
+def calculate_duration_curve(series_mensual, runoff_coeff, area_km2):
+    """Calcula la Curva de Duración de Caudales (FDC) con ajuste polinómico."""
+    if series_mensual is None or series_mensual.empty: return None
     
-    # 1. Transformar Lluvia (mm/mes) a Caudal Medio Mensual (m3/s)
-    # Q (m3/s) = (P_mm * C * Area_km2 * 1000) / (DaysInMonth * 24 * 3600)
-    # Simplificación promedio mes (30.44 días):
-    # Factor: (1000 * 1e6) / (30.44 * 86400) approx 0.38
-    # Pero haremos el cálculo vectorizado preciso si es posible, o promedio simple:
+    # Q (m3/s) = P(mm/mes) * C * Area(km2) * 1000 / (30.44 * 86400)
+    q_m3s = (series_mensual * runoff_coeff * area_km2 * 1000) / (30.44 * 86400)
     
-    # Q_mm_mes = P_mm_mes * C
-    q_mm = series * runoff_coeff
-    
-    # Q_m3_s = (Q_mm * Area_km2 * 1000) / (Segundos en el mes)
-    # Usamos promedio de segundos por mes (2.628e+6) para simplificar visualización
-    q_m3s = (q_mm * area_km2 * 1000) / 2629746 
-    
-    # 2. Ordenar de Mayor a Menor
+    # Ordenar descendente (Duración)
     sorted_q = q_m3s.sort_values(ascending=False)
-    
-    # 3. Calcular Probabilidad de Excedencia
     n = len(sorted_q)
-    exceedance_prob = np.arange(1, n + 1) / (n + 1) * 100
+    if n < 5: return None # Se necesitan mínimos puntos para ajustar curva cúbica
     
-    return pd.DataFrame({
-        "Probabilidad Excedencia (%)": exceedance_prob,
-        "Caudal (m³/s)": sorted_q.values
-    })
+    probs = np.arange(1, n + 1) / (n + 1) * 100
+    
+    # Ajuste Polinómico Grado 3: Q = f(Probabilidad)
+    # y = ax^3 + bx^2 + cx + d
+    try:
+        coeffs = np.polyfit(probs, sorted_q.values, 3)
+        poly_model = np.poly1d(coeffs)
+        # Formato legible: Q = ...
+        eq_str = f"Q = {coeffs[0]:.2e}P³ + {coeffs[1]:.2e}P² + {coeffs[2]:.2f}P + {coeffs[3]:.2f}"
+        
+        # Generar datos de la línea de tendencia suave
+        x_trend = np.linspace(0, 100, 100)
+        y_trend = poly_model(x_trend)
+        y_trend = np.maximum(y_trend, 0) # Caudal no puede ser negativo
+    except:
+        eq_str = "N/A"
+        x_trend, y_trend = [], []
 
-
-
+    return {
+        "data": pd.DataFrame({"Probabilidad Excedencia (%)": probs, "Caudal (m³/s)": sorted_q.values}),
+        "equation": eq_str,
+        "trend_x": x_trend,
+        "trend_y": y_trend
+    }
 
 
