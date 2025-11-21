@@ -1298,35 +1298,30 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 ).add_to(m)
                 
                 # --- ESTACIONES CON POPUP AVANZADO ---
+
                 if 'df' in res and not res['df'].empty:
-                    # 1. Preparar datos para el popup
                     stations_list = res['df'][Config.STATION_NAME_COL].unique()
-                    
-                    # Filtrar histórico para calcular estadísticas
-                    # Usamos df_long (disponible en el scope)
                     stats_sub = df_long[df_long[Config.STATION_NAME_COL].isin(stations_list)].copy()
                     
-                    # A. Años con datos > 0
+                    # A. Años activos
                     years_count = stats_sub[stats_sub[Config.PRECIPITATION_COL] > 0].groupby(Config.STATION_NAME_COL)[Config.YEAR_COL].nunique()
                     
                     # B. Promedio Mensual
                     monthly_mean = stats_sub.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
                     
-                    # C. Promedio Anual (Suma anual -> Promedio)
-                    # --- CORRECCIÓN CRÍTICA DE PROMEDIOS ANUALES ---
+                    # C. Promedio Anual (CORREGIDO: FILTRAR AÑOS INCOMPLETOS)
+                    # 1. Contar datos por año
+                    counts_ per_year = stats_sub.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].count().reset_index()
+                    # 2. Quedarse solo con años que tengan al menos 10 meses de datos
+                    valid_years = counts_per_year[counts_per_year[Config.PRECIPITATION_COL] >= 10]
                     
-                    # 1. Contar meses con datos por año
-                    data_counts = stats_sub.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].count().reset_index()
+                    # 3. Filtrar los datos originales con esos años válidos
+                    df_valid = pd.merge(stats_sub, valid_years[[Config.STATION_NAME_COL, Config.YEAR_COL]], on=[Config.STATION_NAME_COL, Config.YEAR_COL])
                     
-                    # 2. Filtrar años válidos (Mínimo 10 meses con datos para considerar el año completo)
-                    valid_years = data_counts[data_counts[Config.PRECIPITATION_COL] >= 10]
+                    # 4. Calcular la suma anual solo de los años válidos
+                    ann_sums = df_valid.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
                     
-                    # 3. Calcular suma anual SOLO para esos años válidos
-                    # Unimos para filtrar el df original
-                    df_valid_years = pd.merge(stats_sub, valid_years[[Config.STATION_NAME_COL, Config.YEAR_COL]], on=[Config.STATION_NAME_COL, Config.YEAR_COL])
-                    
-                    # 4. Ahora sí, sumamos y promediamos
-                    ann_sums = df_valid_years.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+                    # 5. Promediar esos totales anuales
                     annual_mean = ann_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
                     
                     # -----------------------------------------------
@@ -2593,6 +2588,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
