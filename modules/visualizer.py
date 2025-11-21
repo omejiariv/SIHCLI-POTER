@@ -1827,12 +1827,12 @@ def display_enso_tab(**kwargs):
     else:
         st.info("No hay datos ENSO cargados.")
 
-def display_life_zones_tab(**kwargs):
+def display_life_zones_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌱 Zonas de Vida (Sistema Holdridge)")
     
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
     
-    # --- PESTAÑA 1: MAPA RASTER (NUEVA) ---
+    # --- PESTAÑA 1: MAPA RASTER ---
     with tab_raster:
         st.info("Genera una superficie continua de zonas de vida cruzando los mapas de Elevación y Precipitación.")
         
@@ -1844,13 +1844,18 @@ def display_life_zones_tab(**kwargs):
         with col2:
             use_mask = st.checkbox("Recortar por Cuenca Seleccionada", value=True)
             
-        # Verificar si hay cuenca en memoria
+        # Verificar si hay cuenca en memoria (CORRECCIÓN KEYERROR)
         basin_geom = None
         if use_mask:
             res_basin = st.session_state.get('basin_results')
             if res_basin and res_basin.get('ready'):
-                basin_geom = res_basin['gdf_union']
-                st.caption(f"Máscara activa: {res_basin.get('names', 'Cuenca')}")
+                # Intentar obtener la geometría con ambas claves posibles
+                basin_geom = res_basin.get('gdf_union', res_basin.get('geom'))
+                
+                if basin_geom is not None:
+                    st.success(f"Máscara activa: {res_basin.get('names', 'Cuenca')}")
+                else:
+                    st.warning("Error: Geometría de cuenca no encontrada en memoria.")
             else:
                 st.caption("⚠️ No hay cuenca seleccionada (Ver 'Mapas Avanzados'). Se mostrará toda la región.")
 
@@ -1859,103 +1864,80 @@ def display_life_zones_tab(**kwargs):
                 st.error("Faltan los archivos raster base (DEM o PPT) en la carpeta 'data'.")
             else:
                 with st.spinner("Procesando rasters..."):
-                    from modules.analysis import generate_life_zone_raster
-                    
-                    lz_arr, transform, crs = generate_life_zone_raster(
-                        Config.DEM_FILE_PATH, 
-                        Config.PRECIP_RASTER_PATH, 
-                        mask_geom=basin_geom, 
-                        downscale_factor=downscale
-                    )
-                    
-                    if isinstance(crs, str): # Error
-                        st.error(f"Error: {crs}")
-                    elif lz_arr is not None:
-                        # Visualización
-                        # Leyenda (Debe coincidir con los IDs de analysis.py)
-                        legend_map = {
-                            1: "Bosque Seco Tropical (bs-T)", 2: "Bosque Húmedo Tropical (bh-T)", 
-                            3: "Bosque Muy Húmedo Tropical (bmh-T)", 4: "Bosque Pluvial Tropical (bp-T)",
-                            5: "Bosque Seco Premontano", 6: "Bosque Húmedo Premontano (bh-PM)", 
-                            7: "Bosque Muy Húmedo Premontano (bmh-PM)", 8: "Bosque Pluvial Premontano (bp-PM)",
-                            9: "Bosque Seco Montano Bajo", 10: "Bosque Húmedo Montano Bajo (bh-MB)", 
-                            11: "Bosque Muy Húmedo Montano Bajo (bmh-MB)", 12: "Bosque Pluvial Montano Bajo (bp-MB)",
-                            13: "Bosque Húmedo Montano", 14: "Bosque Muy Húmedo Montano"
-                        }
-                        
-                        # Calcular coordenadas para Plotly
-                        h, w = lz_arr.shape
-                        x0, y0 = transform.c, transform.f
-                        dx, dy = transform.a, transform.e
-                        x_coords = np.linspace(x0, x0 + dx*w, w)
-                        y_coords = np.linspace(y0, y0 + dy*h, h)
-                        
-                        # Filtrar ceros para el gráfico
-                        plot_arr = lz_arr.astype(float)
-                        plot_arr[plot_arr == 0] = np.nan
-                        
-                        fig = go.Figure(data=go.Heatmap(
-                            z=plot_arr, x=x_coords, y=y_coords,
-                            colorscale='Jet', showscale=False,
-                            hoverongaps=False
-                        ))
-                        fig.update_layout(
-                            title="Mapa de Zonas de Vida (Holdridge)",
-                            yaxis_scaleanchor="x",
-                            height=600
+                    # Importar función generadora (asegúrate de tenerla en analysis.py)
+                    # Si no está, avísame y te paso analysis.py completo
+                    try:
+                        from modules.analysis import generate_life_zone_raster
+                        lz_arr, transform, crs = generate_life_zone_raster(
+                            Config.DEM_FILE_PATH, 
+                            Config.PRECIP_RASTER_PATH, 
+                            mask_geom=basin_geom, 
+                            downscale_factor=downscale
                         )
-                        st.plotly_chart(fig, use_container_width=True)
                         
-                        # Tabla de Áreas
-                        unique, counts = np.unique(lz_arr[lz_arr!=0], return_counts=True)
-                        # Área aprox del pixel en km2 (suponiendo coordenadas proyectadas o aprox)
-                        # Si es WGS84, esto es inexacto, pero sirve de referencia relativa
-                        pixel_area = abs(dx * dy) * 111 * 111 # Aprox grados a km2
-                        
-                        data = []
-                        for v, c in zip(unique, counts):
-                            data.append({
-                                "Zona de Vida": legend_map.get(v, f"Clase {v}"),
-                                "Píxeles": c,
-                                "%": c/counts.sum()*100
-                            })
-                        st.dataframe(pd.DataFrame(data).sort_values("%", ascending=False).style.format({"%": "{:.1f}%"}))
+                        if isinstance(crs, str): # Error
+                            st.error(f"Error: {crs}")
+                        elif lz_arr is not None:
+                            # Leyenda Holdridge
+                            legend_map = {
+                                1: "Bosque Seco Tropical", 2: "Bosque Húmedo Tropical", 
+                                3: "Bosque Muy Húmedo Tropical", 4: "Bosque Pluvial Tropical",
+                                5: "Bosque Seco Premontano", 6: "Bosque Húmedo Premontano", 
+                                7: "Bosque Muy Húmedo Premontano", 8: "Bosque Pluvial Premontano",
+                                9: "Bosque Seco Montano Bajo", 10: "Bosque Húmedo Montano Bajo", 
+                                11: "Bosque Muy Húmedo Montano Bajo", 12: "Bosque Pluvial Montano Bajo",
+                                13: "Bosque Húmedo Montano", 14: "Bosque Muy Húmedo Montano"
+                            }
+                            
+                            # Plotly Heatmap
+                            h, w = lz_arr.shape
+                            x0, y0 = transform.c, transform.f
+                            dx, dy = transform.a, transform.e
+                            x_coords = np.linspace(x0, x0 + dx*w, w)
+                            y_coords = np.linspace(y0, y0 + dy*h, h)
+                            
+                            # Flip si es necesario (coordenadas norte suelen ser negativas en transform)
+                            if dy < 0: y_coords = y_coords[::-1]; lz_arr = np.flipud(lz_arr)
+
+                            plot_arr = lz_arr.astype(float)
+                            plot_arr[plot_arr == 0] = np.nan
+                            
+                            fig = go.Figure(data=go.Heatmap(
+                                z=plot_arr, x=x_coords, y=y_coords,
+                                colorscale='Jet', showscale=False, hoverongaps=False
+                            ))
+                            fig.update_layout(title="Mapa de Zonas de Vida (Holdridge)", height=600, yaxis_scaleanchor="x")
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Tabla de Áreas (Aprox)
+                            unique, counts = np.unique(lz_arr[lz_arr!=0], return_counts=True)
+                            data = []
+                            for v, c in zip(unique, counts):
+                                data.append({"Zona de Vida": legend_map.get(v, f"Clase {v}"), "Píxeles": c, "%": c/counts.sum()*100})
+                            st.dataframe(pd.DataFrame(data).sort_values("%", ascending=False).style.format({"%": "{:.1f}%"}), use_container_width=True)
+                    
+                    except ImportError:
+                        st.error("Función 'generate_life_zone_raster' no encontrada en analysis.py")
+                    except Exception as e:
+                        st.error(f"Error inesperado: {e}")
 
     # --- PESTAÑA 2: PUNTOS (EXISTENTE) ---
     with tab_puntos:
-        # Recuperar datos necesarios
         df_anual = kwargs.get('df_anual_melted')
-        gdf_stations = kwargs.get('gdf_stations')
-        
         if df_anual is None or gdf_stations is None:
             st.warning("Datos insuficientes.")
         else:
-            # 1. Calcular Precipitación Media Anual Histórica por Estación
             ppt_media = df_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-            
-            # 2. Unir con Altitud
             merged = pd.merge(ppt_media, gdf_stations[[Config.STATION_NAME_COL, Config.ALTITUDE_COL, 'latitude', 'longitude']], on=Config.STATION_NAME_COL)
+            merged['Zona de Vida'] = merged.apply(lambda row: classify_holdridge_point(row[Config.PRECIPITATION_COL], row[Config.ALTITUDE_COL]), axis=1)
             
-            # 3. Calcular Zona de Vida para cada punto
-            merged['Zona de Vida'] = merged.apply(
-                lambda row: classify_holdridge_point(row[Config.PRECIPITATION_COL], row[Config.ALTITUDE_COL]), axis=1
-            )
-            
-            # 4. Mapa Interactivo de Puntos
             fig_map = px.scatter_mapbox(
-                merged,
-                lat="latitude", lon="longitude",
-                color="Zona de Vida",
-                size=Config.PRECIPITATION_COL,
-                hover_name=Config.STATION_NAME_COL,
-                hover_data={Config.ALTITUDE_COL: True, Config.PRECIPITATION_COL: ':.0f'},
-                zoom=8, mapbox_style="carto-positron",
-                title="Clasificación en Estaciones"
+                merged, lat="latitude", lon="longitude", color="Zona de Vida", size=Config.PRECIPITATION_COL,
+                hover_name=Config.STATION_NAME_COL, zoom=8, mapbox_style="carto-positron", title="Clasificación en Estaciones"
             )
             st.plotly_chart(fig_map, use_container_width=True)
-            
             st.dataframe(merged[[Config.STATION_NAME_COL, 'Zona de Vida', Config.PRECIPITATION_COL, Config.ALTITUDE_COL]], use_container_width=True)
-
+            
 def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌊 Análisis de Extremos Hidrológicos")
     st.info("Evaluación de eventos extremos: Sequías (Déficit), Inundaciones (Exceso) y Frecuencia (Períodos de Retorno).")
@@ -2329,6 +2311,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
