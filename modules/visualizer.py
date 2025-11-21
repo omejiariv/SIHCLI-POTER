@@ -1168,19 +1168,55 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         * **> 120:** Alta/Muy Alta (Requiere medidas de conservación).
                         """)
 
-                # 4. FDC
+                # 4. FDC (Curva de Duración) - RESTAURADO CON CAJA INFORMATIVA
                 if res.get('fdc_data'):
                     st.markdown("---")
-                    st.subheader("📉 Curva de Duración")
-                    fdc = res['fdc_data']['data']
-                    f1, f2 = st.columns([3,1])
-                    with f1:
-                        st.plotly_chart(px.line(fdc, x="Probabilidad Excedencia (%)", y="Caudal (m³/s)"), use_container_width=True)
-                    with f2:
-                        st.latex(res['fdc_data']['equation'].replace('P', 'P_{exc}'))
-                        st.caption(f"R²: {res['fdc_data']['r_squared']:.4f}")
+                    st.subheader("📉 Curva de Duración de Caudales (FDC)")
+                    
+                    fdc_data = res['fdc_data']
+                    df_fdc = fdc_data['data']
+                    eq = fdc_data['equation']
+                    r2 = fdc_data['r_squared']
 
-                # 5. Morfometría y Mapa Contexto
+                    f1, f2 = st.columns([3, 1])
+                    
+                    with f1:
+                        # Gráfico de la curva
+                        fig_fdc = px.line(
+                            df_fdc, 
+                            x="Probabilidad Excedencia (%)", 
+                            y="Caudal (m³/s)",
+                            title="Probabilidad de Disponibilidad Hídrica"
+                        )
+                        # Añadir área sombreada para mejor visualización
+                        fig_fdc.update_traces(fill='tozeroy')
+                        fig_fdc.update_layout(height=400)
+                        st.plotly_chart(fig_fdc, use_container_width=True)
+                    
+                    with f2:
+                        st.markdown("**Modelo Matemático:**")
+                        if eq != "N/A":
+                            # Renderizar ecuación en LaTeX
+                            st.latex(eq.replace('P', 'P_{exc}'))
+                            st.caption(f"**Bondad de Ajuste ($R^2$):** {r2:.4f}")
+                        else:
+                            st.warning("No se pudo generar la ecuación.")
+                        
+                        # --- CAJA INFORMATIVA RECUPERADA ---
+                        with st.expander("ℹ️ Detalles del Método"):
+                            st.markdown("""
+                            **Metodología:**
+                            Ajuste polinómico de tercer grado sobre la serie de caudales mensuales estimados.
+                            
+                            **Variables de la Ecuación:**
+                            * **$Q$**: Caudal ($m^3/s$).
+                            * **$P_{exc}$**: Probabilidad de Excedencia (0-100%).
+                            
+                            **Interpretación:**
+                            Permite estimar el caudal disponible para cualquier nivel de probabilidad (ej. para concesiones hídricas se suele usar Q95).
+                            """)
+
+                # 5. Mapa Contexto
                 st.markdown("---")
                 st.subheader("📍 Contexto Espacial")
                 mx, Mx, my, My = res['bounds']
@@ -2390,6 +2426,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
