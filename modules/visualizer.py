@@ -1222,9 +1222,40 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 st.markdown("---")
                 st.subheader("📍 Contexto Espacial")
                 mx, Mx, my, My = res['bounds']
-                m = folium.Map(location=[(my+My)/2, (mx+Mx)/2], zoom_start=9)
-                folium.GeoJson(res['gdf_union'], style_function=lambda x:{'color':'blue'}).add_to(m)
-                folium.GeoJson(res['buffer'], style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m)
+                m = folium.Map(location=[(my+My)/2, (mx+Mx)/2], zoom_start=9, tiles="CartoDB positron")
+                
+                # Capa Cuenca
+                folium.GeoJson(
+                    res['gdf_union'], 
+                    name="Cuenca Objetivo",
+                    style_function=lambda x: {'color':'blue', 'weight':3, 'fillOpacity':0.1}
+                ).add_to(m)
+                
+                # Capa Buffer
+                folium.GeoJson(
+                    res['buffer'], 
+                    name="Radio de Búsqueda (50km)",
+                    style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False}
+                ).add_to(m)
+                
+                # Capa Estaciones (RECUPERADA)
+                if 'df' in res:
+                    for _, r in res['df'].iterrows():
+                        # Recuperar nombre y valor de forma segura
+                        st_name = r.get(Config.STATION_NAME_COL, 'Estación')
+                        ppt_val = r.get(Config.PRECIPITATION_COL, 0)
+                        
+                        folium.CircleMarker(
+                            [r['latitude'], r['longitude']], 
+                            radius=4, 
+                            color='red', 
+                            fill=True, 
+                            fillColor='red',
+                            fillOpacity=1,
+                            tooltip=f"{st_name}: {ppt_val:.0f} mm"
+                        ).add_to(m)
+                
+                folium.LayerControl().add_to(m)
                 st_folium(m, height=400, width="100%")
 
         else:
@@ -2428,6 +2459,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
