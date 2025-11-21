@@ -513,35 +513,58 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
                     st.rerun()
 
-    # --- RESULTADOS DEL PUNTO ---
+# --- RESULTADOS DEL PUNTO (BLOQUE RESTAURADO COMPLETO) ---
     if st.session_state.selected_point:
         clat, clon = st.session_state.selected_point['lat'], st.session_state.selected_point['lng']
         st.markdown("---")
-        st.subheader(f"📍 Análisis de Punto ({clat:.4f}, {clon:.4f})")
+        st.subheader(f"📍 Análisis de Punto Seleccionado ({clat:.4f}, {clon:.4f})")
         
-        with st.spinner("Analizando..."):
+        with st.spinner("Consultando satélites y modelos..."):
+            # 1. Datos Históricos y Geográficos
             p_data = analyze_point_data(clat, clon, df_long, gdf_filtered, gdf_municipios, gdf_subcuencas)
+            
+            # 2. Pronóstico Meteorológico Detallado (API)
             fc = get_weather_forecast_detailed(clat, clon)
             
+            # FILA 1: Contexto Geográfico e Histórico
             c1, c2, c3, c4 = st.columns(4)
             c1.markdown(f"**Ubicación:**<br>{p_data['Municipio']}<br><span style='color:gray; font-size:0.8em'>{p_data['Cuenca']}</span>", unsafe_allow_html=True)
-            c2.metric("Cobertura", p_data['Cobertura'])
-            c3.metric("Zona de Vida", p_data['Zona_Vida'])
-            c4.metric("Ppt Histórica", f"{p_data['Ppt_Media']:.0f} mm/año")
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Altitud", f"{p_data['Altitud']:.0f} m")
+            c2.metric("Altitud", f"{p_data['Altitud']:.0f} m")
+            c3.metric("Ppt Histórica", f"{p_data['Ppt_Media']:.0f} mm/año")
             t_val = p_data['Tendencia']
-            m2.metric("Tendencia", f"{t_val:+.1f} mm/año", delta_color="normal" if t_val>0 else "inverse")
-            if not fc.empty: m3.metric("Lluvia Hoy", f"{fc.iloc[0]['Ppt. (mm)']} mm")
+            c4.metric("Tendencia Histórica", f"{t_val:+.1f} mm/año", delta_color="normal" if t_val>0 else "inverse")
 
+            # FILA 2: Información Ambiental
+            c5, c6 = st.columns(2)
+            c5.metric("Zona de Vida (Holdridge)", p_data['Zona_Vida'])
+            c6.metric("Cobertura del Suelo", p_data['Cobertura'])
+            
+            # FILA 3: METEOROLOGÍA TIEMPO REAL (LO QUE FALTABA)
             if not fc.empty:
-                with st.expander("Ver Pronóstico 7 Días", expanded=True):
+                st.markdown("##### 🌦️ Condiciones Meteorológicas Actuales (Estimadas Hoy)")
+                today = fc.iloc[0]
+                
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Temp. Promedio", f"{(today['T. Máx (°C)'] + today['T. Mín (°C)'])/2:.1f} °C")
+                m2.metric("Lluvia Hoy", f"{today['Ppt. (mm)']} mm")
+                m3.metric("Humedad Rel.", f"{today['HR Media (%)']} %")
+                m4.metric("Viento Máx", f"{today['Viento Máx (km/h)']} km/h")
+                m5.metric("Radiación", f"{today['Radiación SW (MJ/m²)']} MJ/m²")
+                
+                col_et, col_pres = st.columns(2)
+                col_et.metric("Evapotranspiración (ET₀)", f"{today['ET₀ (mm)']} mm")
+                col_pres.metric("Presión Atmosférica", f"{today['Presión (hPa)']} hPa")
+
+                # Gráfico de Pronóstico
+                with st.expander("Ver Pronóstico Detallado a 7 Días", expanded=True):
                     fig = make_subplots(specs=[[{"secondary_y": True}]])
                     fig.add_trace(go.Scatter(x=fc['Fecha'], y=fc['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
+                    fig.add_trace(go.Scatter(x=fc['Fecha'], y=fc['T. Mín (°C)'], name='Min', line=dict(color='blue'), fill='tonexty'), secondary_y=False)
                     fig.add_trace(go.Bar(x=fc['Fecha'], y=fc['Ppt. (mm)'], name='Lluvia', marker_color='blue', opacity=0.5), secondary_y=True)
-                    fig.update_layout(height=300, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified", showlegend=True)
+                    fig.update_layout(height=350, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified")
                     st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No se pudieron obtener datos meteorológicos en tiempo real.")
                     
     # --- PESTAÑA 2: DISPONIBILIDAD ---
     with tab_avail:
@@ -2158,6 +2181,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
