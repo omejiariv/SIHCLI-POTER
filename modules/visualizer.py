@@ -989,8 +989,8 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             basin_ts = df_long[mask].groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
                             c_run = bal.get('Q_mm', 0) / bal.get('P', 1) if bal.get('P', 1) > 0 else 0.4
                             fdc = calculate_duration_curve(basin_ts, c_run, morph['area_km2'])
-                            idx_clim = calculate_climatic_indices(basin_ts, morph['alt_prom_m'])
-
+                            indices = calculate_climatic_indices(basin_ts, morph['alt_prom_m'])
+                            
                             st.session_state['basin_results'] = {
                                 'ready': True, 'gx': gx, 'gy': gy, 'gz': gz, 'df': df_m, 
                                 'gdf_union': geom, 'buffer': buf, 'bal': bal, 'morph': morph, 
@@ -2273,6 +2273,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
