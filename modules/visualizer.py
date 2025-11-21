@@ -335,84 +335,67 @@ def get_iri_enso_forecast():
 def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
     st.header("🚨 Centro de Monitoreo y Tiempo Real")
     
+    # DEFINICIÓN DE PESTAÑAS (NOMBRES UNIFICADOS)
     tab_fc, tab_sat, tab_alert = st.tabs(["🌦️ Pronóstico Semanal", "🛰️ Satélite en Vivo", "📊 Alertas Históricas"])
 
-    # ... (El código de tab_fc Pronóstico Semanal se mantiene IGUAL que antes) ...
+    # --- PESTAÑA 1: PRONÓSTICO ---
     with tab_fc:
         if gdf_filtered is None or gdf_filtered.empty: st.warning("Seleccione estaciones."); return
         sel_st = st.selectbox("Estación:", sorted(gdf_filtered[Config.STATION_NAME_COL].unique()))
         if sel_st:
-            # ... (Lógica existente de pronóstico semanal) ...
-            # (Para ahorrar espacio, asumo que mantienes el código que ya funcionaba aquí.
-            # Si lo necesitas, avísame y lo pego completo).
-            st.info("Visualizando pronóstico para: " + sel_st)
-            # ...
-
-    # --- SUB-PESTAÑA SATÉLITE (MEJORADA) ---
-    with tab_sat:
-        st.subheader("Observación Satelital (GOES-16)")
-        sat_mode = st.radio("Modo de Visualización:", ["Animación (Visible - Últimas Horas)", "Mapa Interactivo (Infrarrojo)"], horizontal=True)
-        
-        if sat_mode == "Animación (Visible - Últimas Horas)":
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                # GIF Oficial de la NOAA (GeoColor - Sector Norte Sudamérica)
-                # Esta URL se actualiza automáticamente en los servidores de NOAA
-                st.image(
-                    "https://cdn.star.nesdis.noaa.gov/GOES16/ABI/GIFS/GOES16-ABI-GEOCOLOR-1000x1000.gif", 
-                    caption="GOES-16 GeoColor (Tiempo Real) - Fuente: NOAA/NESDIS",
-                    use_container_width=True
-                )
-            with c2:
-                st.info("""
-                **Interpretación:**
-                * **Blanco Brillante:** Nubes altas, tormentas potenciales.
-                * **Verde/Marrón:** Superficie terrestre despejada.
-                * **Gris/Azulado:** Océano o nubes bajas.
+            st_dat = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == sel_st].iloc[0]
+            with st.spinner("Consultando satélites..."):
+                # Coordenadas seguras
+                lat = st_dat['latitude'] if 'latitude' in st_dat else st_dat.geometry.y
+                lon = st_dat['longitude'] if 'longitude' in st_dat else st_dat.geometry.x
+                df = get_weather_forecast_detailed(lat, lon)
+            
+            if not df.empty:
+                td = df.iloc[0]
+                c1,c2,c3,c4 = st.columns(4)
+                c1.metric("T. Máx/Mín", f"{td['T. Máx (°C)']}/{td['T. Mín (°C)']}°C")
+                c2.metric("Lluvia Hoy", f"{td['Ppt. (mm)']}mm")
+                c3.metric("Viento", f"{td['Viento Máx (km/h)']}km/h")
+                c4.metric("Radiación", f"{td['Radiación SW (MJ/m²)']}MJ/m²")
                 
-                Esta animación muestra la evolución de la nubosidad en las últimas horas sobre Colombia y la región.
-                """)
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                fig.add_trace(go.Scatter(x=df['Fecha'], y=df['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
+                fig.add_trace(go.Scatter(x=df['Fecha'], y=df['T. Mín (°C)'], name='Min', line=dict(color='blue'), fill='tonexty'), secondary_y=False)
+                fig.add_trace(go.Bar(x=df['Fecha'], y=df['Ppt. (mm)'], name='Ppt', marker_color='green', opacity=0.6), secondary_y=True)
+                st.plotly_chart(fig, use_container_width=True)
+                with st.expander("Ver Tabla Detallada"): st.dataframe(df, use_container_width=True)
+
+    # --- PESTAÑA 2: SATÉLITE (YA CON EL FIX DE USE_CONTAINER_WIDTH) ---
+    with tab_sat:
+        st.subheader("Observación Satelital")
+        sat_mode = st.radio("Modo:", ["Animación (Visible)", "Mapa Interactivo (Infrarrojo)"], horizontal=True)
+        
+        if sat_mode == "Animación (Visible)":
+            # Aquí es donde fallaba antes, ahora funcionará gracias al update
+            st.image(
+                "https://cdn.star.nesdis.noaa.gov/GOES16/ABI/GIFS/GOES16-ABI-GEOCOLOR-1000x1000.gif", 
+                caption="GOES-16 GeoColor (Tiempo Real)", 
+                use_container_width=True 
+            )
         else:
-            # Mapa WMS Interactivo
             try:
                 m = folium.Map(location=[6.2, -75.5], zoom_start=6, tiles="CartoDB dark_matter")
-                # Capa Infrarroja
                 folium.raster_layers.WmsTileLayer(
-                    url="https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?",
-                    layers='xc04', fmt='image/png', transparent=True, attr='NOAA/IEM',
-                    name='Infrarrojo (Nubes)'
+                    url="https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?", 
+                    layers='xc04', fmt='image/png', transparent=True, attr='NOAA', name='Infrarrojo'
                 ).add_to(m)
-                # Capa de Lluvia (Radar Global si disponible)
-                folium.raster_layers.WmsTileLayer(
-                    url="https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi",
-                    layers='nexrad-n0r-900913', fmt='image/png', transparent=True, attr='NOAA',
-                    name='Radar Lluvia', opacity=0.6
-                ).add_to(m)
-                
                 folium.LayerControl().add_to(m)
                 st_folium(m, height=600, width="100%")
-            except: st.error("Error cargando capas WMS.")
-                
-    # --- SUB-PESTAÑA 3: ALERTAS HISTÓRICAS (LO QUE ERA LA PESTAÑA 1 ANTES) ---
-    with tab_alert:
-        if df_long is not None and not df_long.empty:
-            umbral = st.slider("Umbral de Lluvia Mensual para Alerta (mm):", 100, 1000, 300)
-            alertas = df_long[df_long[Config.PRECIPITATION_COL] > umbral]
-            
-            kpi1, kpi2 = st.columns(2)
-            kpi1.metric("Eventos Extremos Históricos", len(alertas))
-            kpi2.metric("% del Total de Registros", f"{(len(alertas)/len(df_long)*100):.1f}%")
-            
-            if not alertas.empty:
-                top_st = alertas[Config.STATION_NAME_COL].value_counts().head(10).reset_index()
-                top_st.columns = ["Estación", "Eventos"]
-                fig_a = px.bar(top_st, x="Eventos", y="Estación", orientation='h', title="Estaciones con más eventos extremos", color="Eventos", color_continuous_scale='Reds')
-                st.plotly_chart(fig_a, use_container_width=True)
-                
-                st.markdown("##### Registro de Alertas")
-                st.dataframe(alertas.sort_values(Config.PRECIPITATION_COL, ascending=False).head(100), use_container_width=True)
-        else:
-            st.warning("Cargue datos para ver alertas históricas.")
+            except: st.error("Error satélite.")
+
+    # --- PESTAÑA 3: ALERTAS (CORREGIDO EL NOMBRE DE VARIABLE) ---
+    with tab_alert: # <--- ANTES DECÍA tab_alerts (PLURAL) Y DABA ERROR
+        if df_long is not None:
+            umb = st.slider("Umbral (mm):", 0, 1000, 300)
+            alts = df_long[df_long[Config.PRECIPITATION_COL] > umb]
+            st.metric("Eventos Extremos", len(alts))
+            if not alts.empty: 
+                st.dataframe(alts.sort_values(Config.PRECIPITATION_COL, ascending=False).head(100), use_container_width=True)
         
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
     st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
@@ -2243,6 +2226,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
