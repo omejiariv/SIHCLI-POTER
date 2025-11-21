@@ -943,17 +943,32 @@ def display_satellite_imagery_tab(gdf_filtered):
                 fig.add_trace(go.Scatter(x=res['df'].longitude, y=res['df'].latitude, mode='markers', marker=dict(color='red', size=5), name="Estaciones"))
                 
                 # --- RESTAURACIÓN DEL CONTORNO BLANCO ---
+                # --- FRAGMENTO PARA EL CONTORNO DE LA CUENCA ---
                 try:
+                    # Obtener geometría (soporta Polygon y MultiPolygon)
                     poly = res['gdf_union'].geometry.iloc[0]
+                    
                     if poly.geom_type == 'Polygon':
                         xs, ys = poly.exterior.xy
-                        fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='white', width=2), name='Límite Cuenca'))
+                        fig.add_trace(go.Scatter(
+                            x=list(xs), y=list(ys), 
+                            mode='lines', 
+                            line=dict(color='white', width=2), 
+                            name='Límite Cuenca'
+                        ))
                     elif poly.geom_type == 'MultiPolygon':
-                        for p in poly.geoms:
+                        for i, p in enumerate(poly.geoms):
                             xs, ys = p.exterior.xy
-                            fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='white', width=2), showlegend=False))
-                except: pass
-                # ---------------------------------------
+                            fig.add_trace(go.Scatter(
+                                x=list(xs), y=list(ys), 
+                                mode='lines', 
+                                line=dict(color='white', width=2), 
+                                name='Límite Cuenca' if i==0 else None,
+                                showlegend=(i==0)
+                            ))
+                except Exception: 
+                    pass
+                # -----------------------------------------------
                 
                 fig.update_layout(height=500, title="Superficie de Lluvia (mm/año)", xaxis_range=[res['bounds'][0], res['bounds'][1]], yaxis_range=[res['bounds'][2], res['bounds'][3]])
                 st.plotly_chart(fig, use_container_width=True)
@@ -2343,6 +2358,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
