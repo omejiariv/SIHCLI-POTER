@@ -376,18 +376,57 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
                 else:
                     st.error("Error al obtener datos de Open-Meteo.")
 
-    # --- SUB-PESTAÑA 2: SATÉLITE (LO QUE YA TENÍAMOS) ---
+# --- SUB-PESTAÑA 2: SATÉLITE (MEJORADA) ---
     with tab_sat:
-        st.markdown("#### Imágenes Satelitales en Tiempo Real")
-        wms_url = "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?"
-        try:
-            m = folium.Map(location=[6.2, -75.5], zoom_start=6)
-            folium.raster_layers.WmsTileLayer(
-                url=wms_url, layers='xc04', fmt='image/png', name='Infrarrojo GOES',
-                attr='IEM/NOAA', transparent=True, overlay=True
-            ).add_to(m)
-            st_folium(m, height=600, width="100%")
-        except: st.error("Error cargando capa satelital.")
+        st.markdown("#### 🛰️ Observación Satelital en Tiempo Real")
+        sat_mode = st.radio("Modo de Visualización:", ["Mapa Interactivo (Infrarrojo)", "Animación (Visible - Últimas Horas)"], horizontal=True)
+        
+        if sat_mode == "Mapa Interactivo (Infrarrojo)":
+            try:
+                m = folium.Map(location=[6.2, -75.5], zoom_start=6, tiles="CartoDB dark_matter")
+                # Capa Infrarroja (Nubes)
+                folium.raster_layers.WmsTileLayer(
+                    url="https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?",
+                    layers='xc04',
+                    fmt='image/png',
+                    transparent=True,
+                    attr='NOAA/IEM',
+                    name='Infrarrojo GOES-East'
+                ).add_to(m)
+                
+                # Capa de Lluvia (Radar - Si disponible en la zona)
+                folium.raster_layers.WmsTileLayer(
+                    url="https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi",
+                    layers='nexrad-n0r-900913',
+                    fmt='image/png',
+                    transparent=True,
+                    attr='NOAA/NWS',
+                    name='Radar Lluvia',
+                    opacity=0.6
+                ).add_to(m)
+                
+                folium.LayerControl().add_to(m)
+                
+                # Añadir estaciones como referencia
+                if gdf_filtered is not None:
+                    for _, row in gdf_filtered.iterrows():
+                        folium.CircleMarker(
+                            [row['latitude'], row['longitude']], radius=2, color='red'
+                        ).add_to(m)
+                        
+                st_folium(m, height=600, width="100%")
+            except Exception as e:
+                st.error(f"Error cargando mapa satelital: {e}")
+        
+        else:
+            # Animación GIF desde NOAA (Sector Norte de Suramérica)
+            # URL estable del GOES-16 GeoColor
+            st.image(
+                "https://cdn.star.nesdis.noaa.gov/GOES16/ABI/GIFS/GOES16-ABI-GEOCOLOR-1000x1000.gif", 
+                caption="Animación GOES-16 (GeoColor) - Tiempo Real (Fuente: NOAA)",
+                use_column_width=True
+            )
+            st.info("Esta animación muestra la evolución de la nubosidad en las últimas horas.")
 
     # --- SUB-PESTAÑA 3: ALERTAS HISTÓRICAS (LO QUE ERA LA PESTAÑA 1 ANTES) ---
     with tab_alerts:
@@ -2181,6 +2220,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
