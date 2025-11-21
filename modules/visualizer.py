@@ -1076,15 +1076,47 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         with st.expander("ℹ️ Explicación"):
                             st.write("Relación entre altitud y % de área acumulada.")
 
-                # 6. Mapa Contexto
+                # --- 5. MAPA CONTEXTO (RESTAURADO) ---
                 st.markdown("---")
-                st.subheader("📍 Contexto Espacial")
+                st.subheader("📍 Contexto Espacial (Cuenca + Radio 50km)")
+                
+                # Usar bounds seguros para centrar
                 minx, maxx, miny, maxy = res['bounds']
-                map_c = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=9)
-                folium.GeoJson(res['gdf_union'], name="Cuenca", style_function=lambda x: {'color':'blue', 'weight':3}).add_to(map_c)
-                folium.GeoJson(res['buffer'], name="Radio 50km", style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False}).add_to(map_c)
+                map_c = folium.Map(location=[(miny+maxy)/2, (minx+maxx)/2], zoom_start=9, tiles="CartoDB positron")
+                
+                # Capa Cuenca
+                try:
+                    folium.GeoJson(
+                        res['gdf_union'], 
+                        name="Cuenca Objetivo", 
+                        style_function=lambda x: {'color':'blue', 'weight':3, 'fillOpacity':0.1},
+                        tooltip="Cuenca Analizada"
+                    ).add_to(map_c)
+                except: pass
+
+                # Capa Buffer
+                try:
+                    folium.GeoJson(
+                        res['buffer'], 
+                        name="Radio de Búsqueda (50km)", 
+                        style_function=lambda x: {'color':'gray', 'dashArray':'5,5', 'fill':False},
+                        tooltip="Área de influencia (50km)"
+                    ).add_to(map_c)
+                except: pass
+                
+                # Capa Estaciones
                 for _, r in res['df'].iterrows():
-                    folium.CircleMarker([r.latitude, r.longitude], radius=3, color='red', fill=True).add_to(map_c)
+                    folium.CircleMarker(
+                        [r.latitude, r.longitude], 
+                        radius=4, 
+                        color='red', 
+                        fill=True, 
+                        fillColor='red',
+                        fillOpacity=1,
+                        tooltip=f"{r[Config.STATION_NAME_COL]}: {r[Config.PRECIPITATION_COL]:.0f} mm"
+                    ).add_to(map_c)
+                
+                folium.LayerControl().add_to(map_c)
                 st_folium(map_c, height=500, width="100%")
         else:
             st.info("Seleccione cuencas.")
@@ -2287,6 +2319,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
