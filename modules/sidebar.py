@@ -132,7 +132,7 @@ def create_sidebar(gdf_stations, df_long):
         return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
                 "Histórico", selected_regions, selected_municipios, [], year_range)
 
-# ... (código existente del sidebar) ...
+        # ... (código existente del sidebar) ...
         
         st.divider()
         if st.button("🧹 Limpiar Caché y Recargar"):
