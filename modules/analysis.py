@@ -324,50 +324,36 @@ def get_mean_altitude_for_basin(_basin_geometry):
         st.warning(error_message)
         return None, error_message
 
-def calculate_hydrological_balance(precip_mm_anual, alt_media_m, gdf_basin):
+def calculate_hydrological_balance(precip_mm, alt_m, gdf_basin, delta_temp_c=0):
     """
-    Calcula Balance Hídrico usando fórmula de Turc.
-    precip_mm_anual: Debe ser la suma anual (mm/año).
+    Balance Hídrico (Turc). Corregido variable 'q'.
     """
-    if precip_mm_anual is None or precip_mm_anual <= 0: 
-        return {"P": 0, "ET": 0, "Q": 0, "Vol": 0, "Alt": 0, "Area": 0}
+    if precip_mm is None or np.isnan(precip_mm) or precip_mm <= 0:
+        return {"P": 0, "ET": 0, "Q": 0, "Q_mm": 0, "Vol": 0, "Q_m3_año": 0, "Alt": 0, "Area": 0}
+        
+    t = estimate_temperature(alt_m) + delta_temp_c
     
-    # 1. Temperatura Media Anual (°C)
-    temp_c = estimate_temperature(alt_media_m)
+    # Fórmula Turc
+    L = 300 + 25*t + 0.05*t**3
+    denom = np.sqrt(0.9 + (precip_mm/L)**2)
+    etr = precip_mm / denom if denom != 0 else precip_mm
+    etr = min(etr, precip_mm)
     
-    # 2. Evapotranspiración Real (Turc)
-    # L = 300 + 25T + 0.05T^3
-    L = 300 + (25 * temp_c) + (0.05 * (temp_c**3))
-    
-    # ETR = P / sqrt(0.9 + (P/L)^2)
-    # Validar que no sea NaN
-    denom = np.sqrt(0.9 + (precip_mm_anual / L)**2)
-    etr = precip_mm_anual / denom
-    
-    # Ajuste físico: ETR no puede ser mayor que la precipitación
-    etr = min(etr, precip_mm_anual)
-    
-    # 3. Escorrentía (Caudal Q)
-    q_mm = precip_mm_anual - etr
-    
-    # 4. Volumen (Millones de m3)
-    # Q(mm) * Area(km2) * 1000 = m3 -> / 1e6 = Mm3
-    # Simplificado: Q(mm) * Area(km2) / 1000 = Mm3 ?? No
-    # 1 mm = 1 L/m2 = 0.001 m3/m2
-    # Vol = Q * 0.001 (m) * Area * 1e6 (m2) = Q * Area * 1000 (m3)
-    # En Millones de m3: (Q * Area * 1000) / 1e6 = (Q * Area) / 1000
+    # CORRECCIÓN: Definir 'q' explícitamente
+    q = precip_mm - etr
     
     morph = calculate_morphometry(gdf_basin)
     area = morph['area_km2']
-    vol_mm3 = (q_mm * area) / 1000.0
+    
+    # Volumen
+    vol = (q * area) / 1000.0 # Mm3
     
     return {
-        "P": precip_mm_anual,
-        "ET": etr,
-        "Q": q, "Q_mm": q,
-        "Vol": vol_mm3,
-        "Alt": alt_media_m,
-        "Area": area
+        "P": precip_mm, "P_media_anual_mm": precip_mm,
+        "ET": etr, "ET_media_anual_mm": etr,
+        "Q": q, "Q_mm": q, # Ahora 'q' está definido
+        "Vol": vol, "Q_m3_año": vol,
+        "Alt": alt_m, "Area": area
     }
       
 def calculate_morphometry(gdf_basin):
@@ -686,6 +672,7 @@ def calculate_duration_curve(series, runoff_coeff=1.0, area_km2=1.0):
         "Probabilidad Excedencia (%)": exceedance_prob,
         "Caudal (m³/s)": sorted_q.values
     })
+
 
 
 
