@@ -1313,9 +1313,23 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     monthly_mean = stats_sub.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
                     
                     # C. Promedio Anual (Suma anual -> Promedio)
-                    ann_sums = stats_sub.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+                    # --- CORRECCIÓN CRÍTICA DE PROMEDIOS ANUALES ---
+                    
+                    # 1. Contar meses con datos por año
+                    data_counts = stats_sub.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].count().reset_index()
+                    
+                    # 2. Filtrar años válidos (Mínimo 10 meses con datos para considerar el año completo)
+                    valid_years = data_counts[data_counts[Config.PRECIPITATION_COL] >= 10]
+                    
+                    # 3. Calcular suma anual SOLO para esos años válidos
+                    # Unimos para filtrar el df original
+                    df_valid_years = pd.merge(stats_sub, valid_years[[Config.STATION_NAME_COL, Config.YEAR_COL]], on=[Config.STATION_NAME_COL, Config.YEAR_COL])
+                    
+                    # 4. Ahora sí, sumamos y promediamos
+                    ann_sums = df_valid_years.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
                     annual_mean = ann_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
-
+                    
+                    # -----------------------------------------------
                     # D. Cruce Espacial para saber Subcuenca (On-the-fly)
                     # Convertimos estaciones a GDF temporal para cruzar con subcuencas
                     try:
@@ -2579,6 +2593,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
