@@ -1213,7 +1213,9 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             * **$P_{exc}$**: Probabilidad de Excedencia (0-100%).
                             
                             **Interpretación:**
-                            Permite estimar el caudal disponible para cualquier nivel de probabilidad (ej. para concesiones hídricas se suele usar Q95).
+                            Permite estimar el caudal disponible para cualquier nivel de probabilidad
+                            (ej. para concesiones de agua se suele usar Q50 pero es nesario tener en cuenta: 
+                            los caudales otorgados, el caudal ecológico y las perspectivas del cambio climatico).
                             """)
 
                 # 5. Mapa Contexto
@@ -2426,6 +2428,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
