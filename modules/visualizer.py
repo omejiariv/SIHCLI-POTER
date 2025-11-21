@@ -531,10 +531,55 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}, tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None).add_to(m)
             except: pass
 
-            if gdf_filtered is not None:
-                marker_cluster = MarkerCluster().add_to(m)
+            # --- MARCADORES CON POPUP DETALLADO (RESTAURADO) ---
+            if gdf_filtered is not None and df_long is not None:
+                mc = MarkerCluster().add_to(m)
+                
+                # Precalcular datos para el popup (eficiencia)
+                stats_df = df_long.groupby(Config.STATION_NAME_COL).agg({
+                    Config.PRECIPITATION_COL: ['count', lambda x: (x>0).sum()], # Total meses, meses con lluvia > 0
+                    Config.YEAR_COL: 'nunique' # Años únicos
+                }).reset_index()
+                stats_df.columns = [Config.STATION_NAME_COL, 'total_meses', 'meses_con_lluvia', 'años_registrados']
+
                 for _, r in gdf_filtered.dropna(subset=['latitude']).iterrows():
-                    folium.Marker([r.latitude, r.longitude], tooltip=r[Config.STATION_NAME_COL], icon=folium.Icon(color="green", icon="cloud")).add_to(marker_cluster)
+                    st_name = r[Config.STATION_NAME_COL]
+                    alt_val = r.get(Config.ALTITUDE_COL, 'N/A')
+                    mun_val = r.get(Config.MUNICIPALITY_COL, 'N/A')
+                    reg_val = r.get(Config.REGION_COL, 'N/A')
+                    
+                    # Obtener estadísticas de la estación
+                    st_stats = stats_df[stats_df[Config.STATION_NAME_COL] == st_name]
+                    if not st_stats.empty:
+                        n_years = st_stats.iloc[0]['años_registrados']
+                        n_months_rain = st_stats.iloc[0]['meses_con_lluvia']
+                        # Estimación rápida de ppt media mensual
+                        avg_ppt_mensual = df_long[df_long[Config.STATION_NAME_COL] == st_name][Config.PRECIPITATION_COL].mean()
+                    else:
+                        n_years = 0; n_months_rain = 0; avg_ppt_mensual = 0
+
+                    # Crear HTML Popup
+                    html = f"""
+                    <div style='font-family:sans-serif; font-size:12px; min-width:200px'>
+                        <h5 style='margin:0; color:#2c3e50'>{st_name}</h5>
+                        <hr style='margin:5px 0'>
+                        <b>Municipio:</b> {mun_val}<br>
+                        <b>Región:</b> {reg_val}<br>
+                        <b>Altitud:</b> {alt_val} msnm<br>
+                        <hr style='margin:5px 0'>
+                        <b>Años Registrados:</b> {n_years}<br>
+                        <b>Meses con Lluvia (>0):</b> {n_months_rain}<br>
+                        <b>Prom. Mensual Est.:</b> {avg_ppt_mensual:.1f} mm
+                    </div>
+                    """
+                    
+                    folium.Marker(
+                        [r.latitude, r.longitude], 
+                        tooltip=st_name, 
+                        popup=folium.Popup(html, max_width=300),
+                        icon=folium.Icon(color="green", icon="cloud")
+                    ).add_to(mc)
+            # --------------------------------------------------
             
             if st.session_state.selected_point:
                 folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Punto Seleccionado", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
@@ -2470,6 +2515,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
