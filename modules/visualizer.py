@@ -1090,17 +1090,25 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         st.plotly_chart(fig_fdc, use_container_width=True)
 
                     with c_fdc2:
-                        st.markdown("**Ecuación de Ajuste:**")
-                        st.latex(fdc_res['equation'].replace('Q', 'Q').replace('P', 'P_{exc}'))
+                        st.markdown("**Ecuación de Ajuste (Cúbica):**")
+                        if fdc_res.get('equation') and fdc_res.get('equation') != "N/A":
+                            # Reemplazar P por P_exc para notación matemática bonita
+                            latex_eq = fdc_res['equation'].replace('P', 'P_{exc}')
+                            st.latex(latex_eq)
+                            
+                            # MOSTRAR R²
+                            r2 = fdc_res.get('r_squared', 0)
+                            st.caption(f"**Coeficiente de correlación ($R^2$):** {r2:.4f}")
+                        else:
+                            st.write("No se pudo ajustar una ecuación.")
                         
-                        with st.expander("ℹ️ Interpretación FDC"):
+                        with st.expander("ℹ️ Interpretación"):
                             st.markdown("""
                             **Curva de Duración de Caudales (FDC):**
-                            Representa la relación entre la magnitud del caudal y la frecuencia con la que es igualado o excedido.
-                            
-                            * **Ecuación:** Ajuste polinómico de 3er grado ($Q = f(P)$).
-                            * **Q95:** Caudal garantizado el 95% del tiempo (Caudal Ecológico / Sequía).
-                            * **Q50:** Caudal medio disponible.
+                            Relación entre el caudal y el % de tiempo que es igualado o excedido.
+                            * **Q95:** Caudal Ecológico (disponible 95% del tiempo).
+                            * **Q50:** Caudal Medio.
+                            * **R²:** Indica qué tan bien la ecuación matemática representa los datos reales (cercano a 1.0 es mejor).
                             """)
 
                 # 4. Morfometría
@@ -2375,6 +2383,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
