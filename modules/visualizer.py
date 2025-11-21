@@ -919,6 +919,7 @@ def display_satellite_imagery_tab(gdf_filtered):
     # --- Placeholders para el resto de pestañas ---
 
 def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
+    import geopandas as gpd
     st.subheader("🌍 Superficies de Interpolación y Morfometría")
     
     if df_long.empty or gdf_stations.empty:
@@ -2578,6 +2579,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
