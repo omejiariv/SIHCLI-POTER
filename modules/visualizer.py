@@ -1039,13 +1039,69 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 cols[4].metric("Q (L/s)", f"{q_ls:.0f} L/s")
                 st.info(f"**Volumen:** {vol_val:.2f} millones de m³.")
 
-                # 3. FDC (Curva Duración)
-                if 'fdc_data' in res and not res['fdc_data'].empty:
-                    st.markdown("#### 📉 Curva de Duración de Caudales (FDC)")
-                    fdc = res['fdc_data']
-                    fig_fdc = px.line(fdc, x="Probabilidad Excedencia (%)", y="Caudal (m³/s)", title="Disponibilidad Hídrica")
-                    fig_fdc.update_layout(height=400)
-                    st.plotly_chart(fig_fdc, use_container_width=True)
+                # 3. FDC (Curva Duración con Ajuste)
+                fdc_res = res.get('fdc_data') # Ahora es un diccionario, no solo DF
+                
+                # Comprobamos si fdc_res es válido (diccionario con datos)
+                if fdc_res and isinstance(fdc_res, dict) and not fdc_res['data'].empty:
+                    st.markdown("---")
+                    st.subheader("📉 Curva de Duración de Caudales (FDC)")
+                    
+                    c_fdc1, c_fdc2 = st.columns([3, 1])
+                    
+                    with c_fdc1:
+                        fdc_df = fdc_res['data']
+                        fig_fdc = go.Figure()
+                        
+                        # Datos Reales
+                        fig_fdc.add_trace(go.Scatter(
+                            x=fdc_df["Probabilidad Excedencia (%)"], 
+                            y=fdc_df["Caudal (m³/s)"],
+                            mode='lines', 
+                            line=dict(color='#1f77b4', width=2),
+                            name='Datos Observados',
+                            fill='tozeroy', fillcolor='rgba(31, 119, 180, 0.1)'
+                        ))
+                        
+                        # Línea de Tendencia (Ecuación)
+                        if len(fdc_res['trend_x']) > 0:
+                            fig_fdc.add_trace(go.Scatter(
+                                x=fdc_res['trend_x'], 
+                                y=fdc_res['trend_y'],
+                                mode='lines',
+                                line=dict(color='red', dash='dash', width=2),
+                                name='Ajuste Cúbico'
+                            ))
+
+                        # Puntos Clave
+                        try:
+                            q95 = fdc_df.iloc[int(len(fdc_df)*0.95)]["Caudal (m³/s)"]
+                            q50 = fdc_df.iloc[int(len(fdc_df)*0.50)]["Caudal (m³/s)"]
+                            fig_fdc.add_vline(x=95, line_dash="dot", annotation_text=f"Q95: {q95:.2f}")
+                            fig_fdc.add_vline(x=50, line_dash="dot", annotation_text=f"Q50: {q50:.2f}")
+                        except: pass
+                        
+                        fig_fdc.update_layout(
+                            xaxis_title="Probabilidad de Excedencia (%)", 
+                            yaxis_title="Caudal (m³/s)", 
+                            height=450,
+                            hovermode="x unified"
+                        )
+                        st.plotly_chart(fig_fdc, use_container_width=True)
+
+                    with c_fdc2:
+                        st.markdown("**Ecuación de Ajuste:**")
+                        st.latex(fdc_res['equation'].replace('Q', 'Q').replace('P', 'P_{exc}'))
+                        
+                        with st.expander("ℹ️ Interpretación FDC"):
+                            st.markdown("""
+                            **Curva de Duración de Caudales (FDC):**
+                            Representa la relación entre la magnitud del caudal y la frecuencia con la que es igualado o excedido.
+                            
+                            * **Ecuación:** Ajuste polinómico de 3er grado ($Q = f(P)$).
+                            * **Q95:** Caudal garantizado el 95% del tiempo (Caudal Ecológico / Sequía).
+                            * **Q50:** Caudal medio disponible.
+                            """)
 
                 # 4. Morfometría
                 st.markdown("#### 📐 Morfometría")
@@ -2319,6 +2375,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
