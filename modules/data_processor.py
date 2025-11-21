@@ -6,8 +6,12 @@ from sqlalchemy import create_engine, text
 from shapely import wkt
 from modules.config import Config
 
-@st.cache_data(show_spinner="Procesando datos...", ttl=600)
+@st.cache_data(show_spinner="Cargando y limpiando datos...", ttl=600)
 def load_and_process_all_data():
+    """
+    Carga datos desde Supabase.
+    Garantiza nombres únicos para evitar el error 'DataFrame has no attribute unique'.
+    """
     gdf_stations = pd.DataFrame()
     gdf_municipios = pd.DataFrame()
     gdf_subcuencas = pd.DataFrame()
@@ -22,14 +26,16 @@ def load_and_process_all_data():
 
         engine = create_engine(st.secrets["DATABASE_URL"])
 
+        # ---------------------------------------------------------
         # 1. CARGAR ESTACIONES
+        # ---------------------------------------------------------
         try:
             sql_est = text("""
                 SELECT id_estacion, nom_est, alt_est, municipio, depto_region, ST_AsText(geom) as wkt 
                 FROM estaciones
             """)
             df_est = pd.read_sql(sql_est, engine)
-
+            
             # Geometría
             def parse_geom(x):
                 try: return wkt.loads(x) if x else None
@@ -41,18 +47,26 @@ def load_and_process_all_data():
             else:
                 gdf_stations = df_est.copy()
 
-            # --- CORRECCIÓN DE DUPLICADOS (CLAVE ÚNICA) ---
-            # Creamos una etiqueta única combinando Nombre + ID
-            gdf_stations['nom_est'] = gdf_stations['nom_est'].astype(str).str.strip()
-            gdf_stations['station_label'] = gdf_stations['nom_est'] + " [" + gdf_stations['id_estacion'].astype(str) + "]"
+            # --- CORRECCIÓN CRÍTICA: ETIQUETA ÚNICA ---
+            # Crear nueva columna con nombre único
+            gdf_stations['station_label'] = gdf_stations['nom_est'].astype(str).str.strip() + " [" + gdf_stations['id_estacion'].astype(str) + "]"
             
-            # Renombrar para usar la etiqueta única como nombre principal
+            # Eliminar columnas conflictivas ANTES de renombrar
+            # Esto previene que 'nom_est' choque con el nuevo nombre
+            cols_to_drop = ['nom_est'] 
+            gdf_stations.drop(columns=[c for c in cols_to_drop if c in gdf_stations.columns], inplace=True)
+
+            # Renombrar usando el mapa de configuración
+            # station_label -> STATION_NAME_COL
             gdf_stations = gdf_stations.rename(columns={
-                'station_label': Config.STATION_NAME_COL, # AHORA ESTE ES EL NOMBRE QUE VE EL USUARIO
+                'station_label': Config.STATION_NAME_COL,
                 'alt_est': Config.ALTITUDE_COL,
                 'municipio': Config.MUNICIPALITY_COL,
                 'depto_region': Config.REGION_COL
             })
+
+            # Limpieza final de duplicados de columnas
+            gdf_stations = gdf_stations.loc[:, ~gdf_stations.columns.duplicated()]
 
             # Lat/Lon
             if 'geometry' in gdf_stations.columns:
@@ -63,19 +77,19 @@ def load_and_process_all_data():
         except Exception as e:
             st.warning(f"Error cargando estaciones: {e}")
 
+        # ---------------------------------------------------------
         # 2. CARGAR PRECIPITACIÓN
+        # ---------------------------------------------------------
         try:
-            # Usamos el ID FK para unir, que es único
             sql_ppt = text('SELECT id_estacion_fk, "fecha_mes_año", precipitation FROM precipitacion_mensual')
             df_ppt = pd.read_sql(sql_ppt, engine)
             df_ppt[Config.DATE_COL] = pd.to_datetime(df_ppt['fecha_mes_año'])
             
             if not gdf_stations.empty:
-                # MERGE USANDO EL ID REAL (id_estacion), NO EL NOMBRE
-                # Esto evita mezclar datos de estaciones homónimas
+                # Merge usando ID
                 df_long = pd.merge(
                     df_ppt,
-                    gdf_stations[['id_estacion', Config.STATION_NAME_COL]], # Traemos el nombre único
+                    gdf_stations[['id_estacion', Config.STATION_NAME_COL]], 
                     left_on='id_estacion_fk',
                     right_on='id_estacion',
                     how='inner'
@@ -85,21 +99,27 @@ def load_and_process_all_data():
                 df_long[Config.YEAR_COL] = df_long[Config.DATE_COL].dt.year
                 df_long[Config.MONTH_COL] = df_long[Config.DATE_COL].dt.month
         except Exception as e:
-            st.error(f"Error cargando precipitación: {e}")
+            # st.error(f"Error ppt: {e}") # Opcional
+            pass
 
-        # 3. CARGAR GEOMETRÍAS
+        # ---------------------------------------------------------
+        # 3. GEOMETRÍAS ADICIONALES
+        # ---------------------------------------------------------
         try:
             sql_geo = text("SELECT nombre, tipo_geometria, ST_AsText(geom) as wkt FROM geometrias")
             df_geo = pd.read_sql(sql_geo, engine)
             if not df_geo.empty:
                 df_geo['geometry'] = df_geo['wkt'].apply(parse_geom)
                 gdf_all = gpd.GeoDataFrame(df_geo, geometry='geometry', crs="EPSG:4326")
+                
                 gdf_municipios = gdf_all[gdf_all['tipo_geometria'] == 'municipio']
                 gdf_subcuencas = gdf_all[gdf_all['tipo_geometria'].isin(['subcuenca', 'cuenca'])]
                 gdf_predios = gdf_all[gdf_all['tipo_geometria'] == 'predio']
         except: pass
 
+        # ---------------------------------------------------------
         # 4. ENSO
+        # ---------------------------------------------------------
         try:
             df_enso = pd.read_sql(text("SELECT * FROM indices_climaticos"), engine)
             df_enso.columns = [c.lower() for c in df_enso.columns]
@@ -111,12 +131,11 @@ def load_and_process_all_data():
         return gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios
 
     except Exception as e:
-        st.error(f"Error crítico: {e}")
+        st.error(f"Error crítico conexión: {e}")
         return None, None, None, None, None, None
 
 def complete_series(df):
     if df is None or df.empty: return df
     df = df.sort_values(Config.DATE_COL)
-    # Interpolación lineal simple
     df[Config.PRECIPITATION_COL] = df[Config.PRECIPITATION_COL].interpolate(method='linear', limit_direction='both')
     return df
