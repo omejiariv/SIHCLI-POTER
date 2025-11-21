@@ -1034,11 +1034,47 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 # 2. Balance y Morfometría
                 st.markdown("---")
                 b = res['bal']
-                st.subheader("💧 Balance Hídrico")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Ppt Media", f"{b.get('P',0):.0f} mm")
-                c2.metric("Caudal (Q)", f"{b.get('Q_mm',0):.0f} mm")
-                c3.metric("Volumen", f"{b.get('Vol',0):.2f} Mm³")
+                m = res['morph']
+                
+                st.subheader("💧 Balance Hídrico y Morfometría")
+                
+                # Fila 1: Morfometría Básica
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Área Cuenca", f"{m['area_km2']*100:.0f} ha") # km2 a ha
+                c2.metric("Perímetro", f"{m['perimetro_km']:.1f} km")
+                c3.metric("Altitud Media", f"{m['alt_prom_m']:.0f} msnm")
+                c4.metric("Pendiente Media", f"{m['pendiente_prom']:.1f} %")
+                
+                # Fila 2: Hidrología (Balance)
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Precipitación Media (P)", f"{b.get('P',0):.0f} mm/año")
+                k2.metric("Evapotranspiración (ET)", f"{b.get('ET',0):.0f} mm/año")
+                
+                # ESD (Exceso de Precipitación / Escorrentía Directa en mm)
+                esd_mm = max(0, b.get('Q_mm', 0))
+                k3.metric("Escorrentía (ESD)", f"{esd_mm:.0f} mm/año")
+                
+                # Caudal en L/s
+                vol_mm3 = b.get('Vol', 0) # Millones de m3
+                # L/s = (Mm3 * 10^9) / (31536000 segundos/año)
+                q_ls = (vol_mm3 * 1_000_000_000) / 31536000 if vol_mm3 > 0 else 0
+                k4.metric("Caudal Medio (Q)", f"{q_ls:.0f} L/s")
+                
+                # Volumen Total
+                st.success(f"**Volumen Total Anual Ofertado:** {vol_mm3:.2f} Millones de m³")
+
+                # Caja Informativa Desplegable
+                with st.expander("ℹ️ Metodología del Balance Hídrico"):
+                    st.markdown("""
+                    **Método de Turc (Balance de Largo Plazo):**
+                    Este modelo estima la escorrentía media anual en función de la lluvia y la temperatura.
+                    
+                    * **P (Precipitación):** Promedio ponderado de la lluvia interpolada sobre la cuenca.
+                    * **ET (Evapotranspiración Real):** Calculada con la fórmula de Turc, que considera la capacidad evaporante de la atmósfera según la temperatura media.
+                    * **ESD (Escorrentía):** Diferencia neta $P - ET$. Es la lámina de agua disponible.
+                    * **Q (Caudal):** Volumen de agua que fluye por el punto de cierre (ESD $\times$ Área).
+                    """)
+                # --------------------------------------------------
 
                 # --- CURVA HIPSOMÉTRICA (RESTAURADA) ---
                 # Calculamos la curva usando la geometría de la cuenca
@@ -2354,6 +2390,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
