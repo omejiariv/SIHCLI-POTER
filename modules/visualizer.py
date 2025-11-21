@@ -395,28 +395,67 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
                 with st.expander("Ver Tabla de Datos Completa"): 
                     st.dataframe(df, use_container_width=True)
 
-    # --- SUB-PESTAÑA 2: SATÉLITE (CON CORRECCIÓN DE VERSIÓN) ---
+    # --- SUB-PESTAÑA 2: SATÉLITE (ESTABILIZADA) ---
     with tab_sat:
         st.subheader("Observación Satelital")
-        sat_mode = st.radio("Modo:", ["Animación (Visible)", "Mapa Interactivo (Infrarrojo)"], horizontal=True)
         
-        if sat_mode == "Animación (Visible)":
-            # AQUÍ ESTÁ LA CORRECCIÓN CLAVE: use_column_width
-            st.image(
-                "https://cdn.star.nesdis.noaa.gov/GOES16/ABI/GIFS/GOES16-ABI-GEOCOLOR-1000x1000.gif", 
-                caption="GOES-16 GeoColor (Tiempo Real)", 
-                use_column_width=True 
-            )
-        else:
-            try:
-                m = folium.Map(location=[6.2, -75.5], zoom_start=6, tiles="CartoDB dark_matter")
-                folium.raster_layers.WmsTileLayer(
-                    url="https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?", 
-                    layers='xc04', fmt='image/png', transparent=True, attr='NOAA', name='Infrarrojo'
-                ).add_to(m)
-                folium.LayerControl().add_to(m)
-                st_folium(m, height=600, width="100%")
-            except: st.error("Error satélite.")
+        # Controles
+        c_sat1, c_sat2 = st.columns([1, 3])
+        with c_sat1:
+            sat_mode = st.radio("Modo:", ["Animación (Visible)", "Mapa Interactivo (Lluvia/Nubes)"], index=1)
+            show_stations_sat = st.checkbox("Mostrar Estaciones", value=True)
+        
+        with c_sat2:
+            if sat_mode == "Animación (Visible)":
+                # GIF Oficial NOAA (GeoColor) - Muy estable
+                st.image(
+                    "https://cdn.star.nesdis.noaa.gov/GOES16/ABI/GIFS/GOES16-ABI-GEOCOLOR-1000x1000.gif", 
+                    caption="GOES-16 GeoColor (Tiempo Real)", 
+                    use_column_width=True 
+                )
+            else:
+                # Mapa Interactivo
+                try:
+                    # Usamos OpenStreetMap por estabilidad, centrado en la zona de interés
+                    m = folium.Map(location=[6.2, -75.5], zoom_start=7, tiles="OpenStreetMap")
+                    
+                    # Capa de Radar de Lluvia (RainViewer - Cobertura Global y Rápida)
+                    folium.TileLayer(
+                        tiles="https://tile.rainviewer.com/nowcast/now/256/{z}/{x}/{y}/2/1_1.png",
+                        attr="RainViewer",
+                        name="Radar de Lluvia (Tiempo Real)",
+                        overlay=True,
+                        opacity=0.7
+                    ).add_to(m)
+
+                    # Capa de Nubes (Infrarrojo) - Opcional, si RainViewer falla
+                    folium.TileLayer(
+                        tiles="https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-east-ir-4km-900913/{z}/{x}/{y}.png",
+                        attr="IEM/NOAA",
+                        name="Nubes Infrarrojo",
+                        overlay=True,
+                        opacity=0.5,
+                        show=False # Oculta por defecto para no saturar
+                    ).add_to(m)
+
+                    # Mostrar Estaciones (Lo que pediste recuperar)
+                    if show_stations_sat and gdf_filtered is not None and not gdf_filtered.empty:
+                        for _, row in gdf_filtered.dropna(subset=['latitude', 'longitude']).iterrows():
+                            folium.CircleMarker(
+                                location=[row['latitude'], row['longitude']],
+                                radius=3,
+                                color='red',
+                                fill=True,
+                                fill_opacity=1,
+                                tooltip=row[Config.STATION_NAME_COL]
+                            ).add_to(m)
+
+                    folium.LayerControl().add_to(m)
+                    st_folium(m, height=600, width="100%")
+                    
+                    st.caption("🔵 Capa de Lluvia: Radar Meteorológico (RainViewer). ☁️ Capa de Nubes: GOES-16 Infrarrojo.")
+                except Exception as e:
+                    st.error(f"Error cargando el mapa satelital: {e}")
 
     # --- SUB-PESTAÑA 3: ALERTAS ---
     with tab_alert:
@@ -2253,6 +2292,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
