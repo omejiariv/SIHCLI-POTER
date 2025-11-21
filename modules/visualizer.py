@@ -1161,7 +1161,7 @@ def display_climate_forecast_tab(**kwargs):
                 st.dataframe(df_plot.pivot(index='Fecha', columns='Modelo', values='Valor'), use_container_width=True)
         else:
             st.error("No se pudo descargar el pronóstico. Mostrando imagen de respaldo.")
-            st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png")
+            st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", width=700)
 
 def display_trends_and_forecast_tab(**kwargs):
     st.subheader("📉 Tendencias, Pronósticos y Riesgo")
@@ -2292,6 +2292,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
