@@ -969,10 +969,21 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         mask = (df_long[Config.STATION_NAME_COL].isin(ids)) & (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
                         
                         # Promedio Anual Real (mm/año)
-                        df_ann = df_long[mask].groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-                        df_pts = df_ann.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-                        df_m = pd.merge(df_pts, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
 
+                        # 1. Sumar por año (Total Anual)
+                        df_ann = df_long[mask].groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+                        
+                        # 2. FILTRAR AÑOS INCOMPLETOS/CEROS
+                        # Asumimos que en esta zona llover menos de 100mm AL AÑO es un error de registro (año vacío)
+                        # Ajusta este umbral según la climatología local (ej. 50mm para zonas muy secas, 500mm para selva)
+                        df_ann_valid = df_ann[df_ann[Config.PRECIPITATION_COL] > 100] 
+                        
+                        # 3. Promediar solo años válidos
+                        df_points = df_ann_valid.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+                        
+                        # Unir coordenadas
+                        df_m = pd.merge(df_points, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
+                        
                         if len(df_m) >= 3:
                             # B. Interpolación
                             bounds = buf.bounds
@@ -2459,6 +2470,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
