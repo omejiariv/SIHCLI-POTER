@@ -655,6 +655,37 @@ def calculate_percentiles_extremes(df_long, station_name, p_low=10, p_high=90):
     
     return df_station, thresh_low, thresh_high
 
+def calculate_duration_curve(series, runoff_coeff=1.0, area_km2=1.0):
+    """
+    Calcula la Curva de Duración de Caudales (FDC) a partir de una serie de precipitación.
+    Transforma P (mm/mes) a Q (m3/s) usando el coeficiente de escorrentía y el área.
+    """
+    if series.empty: return None
+    
+    # 1. Transformar Lluvia (mm/mes) a Caudal Medio Mensual (m3/s)
+    # Q (m3/s) = (P_mm * C * Area_km2 * 1000) / (DaysInMonth * 24 * 3600)
+    # Simplificación promedio mes (30.44 días):
+    # Factor: (1000 * 1e6) / (30.44 * 86400) approx 0.38
+    # Pero haremos el cálculo vectorizado preciso si es posible, o promedio simple:
+    
+    # Q_mm_mes = P_mm_mes * C
+    q_mm = series * runoff_coeff
+    
+    # Q_m3_s = (Q_mm * Area_km2 * 1000) / (Segundos en el mes)
+    # Usamos promedio de segundos por mes (2.628e+6) para simplificar visualización
+    q_m3s = (q_mm * area_km2 * 1000) / 2629746 
+    
+    # 2. Ordenar de Mayor a Menor
+    sorted_q = q_m3s.sort_values(ascending=False)
+    
+    # 3. Calcular Probabilidad de Excedencia
+    n = len(sorted_q)
+    exceedance_prob = np.arange(1, n + 1) / (n + 1) * 100
+    
+    return pd.DataFrame({
+        "Probabilidad Excedencia (%)": exceedance_prob,
+        "Caudal (m³/s)": sorted_q.values
+    })
 
 
 
