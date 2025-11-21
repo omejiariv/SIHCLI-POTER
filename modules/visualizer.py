@@ -884,25 +884,23 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
     
     # --- FUNCIÓN INTERNA DE INTERPOLACIÓN (DEFINIDA AQUÍ PARA EVITAR NAMEERROR) ---
     def run_interpolation(df_data, method, grid_bounds, grid_res=100):
-        from scipy.interpolate import griddata, Rbf
-        minx, maxx, miny, maxy = grid_bounds
-        grid_x, grid_y = np.mgrid[minx:maxx:complex(grid_res), miny:maxy:complex(grid_res)]
-        
-        points = df_data[['longitude', 'latitude']].values
-        values = df_data[Config.PRECIPITATION_COL].values
-        
         try:
+            from scipy.interpolate import griddata, Rbf
+            minx, maxx, miny, maxy = grid_bounds
+            grid_x, grid_y = np.mgrid[minx:maxx:complex(grid_res), miny:maxy:complex(grid_res)]
+            
+            points = df_data[['longitude', 'latitude']].values
+            values = df_data[Config.PRECIPITATION_COL].values
+            
             if "Spline" in method:
                 grid_z = griddata(points, values, (grid_x, grid_y), method='cubic')
             elif "Kriging" in method:
-                # RBF funciona como un Kriging suavizado
                 rbf = Rbf(points[:,0], points[:,1], values, function='thin_plate')
                 grid_z = rbf(grid_x, grid_y)
             else:
                 grid_z = griddata(points, values, (grid_x, grid_y), method='linear')
             return grid_x, grid_y, grid_z
-        except Exception: 
-            return None, None, None
+        except: return None, None, None
 
     # -------------------------------------------------------------------------
     # MODO 1: REGIONAL (COMPARATIVO)
@@ -2275,6 +2273,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
