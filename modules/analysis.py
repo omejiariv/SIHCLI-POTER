@@ -364,7 +364,7 @@ def calculate_hydrological_balance(precip_mm_anual, alt_media_m, gdf_basin):
     return {
         "P": precip_mm_anual,
         "ET": etr,
-        "Q": q_mm,
+        "Q": q, "Q_mm": q,
         "Vol": vol_mm3,
         "Alt": alt_media_m,
         "Area": area
@@ -686,6 +686,7 @@ def calculate_duration_curve(series, runoff_coeff=1.0, area_km2=1.0):
         "Probabilidad Excedencia (%)": exceedance_prob,
         "Caudal (m³/s)": sorted_q.values
     })
+
 
 
 
