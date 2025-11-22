@@ -1399,18 +1399,17 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
         else:
             st.info("Seleccione cuencas.")
             
+# PESTAÑA DE PRONÓSTICO CLIMÁTICO (INDICES + GENERADOR)
+# -----------------------------------------------------------------------------
 def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático (Índices Globales)")
     
     df_enso = kwargs.get('df_enso')
-    df_long = kwargs.get('df_long') # Necesario si queremos usar SOI/IOD del histórico
     
     # 3 Pestañas: Pasado, Futuro Oficial, Futuro Propio (Regresor)
     tab_hist, tab_iri, tab_gen = st.tabs(["📜 Evolución Histórica", "🌎 Pronóstico Oficial (IRI/CPC)", "⚙️ Generador de Regresores"])
 
-    # ---------------------------------------------------------
-    # PESTAÑA 1: HISTORIA (Visualización simple)
-    # ---------------------------------------------------------
+    # --- PESTAÑA 1: HISTORIA ---
     with tab_hist:
         if df_enso is None or df_enso.empty:
             st.warning("No hay datos de índices climáticos cargados.")
@@ -1421,134 +1420,66 @@ def display_climate_forecast_tab(**kwargs):
             if index_col in df_enso.columns:
                 data = df_enso.dropna(subset=[index_col]).sort_values(Config.DATE_COL)
                 fig = px.line(data, x=Config.DATE_COL, y=index_col, title=f"Evolución Histórica: {index_col}")
-                
-                # Líneas de referencia solo para ONI
                 if index_col == Config.ENSO_ONI_COL:
                     fig.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
                     fig.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
-                    
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning(f"Columna {index_col} no encontrada.")
 
-    # ---------------------------------------------------------
-    # PESTAÑA 2: PRONÓSTICO IRI (La Pluma Oficial)
-    # ---------------------------------------------------------
+    # --- PESTAÑA 2: PRONÓSTICO IRI ---
     with tab_iri:
-        st.markdown("#### Pluma de Predicción ENSO (International Research Institute)")
-        st.caption("Pronóstico consolidado de modelos globales sobre la temperatura del Pacífico (Niño 3.4).")
-        
+        st.markdown("#### Pluma de Predicción ENSO (IRI/CPC)")
         with st.spinner("Conectando con servidores del IRI..."):
             df_iri = get_iri_enso_forecast()
-            
         if not df_iri.empty:
-            # Filtrar últimos meses y futuro
             last_obs = df_iri[df_iri['Tipo'] == 'Observado']['Fecha'].max()
             df_plot = df_iri[df_iri['Fecha'] >= (last_obs - pd.DateOffset(months=4))]
-            
             fig_plume = go.Figure()
-            
-            # 1. Modelos individuales (Espagueti)
             for model in df_plot['Modelo'].unique():
                 sub = df_plot[df_plot['Modelo'] == model]
                 tipo = sub.iloc[0]['Tipo']
-                
-                # Estilo según tipo
-                if tipo == 'Observado':
-                    color, width, opac, name = 'black', 4, 1, "Observado"
-                elif 'AVG' in model.upper(): # Promedios
-                    color, width, opac, name = 'blue', 3, 1, model
-                elif tipo == 'Dinámico':
-                    color, width, opac, name = 'orange', 1, 0.3, "Dinámicos"
-                else:
-                    color, width, opac, name = 'green', 1, 0.3, "Estadísticos"
-                
-                show_leg = True if width > 1 else False # Solo leyenda para los importantes
-                
-                fig_plume.add_trace(go.Scatter(
-                    x=sub['Fecha'], y=sub['Valor'], mode='lines',
-                    line=dict(color=color, width=width), opacity=opac,
-                    name=name, showlegend=show_leg, hoverinfo='text+y', text=model
-                ))
-            
-            # 2. Umbrales
-            fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
-            fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
-            
-            fig_plume.update_layout(
-                title=f"Pronóstico Multimodelo ENSO - Actualizado a {last_obs.strftime('%Y-%m')}",
-                yaxis_title="Anomalía SST (°C)", height=550, hovermode="x unified"
-            )
+                color, width, opac = ('black', 4, 1) if tipo == 'Observado' else (('blue', 3, 1) if 'AVG' in model.upper() else ('orange', 1, 0.3))
+                fig_plume.add_trace(go.Scatter(x=sub['Fecha'], y=sub['Valor'], mode='lines', line=dict(color=color, width=width), opacity=opac, name=model, showlegend=(width>1)))
+            fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red"); fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue")
+            fig_plume.update_layout(title=f"Pronóstico Multimodelo ENSO", yaxis_title="Anomalía SST (°C)", height=500)
             st.plotly_chart(fig_plume, use_container_width=True)
-            
-            with st.expander("Ver Tabla de Datos"):
-                st.dataframe(df_plot.pivot(index='Fecha', columns='Modelo', values='Valor'), use_container_width=True)
         else:
-            st.error("No se pudo descargar el pronóstico. Mostrando imagen de respaldo.")
             st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", width=700)
 
-    # ---------------------------------------------------------
-    # PESTAÑA 3: GENERADOR (La función recuperada)
-    # ---------------------------------------------------------
+    # --- PESTAÑA 3: GENERADOR (PARA REGRESORES) ---
     with tab_gen:
         st.markdown("#### Entrenar Pronóstico de Índice Climático (Prophet)")
-        st.info("""
-        Esta herramienta entrena un modelo de Inteligencia Artificial (Prophet) exclusivamente con los datos históricos del índice seleccionado.
-        **El resultado se guardará en memoria** para que puedas usarlo como **"Regresor Externo"** al pronosticar la lluvia en la pestaña de Tendencias.
-        """)
+        st.info("Genere una proyección de índices (ONI, SOI) para usarla como **Variable Externa** en el pronóstico de lluvias.")
         
-        # Preparar datos de índices disponibles
         indices_data = {}
-        if df_enso is not None and Config.ENSO_ONI_COL in df_enso.columns:
-            indices_data["ONI (El Niño)"] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.ENSO_ONI_COL:'y', Config.DATE_COL:'ds'}).dropna()
-        if df_enso is not None and Config.SOI_COL in df_enso.columns:
-            indices_data["SOI"] = df_enso[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.SOI_COL:'y', Config.DATE_COL:'ds'}).dropna()
-        if df_enso is not None and Config.IOD_COL in df_enso.columns:
-            indices_data["IOD"] = df_enso[[Config.DATE_COL, Config.IOD_COL]].rename(columns={Config.IOD_COL:'y', Config.DATE_COL:'ds'}).dropna()
+        if df_enso is not None:
+            if Config.ENSO_ONI_COL in df_enso.columns: indices_data["ONI"] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.ENSO_ONI_COL:'y', Config.DATE_COL:'ds'}).dropna()
+            if Config.SOI_COL in df_enso.columns: indices_data["SOI"] = df_enso[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.SOI_COL:'y', Config.DATE_COL:'ds'}).dropna()
 
-        if not indices_data:
-            st.warning("No hay datos suficientes para entrenar.")
+        if not indices_data: st.warning("No hay datos suficientes.")
         else:
             c1, c2 = st.columns(2)
-            idx_sel = c1.selectbox("Seleccionar Índice para Pronosticar:", list(indices_data.keys()))
+            idx_sel = c1.selectbox("Índice para Pronosticar:", list(indices_data.keys()))
             horizon_idx = c2.slider("Meses a Futuro:", 12, 60, 24)
             
-            if st.button(f"🚀 Generar Pronóstico Futuro de {idx_sel}"):
+            if st.button(f"🚀 Generar Pronóstico {idx_sel}"):
                 with st.spinner(f"Entrenando Prophet para {idx_sel}..."):
                     try:
-                        from prophet import Prophet
                         df_train = indices_data[idx_sel]
-                        
-                        # Entrenar
-                        m = Prophet(weekly_seasonality=False, daily_seasonality=False)
-                        m.fit(df_train)
-                        
-                        # Predecir
+                        m = Prophet(weekly_seasonality=False, daily_seasonality=False).fit(df_train)
                         future = m.make_future_dataframe(periods=horizon_idx, freq='MS')
                         forecast = m.predict(future)
                         
-                        # GUARDAR EN SESIÓN (Para que SARIMA lo vea)
-                        if 'forecasted_regressors' not in st.session_state:
-                            st.session_state['forecasted_regressors'] = {}
+                        if 'forecasted_regressors' not in st.session_state: st.session_state['forecasted_regressors'] = {}
+                        st.session_state['forecasted_regressors'][idx_sel] = forecast[['ds', 'yhat']].rename(columns={'yhat': idx_sel})
                         
-                        # Guardamos con el nombre simple (ONI, SOI) para facilitar el merge después
-                        key_name = idx_sel.split()[0] # "ONI (El Niño)" -> "ONI"
-                        st.session_state['forecasted_regressors'][key_name] = forecast[['ds', 'yhat']].rename(columns={'yhat': key_name})
-                        
-                        st.success(f"✅ Pronóstico de {key_name} generado exitosamente ({horizon_idx} meses). Ahora puedes ir a 'Tendencias' y seleccionarlo como regresor.")
-                        
-                        # Visualizar
+                        st.success(f"✅ Pronóstico de {idx_sel} guardado. Disponible en pestaña 'Tendencias'.")
                         fig = go.Figure()
                         fig.add_trace(go.Scatter(x=df_train['ds'], y=df_train['y'], name='Histórico', line=dict(color='black')))
                         fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='Pronóstico', line=dict(color='red')))
-                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_upper'], line=dict(width=0), showlegend=False))
-                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_lower'], line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)', name='Incertidumbre'))
-                        
-                        fig.update_layout(title=f"Proyección de {idx_sel}", yaxis_title="Valor Índice", height=500)
                         st.plotly_chart(fig, use_container_width=True)
-                        
-                    except Exception as e:
-                        st.error(f"Error en el entrenamiento: {e}")
+                    except Exception as e: st.error(f"Error: {e}")
+
+# -----------------------------------------------------------------------------
 
 def display_trends_and_forecast_tab(**kwargs):
     st.subheader("📉 Tendencias, Pronósticos y Riesgo")
@@ -1563,7 +1494,32 @@ def display_trends_and_forecast_tab(**kwargs):
         st.warning("Seleccione estaciones en el panel lateral.")
         return
 
-    # Pestañas Principales (MANTENIENDO TU ESTRUCTURA DE 7 TABS)
+    # 1. SELECTOR GLOBAL DE SERIE (Estación o Regional)
+    st.markdown("##### Configuración de la Serie de Tiempo")
+    mode_fc = st.radio("Modo de Análisis:", ["Estación Individual", "Serie Regional (Promedio)"], horizontal=True, key="fc_mode_selector")
+
+    ts_source = None
+    station_name_title = ""
+
+    if mode_fc == "Estación Individual":
+        selected_station = st.selectbox("Seleccionar Estación:", stations, key="trend_st")
+        if selected_station:
+            station_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == selected_station].sort_values(Config.DATE_COL).set_index(Config.DATE_COL)
+            ts_source = station_data[Config.PRECIPITATION_COL]
+            station_name_title = selected_station
+    else:
+        # Promedio regional
+        ts_source = df_monthly.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
+        station_name_title = "Promedio Regional"
+
+    if ts_source is None or len(ts_source) < 24:
+        st.error("Datos insuficientes (<24 meses) para el análisis.")
+        return
+
+    # Limpieza y Frecuencia (Blindaje contra errores)
+    ts_clean = ts_source.asfreq('MS').interpolate(method='time').dropna()
+
+    # 2. ESTRUCTURA DE 7 PESTAÑAS (RECUPERADA)
     tabs = st.tabs([
         "Análisis de Tendencias", 
         "Descomposición", 
@@ -1573,191 +1529,212 @@ def display_trends_and_forecast_tab(**kwargs):
         "Comparación Modelos",
         "Mapa de Riesgo"
     ])
-    
-    selected_station = st.selectbox("Estación para Análisis Individual:", stations, key="trend_st")
-    
-    # --- CORRECCIÓN CRÍTICA: Preparación de la Serie de Tiempo ---
-    # 1. Filtrar
-    station_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == selected_station].sort_values(Config.DATE_COL).set_index(Config.DATE_COL)
-    # 2. Asignar frecuencia, interpolar Y ELIMINAR NULOS (dropna es la clave para evitar el error anterior)
-    ts = station_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time').dropna()
 
-    # Validar longitud mínima
-    if len(ts) < 24:
-        st.error(f"Datos insuficientes para la estación {selected_station} (se requieren al menos 24 meses continuos).")
-        return
-
-    # 1. TENDENCIAS (Mann-Kendall)
+    # --- TAB 1: TENDENCIAS ---
     with tabs[0]:
+        st.markdown(f"###### Tendencia: {station_name_title}")
         try:
-            res = mk.original_test(ts)
+            res = mk.original_test(ts_clean)
             c1, c2, c3 = st.columns(3)
             c1.metric("Tendencia", res.trend, delta=f"Pendiente: {res.slope:.3f}")
             c2.metric("P-Value", f"{res.p:.4f}")
             c3.metric("Tau Kendall", f"{res.Tau:.3f}")
             
-            fig = px.scatter(ts.reset_index(), x=Config.DATE_COL, y=Config.PRECIPITATION_COL, trendline="ols", title=f"Tendencia Lineal - {selected_station}")
+            fig = px.scatter(ts_clean.reset_index(), x=Config.DATE_COL, y=Config.PRECIPITATION_COL, trendline="ols", title="Tendencia Lineal")
             st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.error(f"Error en Mann-Kendall: {e}")
 
-    # 2. DESCOMPOSICIÓN
+    # --- TAB 2: DESCOMPOSICIÓN ---
     with tabs[1]:
         try:
-            # Ahora ts no tiene NaNs, por lo que esto funcionará
-            decomp = seasonal_decompose(ts, model='additive', period=12)
+            decomp = seasonal_decompose(ts_clean, model='additive', period=12)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=ts.index, y=decomp.trend, name='Tendencia'))
-            fig.add_trace(go.Scatter(x=ts.index, y=decomp.seasonal, name='Estacionalidad'))
-            fig.add_trace(go.Scatter(x=ts.index, y=decomp.resid, name='Residuo', mode='markers'))
-            fig.update_layout(title=f"Descomposición de Serie Temporal - {selected_station}", height=600)
+            fig.add_trace(go.Scatter(x=ts_clean.index, y=decomp.trend, name='Tendencia'))
+            fig.add_trace(go.Scatter(x=ts_clean.index, y=decomp.seasonal, name='Estacionalidad'))
+            fig.add_trace(go.Scatter(x=ts_clean.index, y=decomp.resid, name='Residuo', mode='markers'))
+            fig.update_layout(title="Descomposición Estacional", height=600)
             st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
-            st.error(f"Error en descomposición: {e}")
+            st.error(f"Error descomposición: {e}")
 
-    # 3. AUTOCORRELACIÓN (ACF/PACF)
+    # --- TAB 3: AUTOCORRELACIÓN ---
     with tabs[2]:
         try:
             from statsmodels.tsa.stattools import acf, pacf
-            lag_acf = acf(ts, nlags=min(40, len(ts)//2))
-            lag_pacf = pacf(ts, nlags=min(40, len(ts)//2))
+            nlags = min(40, len(ts_clean)//2 - 1)
+            lag_acf = acf(ts_clean, nlags=nlags)
+            lag_pacf = pacf(ts_clean, nlags=nlags)
             
             c1, c2 = st.columns(2)
-            fig_acf = px.bar(x=range(len(lag_acf)), y=lag_acf, title="Autocorrelación (ACF)")
-            c1.plotly_chart(fig_acf, use_container_width=True)
-            
-            fig_pacf = px.bar(x=range(len(lag_pacf)), y=lag_pacf, title="Autocorrelación Parcial (PACF)")
-            c2.plotly_chart(fig_pacf, use_container_width=True)
+            c1.plotly_chart(px.bar(x=range(len(lag_acf)), y=lag_acf, title="ACF"), use_container_width=True)
+            c2.plotly_chart(px.bar(x=range(len(lag_pacf)), y=lag_pacf, title="PACF"), use_container_width=True)
         except Exception as e:
-            st.error(f"Error en ACF: {e}")
+            st.error(f"Error ACF/PACF: {e}")
 
-    # 4. SARIMA
+    # --- TAB 4: SARIMA (CON REGRESORES) ---
     with tabs[3]:
         st.markdown("#### Pronóstico SARIMA")
-        horizon = st.slider("Horizonte:", 6, 36, 12, key="h_sarima")
+        
+        # Selector de Regresores (NUEVA FUNCIONALIDAD)
+        avail_regs = list(st.session_state.get('forecasted_regressors', {}).keys())
+        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI/IOD):", avail_regs, key="sarima_regs_sel", help="Debe generarlos primero en la pestaña 'Pronóstico Climático'")
+        
+        reg_df = None
+        if sel_regs:
+            try:
+                reg_list = [st.session_state['forecasted_regressors'][k] for k in sel_regs]
+                from functools import reduce
+                # Merge de todos los regresores seleccionados por fecha 'ds' -> date_col
+                reg_df = reduce(lambda left,right: pd.merge(left,right,on='ds', how='outer'), reg_list)
+                # Renombrar 'ds' a la columna de fecha configurada para que coincida con ts_clean
+                reg_df = reg_df.rename(columns={'ds': Config.DATE_COL})
+            except Exception as e:
+                st.error(f"Error preparando regresores: {e}")
+
+        horizon = st.slider("Horizonte (Meses):", 12, 48, 12, key="h_sarima")
         
         if st.button("Calcular SARIMA"):
-            with st.spinner("Ajustando modelo SARIMA..."):
+            from modules.forecasting import generate_sarima_forecast
+            with st.spinner("Calculando SARIMA..."):
                 try:
-                    from statsmodels.tsa.statespace.sarimax import SARIMAX
-                    model = SARIMAX(ts, order=(1, 1, 1), seasonal_order=(1, 1, 1, 12), enforce_stationarity=False, enforce_invertibility=False)
-                    model_fit = model.fit(disp=False)
-                    
-                    forecast = model_fit.get_forecast(steps=horizon)
-                    fc_mean = forecast.predicted_mean
-                    conf_int = forecast.conf_int()
+                    # Convertir ts_clean a DF para la funcion (que espera DF con columnas)
+                    ts_in = ts_clean.reset_index()
+                    # Llamada a la función del backend
+                    _, fc, ci, met, _ = generate_sarima_forecast(
+                        ts_in, order=(1,1,1), seasonal_order=(1,1,1,12), 
+                        horizon=horizon, regressors=reg_df
+                    )
+                    st.success(f"Modelo Ajustado. RMSE: {met['RMSE']:.1f}")
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=ts.index[-60:], y=ts.tail(60), name="Histórico (Últimos 5 años)"))
-                    fig.add_trace(go.Scatter(x=fc_mean.index, y=fc_mean, name="Pronóstico SARIMA", line=dict(color='red', dash='dash')))
-                    
-                    # Intervalo de confianza (Corregido para evitar errores de índice)
+                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Histórico"))
+                    fig.add_trace(go.Scatter(x=fc.index, y=fc, name="Pronóstico", line=dict(color='red')))
+                    # Intervalo
                     fig.add_trace(go.Scatter(
-                        x=pd.concat([pd.Series(conf_int.index), pd.Series(conf_int.index)[::-1]]),
-                        y=pd.concat([conf_int.iloc[:, 0], conf_int.iloc[:, 1][::-1]]),
+                        x=pd.concat([pd.Series(ci.index), pd.Series(ci.index)[::-1]]),
+                        y=pd.concat([ci.iloc[:, 0], ci.iloc[:, 1][::-1]]),
                         fill='toself', fillcolor='rgba(255,0,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
                         name='Intervalo Confianza'
                     ))
                     st.plotly_chart(fig, use_container_width=True)
-                    st.session_state['sarima_res'] = fc_mean
+                    st.session_state['sarima_res'] = fc
                 except Exception as e:
-                    st.error(f"Error en SARIMA: {e}")
+                    st.error(f"Error SARIMA: {e}")
 
-    # 5. PROPHET
+    # --- TAB 5: PROPHET (CON REGRESORES) ---
     with tabs[4]:
         st.markdown("#### Pronóstico Prophet")
-        horizon_p = st.slider("Horizonte:", 6, 36, 12, key="h_prophet")
+        
+        sel_regs_p = st.multiselect("Usar Regresor Externo (ONI/SOI/IOD):", avail_regs, key="prophet_regs_sel")
+        
+        reg_df_p = None
+        if sel_regs_p:
+            try:
+                reg_list = [st.session_state['forecasted_regressors'][k] for k in sel_regs_p]
+                from functools import reduce
+                reg_df_p = reduce(lambda left,right: pd.merge(left,right,on='ds', how='outer'), reg_list)
+            except: pass
+
+        horizon_p = st.slider("Horizonte (Meses):", 12, 48, 12, key="h_prophet")
+        
         if st.button("Calcular Prophet"):
-            with st.spinner("Entrenando Prophet..."):
+            from modules.forecasting import generate_prophet_forecast
+            with st.spinner("Calculando Prophet..."):
                 try:
-                    df_p = ts.reset_index().rename(columns={Config.DATE_COL: 'ds', Config.PRECIPITATION_COL: 'y'})
-                    m = Prophet(yearly_seasonality=True)
-                    m.fit(df_p)
-                    future = m.make_future_dataframe(periods=horizon_p, freq='MS')
-                    fcst = m.predict(future)
+                    ts_in = ts_clean.reset_index()
+                    _, fc, met = generate_prophet_forecast(ts_in, horizon_p, regressors=reg_df_p)
+                    st.success(f"Modelo Ajustado. RMSE: {met['RMSE']:.1f}")
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_p['ds'].tail(60), y=df_p['y'].tail(60), name="Histórico"))
-                    fig.add_trace(go.Scatter(x=fcst['ds'].tail(horizon_p), y=fcst['yhat'].tail(horizon_p), name="Prophet", line=dict(color='green')))
+                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Histórico"))
+                    fig.add_trace(go.Scatter(x=fc['ds'], y=fc['yhat'], name="Pronóstico", line=dict(color='green')))
+                    # Intervalo
                     fig.add_trace(go.Scatter(
-                        x=pd.concat([fcst['ds'].tail(horizon_p), fcst['ds'].tail(horizon_p)[::-1]]),
-                        y=pd.concat([fcst['yhat_lower'].tail(horizon_p), fcst['yhat_upper'].tail(horizon_p)[::-1]]),
+                        x=pd.concat([fc['ds'], fc['ds'][::-1]]),
+                        y=pd.concat([fc['yhat_upper'], fc['yhat_lower'][::-1]]),
                         fill='toself', fillcolor='rgba(0,255,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
                         name='Intervalo Confianza'
                     ))
                     st.plotly_chart(fig, use_container_width=True)
-                    st.session_state['prophet_res'] = fcst[['ds', 'yhat']].tail(horizon_p).set_index('ds')['yhat']
+                    st.session_state['prophet_res'] = fc[['ds', 'yhat']].set_index('ds')['yhat']
                 except Exception as e:
-                    st.error(f"Error en Prophet: {e}")
+                    st.error(f"Error Prophet: {e}")
 
-    # 6. COMPARACIÓN
+    # --- TAB 6: COMPARACIÓN MODELOS ---
     with tabs[5]:
-        s_res = st.session_state.get('sarima_res')
-        p_res = st.session_state.get('prophet_res')
+        st.subheader("Comparación SARIMA vs Prophet")
+        s = st.session_state.get('sarima_res')
+        p = st.session_state.get('prophet_res')
         
-        if s_res is not None and p_res is not None:
+        if s is not None and p is not None:
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=s_res.index, y=s_res, name="SARIMA", line=dict(color='red')))
-            fig.add_trace(go.Scatter(x=p_res.index, y=p_res, name="Prophet", line=dict(color='green')))
-            fig.update_layout(title="Comparación de Modelos", yaxis_title="Precipitación (mm)")
+            fig.add_trace(go.Scatter(x=s.index, y=s, name="SARIMA", line=dict(color='red')))
+            fig.add_trace(go.Scatter(x=p.index, y=p, name="Prophet", line=dict(color='green')))
+            # Histórico reciente
+            fig.add_trace(go.Scatter(x=ts_clean.index[-24:], y=ts_clean[-24:], name="Real", line=dict(color='black', width=2, dash='dot')))
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Ejecute ambos pronósticos (SARIMA y Prophet) primero para ver la comparación.")
+            st.info("Debe ejecutar ambos modelos (SARIMA y Prophet) primero para ver la comparación.")
 
-    # 7. MAPA DE RIESGO (MANTENIENDO TU LÓGICA ORIGINAL + CORRECCIÓN ZMID)
+    # --- TAB 7: MAPA DE RIESGO ---
     with tabs[6]:
         st.markdown("#### Mapa de Vulnerabilidad (Tendencias de Lluvia)")
-        st.info("Interpolación de la Pendiente de Sen (mm/año) para todas las estaciones con >10 años de datos.")
+        st.info("Interpolación de la Pendiente de Sen (mm/año).")
         
         if st.button("Generar Mapa de Riesgo"):
             with st.spinner("Calculando tendencias regionales..."):
                 trend_data = []
-                # Usamos df_anual_melted (kwargs) o el global
-                df_source = df_anual if df_anual is not None else kwargs.get('df_anual_melted')
+                # Usar el df_anual completo para tener más puntos, o filtrar por selección si se prefiere.
+                # Si 'df_anual' viene filtrado por estaciones seleccionadas (sidebar), usamos eso.
+                # Si hay pocas estaciones (<4), intentamos usar TODAS las del archivo original si está disponible en kwargs 'df_long'
+                # Pero por coherencia, usaremos lo que el usuario ve (df_anual).
                 
-                if df_source is not None:
-                    for stn in gdf_stations[Config.STATION_NAME_COL].unique():
-                        sub = df_source[df_source[Config.STATION_NAME_COL] == stn]
-                        if len(sub) > 10:
+                stations_pool = df_anual[Config.STATION_NAME_COL].unique()
+                if len(stations_pool) < 4:
+                    st.warning("Se requieren al menos 4 estaciones seleccionadas para interpolar el mapa de riesgo.")
+                else:
+                    for stn in stations_pool:
+                        sub = df_anual[df_anual[Config.STATION_NAME_COL] == stn]
+                        if len(sub) > 10: # Min 10 años
                             try:
                                 res = mk.original_test(sub[Config.PRECIPITATION_COL])
-                                loc = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == stn].iloc[0]
-                                trend_data.append({
-                                    'lat': loc['latitude'], 'lon': loc['longitude'], 
-                                    'slope': res.slope, 'name': stn
-                                })
+                                # Buscar coordenadas
+                                if gdf_stations is not None:
+                                    loc = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == stn]
+                                    if not loc.empty:
+                                        iloc = loc.iloc[0]
+                                        trend_data.append({
+                                            'lat': iloc['latitude'], 'lon': iloc['longitude'], 
+                                            'slope': res.slope, 'name': stn
+                                        })
                             except: pass
-                
-                if len(trend_data) >= 4:
-                    df_trend = pd.DataFrame(trend_data)
-                    from scipy.interpolate import griddata
                     
-                    pad = 0.1
-                    grid_x, grid_y = np.mgrid[df_trend.lon.min()-pad:df_trend.lon.max()+pad:100j, 
-                                              df_trend.lat.min()-pad:df_trend.lat.max()+pad:100j]
-                    
-                    grid_z = griddata(
-                        df_trend[['lon', 'lat']].values, 
-                        df_trend['slope'].values, 
-                        (grid_x, grid_y), 
-                        method='linear'
-                    )
-                    
-                    fig = go.Figure(data=go.Contour(
-                        z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:],
-                        colorscale='RdBu', 
-                        colorbar=dict(title='Tendencia (mm/año)'),
-                        zmid=0 # <--- ESTA ES LA CORRECCIÓN CLAVE (midpoint -> zmid)
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=df_trend.lon, y=df_trend.lat, mode='markers', 
-                        text=df_trend.apply(lambda row: f"{row['name']}: {row['slope']:.2f}", axis=1),
-                        marker=dict(color='black', size=4), name='Estaciones'
-                    ))
-                    fig.update_layout(title="Mapa de Tendencias de Precipitación (Pendiente Sen)", height=600)
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("No hay suficientes estaciones con >10 años de datos en la selección actual para interpolar un mapa de riesgo.")
+                    if len(trend_data) >= 4:
+                        df_trend = pd.DataFrame(trend_data)
+                        from scipy.interpolate import griddata
+                        
+                        grid_x, grid_y = np.mgrid[df_trend.lon.min():df_trend.lon.max():100j, 
+                                                  df_trend.lat.min():df_trend.lat.max():100j]
+                        
+                        grid_z = griddata(
+                            df_trend[['lon', 'lat']].values, 
+                            df_trend['slope'].values, 
+                            (grid_x, grid_y), 
+                            method='linear'
+                        )
+                        
+                        fig = go.Figure(data=go.Contour(
+                            z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:],
+                            colorscale='RdBu', 
+                            colorbar=dict(title='Tendencia (mm/año)'),
+                            zmid=0
+                        ))
+                        fig.add_trace(go.Scatter(x=df_trend.lon, y=df_trend.lat, mode='markers', text=df_trend.name, marker=dict(color='black')))
+                        fig.update_layout(height=600)
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning("No hay suficientes estaciones con tendencia calculable (>10 años datos) para generar el mapa.")
                     
 def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, **kwargs):
     st.subheader("⚠️ Análisis de Anomalías de Precipitación")
@@ -2647,6 +2624,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
