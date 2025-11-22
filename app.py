@@ -87,7 +87,8 @@ def main():
         "🗺️ Distribución", 
         "📈 Gráficos", 
         "📊 Estadísticas",
-        "📉 Tendencias", 
+        "🔮 Pronóstico Climático", 
+        "📉 Tendencias",
         "⚠️ Anomalías", 
         "🔗 Correlación", 
         "🌊 ENSO", 
@@ -119,35 +120,38 @@ def main():
         st.markdown("---")
         display_station_table_tab(**display_args)
 
-    with tabs[5]: 
-        # AQUÍ ESTABA EL ERROR: Antes decía **args, ahora es **display_args
+    with tabs[5]: # AHORA ES PRONÓSTICO CLIMÁTICO
+        from modules.visualizer import display_climate_forecast_tab
+        display_climate_forecast_tab(**display_args)
+
+    with tabs[6]: # AHORA ES TENDENCIAS
         display_trends_and_forecast_tab(**display_args)
 
-    with tabs[6]: 
+    with tabs[7]: 
         display_anomalies_tab(**display_args)
 
-    with tabs[7]: 
+    with tabs[8]: 
         display_correlation_tab(**display_args)
 
-    with tabs[8]: 
+    with tabs[9]: 
         display_enso_tab(**display_args)
 
-    with tabs[9]: 
+    with tabs[10]: 
         display_drought_analysis_tab(**display_args)
 
-    with tabs[10]: 
+    with tabs[11]: 
         display_advanced_maps_tab(**display_args)
 
-    with tabs[11]: 
+    with tabs[12]: 
         display_land_cover_analysis_tab(**display_args)
 
-    with tabs[12]: 
+    with tabs[13]: 
         display_life_zones_tab(**display_args)
 
-    with tabs[13]: 
+    with tabs[14]: 
         display_climate_scenarios_tab(**display_args)
 
-    with tabs[14]: 
+    with tabs[15]: 
         st.header("Generar Reporte PDF")
         if st.button("Generar Reporte Ejecutivo", type="primary"):
             with st.spinner("Generando..."):
@@ -169,4 +173,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
