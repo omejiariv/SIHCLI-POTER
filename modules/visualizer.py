@@ -1405,6 +1405,7 @@ def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático (Índices Globales)")
     
     df_enso = kwargs.get('df_enso')
+    df_long = kwargs.get('df_long') # Necesario si queremos usar SOI/IOD del histórico
     
     # 3 Pestañas: Pasado, Futuro Oficial, Futuro Propio (Regresor)
     tab_hist, tab_iri, tab_gen = st.tabs(["📜 Evolución Histórica", "🌎 Pronóstico Oficial (IRI/CPC)", "⚙️ Generador de Regresores"])
@@ -1424,6 +1425,8 @@ def display_climate_forecast_tab(**kwargs):
                     fig.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
                     fig.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning(f"Columna {index_col} no encontrada.")
 
     # --- PESTAÑA 2: PRONÓSTICO IRI ---
     with tab_iri:
@@ -1437,25 +1440,32 @@ def display_climate_forecast_tab(**kwargs):
             for model in df_plot['Modelo'].unique():
                 sub = df_plot[df_plot['Modelo'] == model]
                 tipo = sub.iloc[0]['Tipo']
-                color, width, opac = ('black', 4, 1) if tipo == 'Observado' else (('blue', 3, 1) if 'AVG' in model.upper() else ('orange', 1, 0.3))
-                fig_plume.add_trace(go.Scatter(x=sub['Fecha'], y=sub['Valor'], mode='lines', line=dict(color=color, width=width), opacity=opac, name=model, showlegend=(width>1)))
-            fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red"); fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue")
-            fig_plume.update_layout(title=f"Pronóstico Multimodelo ENSO", yaxis_title="Anomalía SST (°C)", height=500)
+                color, width, opac, name = ('black', 4, 1, "Observado") if tipo == 'Observado' else (('blue', 3, 1, model) if 'AVG' in model.upper() else ('orange', 1, 0.3, "Dinámicos"))
+                if tipo == 'Estadístico': color, name = 'green', "Estadísticos"
+                
+                show_leg = True if width > 1 else False
+                fig_plume.add_trace(go.Scatter(x=sub['Fecha'], y=sub['Valor'], mode='lines', line=dict(color=color, width=width), opacity=opac, name=name, showlegend=show_leg, hoverinfo='text+y', text=model))
+            
+            fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
+            fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
+            fig_plume.update_layout(title=f"Pronóstico Multimodelo ENSO", yaxis_title="Anomalía SST (°C)", height=550, hovermode="x unified")
             st.plotly_chart(fig_plume, use_container_width=True)
         else:
             st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", width=700)
 
-    # --- PESTAÑA 3: GENERADOR (PARA REGRESORES) ---
+    # --- PESTAÑA 3: GENERADOR (LA PIEZA FALTANTE) ---
     with tab_gen:
         st.markdown("#### Entrenar Pronóstico de Índice Climático (Prophet)")
         st.info("Genere una proyección de índices (ONI, SOI) para usarla como **Variable Externa** en el pronóstico de lluvias.")
         
         indices_data = {}
         if df_enso is not None:
-            if Config.ENSO_ONI_COL in df_enso.columns: indices_data["ONI"] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.ENSO_ONI_COL:'y', Config.DATE_COL:'ds'}).dropna()
+            if Config.ENSO_ONI_COL in df_enso.columns: indices_data["ONI (El Niño)"] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.ENSO_ONI_COL:'y', Config.DATE_COL:'ds'}).dropna()
             if Config.SOI_COL in df_enso.columns: indices_data["SOI"] = df_enso[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.SOI_COL:'y', Config.DATE_COL:'ds'}).dropna()
+            if Config.IOD_COL in df_enso.columns: indices_data["IOD"] = df_enso[[Config.DATE_COL, Config.IOD_COL]].rename(columns={Config.IOD_COL:'y', Config.DATE_COL:'ds'}).dropna()
 
-        if not indices_data: st.warning("No hay datos suficientes.")
+        if not indices_data: 
+            st.warning("No hay datos suficientes.")
         else:
             c1, c2 = st.columns(2)
             idx_sel = c1.selectbox("Índice para Pronosticar:", list(indices_data.keys()))
@@ -1469,16 +1479,21 @@ def display_climate_forecast_tab(**kwargs):
                         future = m.make_future_dataframe(periods=horizon_idx, freq='MS')
                         forecast = m.predict(future)
                         
+                        # GUARDAR EN SESIÓN
                         if 'forecasted_regressors' not in st.session_state: st.session_state['forecasted_regressors'] = {}
-                        st.session_state['forecasted_regressors'][idx_sel] = forecast[['ds', 'yhat']].rename(columns={'yhat': idx_sel})
+                        # Guardamos con nombre simple para facilitar el uso
+                        key_name = idx_sel.split()[0] # "ONI" de "ONI (El Niño)"
+                        st.session_state['forecasted_regressors'][key_name] = forecast[['ds', 'yhat']].rename(columns={'yhat': key_name})
                         
-                        st.success(f"✅ Pronóstico de {idx_sel} guardado. Disponible en pestaña 'Tendencias'.")
+                        st.success(f"✅ Pronóstico de {key_name} guardado. Disponible en pestaña 'Tendencias'.")
+                        
                         fig = go.Figure()
                         fig.add_trace(go.Scatter(x=df_train['ds'], y=df_train['y'], name='Histórico', line=dict(color='black')))
                         fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='Pronóstico', line=dict(color='red')))
+                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_upper'], line=dict(width=0), showlegend=False))
+                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_lower'], line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)', name='Incertidumbre'))
                         st.plotly_chart(fig, use_container_width=True)
                     except Exception as e: st.error(f"Error: {e}")
-
 # -----------------------------------------------------------------------------
 
 def display_trends_and_forecast_tab(**kwargs):
@@ -2624,6 +2639,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
