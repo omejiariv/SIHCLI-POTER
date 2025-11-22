@@ -737,6 +737,7 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
             labels={Config.PRECIPITATION_COL: "Lluvia (mm)", Config.YEAR_COL: "Año"}
         )
         st.plotly_chart(fig, use_container_width=True)
+        st.session_state['report_fig_anual'] = fig_anual
         
         # Descarga
         st.download_button(
@@ -768,6 +769,7 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
             color_continuous_scale=px.colors.sequential.Blues, text_auto='.0f'
         )
         st.plotly_chart(fig_bar, use_container_width=True)
+        st.session_state['report_fig_ranking'] = fig_rank
         
         st.download_button(
             "📥 Descargar Ranking (CSV)",
@@ -803,6 +805,7 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
                 ))
             
             st.plotly_chart(fig, use_container_width=True)
+            st.session_state['report_fig_mensual'] = fig_mens
             
         st.download_button(
             "📥 Descargar Datos Mensuales (CSV)",
@@ -824,6 +827,7 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         )
         fig_ciclo.update_xaxes(tickmode='linear', tick0=1, dtick=1)
         st.plotly_chart(fig_ciclo, use_container_width=True)
+        st.session_state['report_fig_ciclo'] = fig_cyc
         
         st.download_button(
             "📥 Descargar Ciclo Anual (CSV)",
@@ -865,6 +869,7 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
 
         fig.update_layout(height=600, title=f"Distribución {data_src} - {chart_typ}")
         st.plotly_chart(fig, use_container_width=True)
+        st.session_state['report_fig_dist'] = fig_dist
         
         st.download_button(
             f"📥 Descargar Datos {data_src} (CSV)",
@@ -2601,6 +2606,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
