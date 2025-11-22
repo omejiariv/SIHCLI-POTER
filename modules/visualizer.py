@@ -1290,6 +1290,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             """)
 
                 # 5. Mapa Contexto (ENRIQUECIDO)
+
                 st.markdown("---")
                 st.subheader("📍 Contexto Espacial (Cuenca + Radio 50km)")
                 
@@ -1311,63 +1312,60 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     tooltip="Área de Influencia"
                 ).add_to(m)
                 
-                # --- ESTACIONES CON POPUP AVANZADO ---
-
+                # --- ESTACIONES CON POPUP INTELIGENTE ---
                 if 'df' in res and not res['df'].empty:
                     stations_list = res['df'][Config.STATION_NAME_COL].unique()
                     stats_sub = df_long[df_long[Config.STATION_NAME_COL].isin(stations_list)].copy()
                     
-                    # A. Años activos
-                    years_count = stats_sub[stats_sub[Config.PRECIPITATION_COL] > 0].groupby(Config.STATION_NAME_COL)[Config.YEAR_COL].nunique()
+                    # A. Años activos (totales)
+                    years_count = stats_sub.groupby(Config.STATION_NAME_COL)[Config.YEAR_COL].nunique()
                     
-                    # B. Promedio Mensual
+                    # B. Promedio Mensual (Siempre confiable)
                     monthly_mean = stats_sub.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
-                    
-                    # C. Promedio Anual (CORREGIDO: FILTRAR AÑOS INCOMPLETOS)
-                    # 1. Contar datos por año
-                    counts_per_year = stats_sub.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].count().reset_index()
-                    # 2. Quedarse solo con años que tengan al menos 10 meses de datos
-                    valid_years = counts_per_year[counts_per_year[Config.PRECIPITATION_COL] >= 10]
-                    
-                    # 3. Filtrar los datos originales con esos años válidos
-                    df_valid = pd.merge(stats_sub, valid_years[[Config.STATION_NAME_COL, Config.YEAR_COL]], on=[Config.STATION_NAME_COL, Config.YEAR_COL])
-                    
-                    # 4. Calcular la suma anual solo de los años válidos
-                    ann_sums = df_valid.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-                    
-                    # 5. Promediar esos totales anuales
-                    annual_mean = ann_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean()
-                    
-                    # -----------------------------------------------
-                    # D. Cruce Espacial para saber Subcuenca (On-the-fly)
-                    # Convertimos estaciones a GDF temporal para cruzar con subcuencas
+
+                    # C. Cruce Espacial para saber Subcuenca
+                    basin_map = {}
                     try:
                         import geopandas as gpd
                         pts_geom = gpd.points_from_xy(res['df'].longitude, res['df'].latitude)
                         gdf_temp = gpd.GeoDataFrame(res['df'], geometry=pts_geom, crs="EPSG:4326")
-                        
-                        # Spatial Join con todas las subcuencas disponibles
                         if gdf_subcuencas is not None:
                             gdf_joined = gpd.sjoin(gdf_temp, gdf_subcuencas[['geometry', 'nombre']], how='left', predicate='within')
-                            # Crear mapa de ID -> Subcuenca
                             basin_map = gdf_joined.set_index(Config.STATION_NAME_COL)['nombre'].to_dict()
-                        else:
-                            basin_map = {}
-                    except:
-                        basin_map = {}
+                    except: pass
 
-                    # 2. Dibujar Marcadores
+                    # Iterar para dibujar
                     for _, row in res['df'].iterrows():
                         st_name = row[Config.STATION_NAME_COL]
                         
-                        # Recuperar valores
+                        # Filtrar datos de ESTA estación
+                        st_data = stats_sub[stats_sub[Config.STATION_NAME_COL] == st_name]
+                        
+                        # --- LÓGICA INTELIGENTE DE PROMEDIO ANUAL ---
+                        if not st_data.empty:
+                            # 1. Contar meses con datos por año
+                            counts = st_data.groupby(Config.YEAR_COL).size()
+                            # 2. Años válidos (>= 10 meses)
+                            years_ok = counts[counts >= 10].index
+                            
+                            if len(years_ok) > 0:
+                                # Promedio de años completos
+                                val_anual = st_data[st_data[Config.YEAR_COL].isin(years_ok)].groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum().mean()
+                                n_years_valid = len(years_ok)
+                            else:
+                                # Fallback: Estimar desde mensual
+                                val_mensual = monthly_mean.get(st_name, 0)
+                                val_anual = val_mensual * 12
+                                n_years_valid = 0 # Indicador de datos incompletos
+                        else:
+                            val_anual = 0
+                            n_years_valid = 0
+                        # --------------------------------------------
+
+                        val_mensual = monthly_mean.get(st_name, 0)
                         mun = row.get(Config.MUNICIPALITY_COL, 'N/A')
                         alt = row.get(Config.ALTITUDE_COL, 'N/A')
                         subcuenca = basin_map.get(st_name, "Fuera de red")
-                        
-                        val_anual = annual_mean.get(st_name, 0)
-                        val_mensual = monthly_mean.get(st_name, 0)
-                        n_years = years_count.get(st_name, 0)
 
                         # HTML Popup Estilizado
                         html = f"""
@@ -1381,7 +1379,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             <div style='background-color:#f8f9fa; padding:5px; margin-top:5px; border-radius:4px'>
                                 <b>Ppt Media Anual:</b> {val_anual:,.0f} mm<br>
                                 <b>Ppt Media Mensual:</b> {val_mensual:.1f} mm<br>
-                                <b>Años Activos:</b> {n_years}
+                                <b>Años Completos:</b> {n_years_valid}
                             </div>
                         </div>
                         """
@@ -2602,6 +2600,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
