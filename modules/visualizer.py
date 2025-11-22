@@ -1419,11 +1419,26 @@ def display_climate_forecast_tab(**kwargs):
             index_col = st.selectbox("Seleccione Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL], index=0)
             
             if index_col in df_enso.columns:
-                data = df_enso.dropna(subset=[index_col]).sort_values(Config.DATE_COL)
+                # CORRECCIÓN DE FECHAS Y ORDENAMIENTO
+                data = df_enso.copy()
+                
+                # Asegurar formato datetime
+                if data[Config.DATE_COL].dtype == 'object':
+                    data[Config.DATE_COL] = data[Config.DATE_COL].apply(parse_spanish_date)
+                else:
+                    data[Config.DATE_COL] = pd.to_datetime(data[Config.DATE_COL], errors='coerce')
+                
+                # Eliminar NaT (fechas inválidas) y ordenar
+                data = data.dropna(subset=[Config.DATE_COL, index_col]).sort_values(Config.DATE_COL)
+                
+                # Graficar
                 fig = px.line(data, x=Config.DATE_COL, y=index_col, title=f"Evolución Histórica: {index_col}")
+                
+                # Líneas de referencia solo para ONI
                 if index_col == Config.ENSO_ONI_COL:
                     fig.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
                     fig.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
+                    
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.warning(f"Columna {index_col} no encontrada.")
@@ -2649,6 +2664,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
