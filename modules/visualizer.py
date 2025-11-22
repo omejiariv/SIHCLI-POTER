@@ -533,54 +533,67 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
 
             # --- INICIO BLOQUE REEMPLAZO ---
             # Estaciones (Puntos verdes con Popup Inteligente)
+            # --- BLOQUE DE ESTACIONES (CORREGIDO Y ALINEADO) ---
             if gdf_filtered is not None:
                 marker_cluster = MarkerCluster().add_to(m)
                 
-                for _, r in gdf_filtered.dropna(subset=['latitude', 'longitude']).iterrows():
+                # Iterar sobre las estaciones
+                for _, r in gdf_filtered.dropna(subset=['latitude']).iterrows():
+                    
                     # 1. Filtrar datos SOLO de esta estación
                     df_st = df_long[df_long[Config.STATION_NAME_COL] == r[Config.STATION_NAME_COL]]
                     
                     # 2. Contar meses con datos REALES (>0)
-                    n_months_real = len(df_st[df_st[Config.PRECIPITATION_COL] > 0])
+                    # (Esto evita contar meses vacíos o nulos como válidos)
+                    df_valid = df_st[df_st[Config.PRECIPITATION_COL] > 0]
+                    n_months_real = len(df_valid)
                     
-                    # 3. Calcular años válidos (aquellos con >10 meses de datos reales)
-                    if not df_st.empty:
-                        # Agrupar por año y contar meses con lluvia > 0
-                        months_per_year = df_st[df_st[Config.PRECIPITATION_COL] > 0].groupby(Config.YEAR_COL).size()
-                        # Solo contar años con al menos 10 meses
-                        n_years_valid = len(months_per_year[months_per_year >= 10])
-                        
-                        # 4. Promedios
-                        if n_years_valid > 0:
-                            # Promedio Anual: Suma de años válidos / n_years_valid
-                            valid_years_data = df_st[df_st[Config.YEAR_COL].isin(months_per_year[months_per_year >= 10].index)]
-                            avg_ppt_anual = valid_years_data.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum().mean()
-                        else:
-                            avg_ppt_anual = 0
-                        
-                        avg_ppt_mensual = df_st[df_st[Config.PRECIPITATION_COL] > 0][Config.PRECIPITATION_COL].mean()
+                    # 3. Promedio MENSUAL (Siempre confiable si hay datos)
+                    if n_months_real > 0:
+                        avg_ppt_mensual = df_valid[Config.PRECIPITATION_COL].mean()
                     else:
-                        n_years_valid = 0; avg_ppt_anual = 0; avg_ppt_mensual = 0
+                        avg_ppt_mensual = 0
+                    
+                    # 4. Promedio ANUAL (Lógica Inteligente)
+                    if n_months_real > 0:
+                        # Intentar calcular años con al menos 6 meses de datos
+                        counts = df_valid.groupby(Config.YEAR_COL).size()
+                        years_ok = counts[counts >= 6].index
+                        
+                        if len(years_ok) > 0:
+                            # Si hay años decentes, usarlos para el promedio real
+                            df_years = df_valid[df_valid[Config.YEAR_COL].isin(years_ok)]
+                            avg_ppt_anual = df_years.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum().mean()
+                            n_years_valid = len(years_ok)
+                        else:
+                            # Si los datos son muy fragmentados, ESTIMAR (Mensual * 12)
+                            # Esto evita mostrar "0 mm" que confunde al usuario
+                            avg_ppt_anual = avg_ppt_mensual * 12
+                            n_years_valid = 0 # 0 indica que es una estimación por falta de años completos
+                    else:
+                        avg_ppt_anual = 0
+                        n_years_valid = 0
 
-                    # HTML Popup Corregido
+                    # 5. Construir Popup HTML
                     html = f"""
                     <div style='font-family:sans-serif; font-size:12px; min-width:200px'>
                         <h5 style='margin:0; color:#2c3e50'>{r[Config.STATION_NAME_COL]}</h5>
                         <hr style='margin:5px 0'>
                         <b>Años Completos:</b> {n_years_valid}<br>
                         <b>Meses con Datos:</b> {n_months_real}<br>
-                        <b>Promedio Anual (Real):</b> {avg_ppt_anual:,.0f} mm<br>
+                        <b>Promedio Anual (Est):</b> {avg_ppt_anual:,.0f} mm<br>
                         <b>Promedio Mensual:</b> {avg_ppt_mensual:.1f} mm
                     </div>
                     """
                     
+                    # 6. Añadir Marcador al Mapa
                     folium.Marker(
-                        [r.latitude, r.longitude], 
-                        tooltip=r[Config.STATION_NAME_COL], 
+                        [r['latitude'], r['longitude']], 
+                        tooltip=f"{r[Config.STATION_NAME_COL]} ({avg_ppt_anual:.0f} mm)", 
                         popup=folium.Popup(html, max_width=300),
                         icon=folium.Icon(color="green", icon="cloud")
                     ).add_to(marker_cluster)
-            # --- FIN BLOQUE REEMPLAZO ---
+            # ---------------------------------------------------
             
             if st.session_state.selected_point:
                 folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Punto Seleccionado", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
@@ -2589,6 +2602,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
