@@ -1403,12 +1403,13 @@ def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático (Índices Globales)")
     
     df_enso = kwargs.get('df_enso')
+    df_long = kwargs.get('df_long') # Necesario si queremos usar SOI/IOD del histórico
     
-    # Crear pestañas para separar Historia (tu código) de Pronóstico (nuevo)
-    tab_hist, tab_iri = st.tabs(["📜 Evolución Histórica", "🌎 Pronóstico Oficial (IRI/CPC)"])
+    # 3 Pestañas: Pasado, Futuro Oficial, Futuro Propio (Regresor)
+    tab_hist, tab_iri, tab_gen = st.tabs(["📜 Evolución Histórica", "🌎 Pronóstico Oficial (IRI/CPC)", "⚙️ Generador de Regresores"])
 
     # ---------------------------------------------------------
-    # PESTAÑA 1: HISTÓRICO (Tu lógica original conservada)
+    # PESTAÑA 1: HISTORIA (Visualización simple)
     # ---------------------------------------------------------
     with tab_hist:
         if df_enso is None or df_enso.empty:
@@ -1431,7 +1432,7 @@ def display_climate_forecast_tab(**kwargs):
                 st.warning(f"Columna {index_col} no encontrada.")
 
     # ---------------------------------------------------------
-    # PESTAÑA 2: PRONÓSTICO IRI (La nueva funcionalidad)
+    # PESTAÑA 2: PRONÓSTICO IRI (La Pluma Oficial)
     # ---------------------------------------------------------
     with tab_iri:
         st.markdown("#### Pluma de Predicción ENSO (International Research Institute)")
@@ -1486,46 +1487,68 @@ def display_climate_forecast_tab(**kwargs):
             st.error("No se pudo descargar el pronóstico. Mostrando imagen de respaldo.")
             st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", width=700)
 
-# TAB 3: GENERADOR DE REGRESORES (LA RECUPERACIÓN CLAVE)
+    # ---------------------------------------------------------
+    # PESTAÑA 3: GENERADOR (La función recuperada)
+    # ---------------------------------------------------------
     with tab_gen:
-        st.markdown("#### Entrenar Pronóstico de Índice Climático")
-        st.info("Esto generará una proyección de índices (ONI, SOI) que podrá ser usada como **Variable Externa** para mejorar el pronóstico de lluvias.")
+        st.markdown("#### Entrenar Pronóstico de Índice Climático (Prophet)")
+        st.info("""
+        Esta herramienta entrena un modelo de Inteligencia Artificial (Prophet) exclusivamente con los datos históricos del índice seleccionado.
+        **El resultado se guardará en memoria** para que puedas usarlo como **"Regresor Externo"** al pronosticar la lluvia en la pestaña de Tendencias.
+        """)
         
-        # Preparar datos de índices
+        # Preparar datos de índices disponibles
         indices_data = {}
         if df_enso is not None and Config.ENSO_ONI_COL in df_enso.columns:
-            indices_data["ONI"] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.ENSO_ONI_COL:'y', Config.DATE_COL:'ds'}).dropna()
+            indices_data["ONI (El Niño)"] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.ENSO_ONI_COL:'y', Config.DATE_COL:'ds'}).dropna()
         if df_enso is not None and Config.SOI_COL in df_enso.columns:
             indices_data["SOI"] = df_enso[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.SOI_COL:'y', Config.DATE_COL:'ds'}).dropna()
-            
-        idx_sel = st.selectbox("Seleccionar Índice para Pronosticar:", list(indices_data.keys()))
-        horizon_idx = st.slider("Meses a Futuro:", 12, 60, 24)
-        
-        if st.button(f"Generar Pronóstico Futuro de {idx_sel}"):
-            with st.spinner("Entrenando Prophet en el índice..."):
-                df_train = indices_data[idx_sel]
-                m = Prophet(weekly_seasonality=False, daily_seasonality=False)
-                m.fit(df_train)
-                future = m.make_future_dataframe(periods=horizon_idx, freq='MS')
-                forecast = m.predict(future)
-                
-                # GUARDAR EN SESIÓN
-                if 'forecasted_regressors' not in st.session_state:
-                    st.session_state['forecasted_regressors'] = {}
-                
-                # Guardamos el DF completo (ds, yhat)
-                st.session_state['forecasted_regressors'][idx_sel] = forecast[['ds', 'yhat']].rename(columns={'yhat': idx_sel})
-                
-                st.success(f"✅ Pronóstico de {idx_sel} generado exitosamente. Disponible en pestaña 'Tendencias'.")
-                
-                # Visualizar
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df_train['ds'], y=df_train['y'], name='Histórico'))
-                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='Pronóstico', line=dict(color='red')))
-                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_upper'], line=dict(width=0), showlegend=False))
-                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_lower'], line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)', name='Incertidumbre'))
-                st.plotly_chart(fig, use_container_width=True)
+        if df_enso is not None and Config.IOD_COL in df_enso.columns:
+            indices_data["IOD"] = df_enso[[Config.DATE_COL, Config.IOD_COL]].rename(columns={Config.IOD_COL:'y', Config.DATE_COL:'ds'}).dropna()
 
+        if not indices_data:
+            st.warning("No hay datos suficientes para entrenar.")
+        else:
+            c1, c2 = st.columns(2)
+            idx_sel = c1.selectbox("Seleccionar Índice para Pronosticar:", list(indices_data.keys()))
+            horizon_idx = c2.slider("Meses a Futuro:", 12, 60, 24)
+            
+            if st.button(f"🚀 Generar Pronóstico Futuro de {idx_sel}"):
+                with st.spinner(f"Entrenando Prophet para {idx_sel}..."):
+                    try:
+                        from prophet import Prophet
+                        df_train = indices_data[idx_sel]
+                        
+                        # Entrenar
+                        m = Prophet(weekly_seasonality=False, daily_seasonality=False)
+                        m.fit(df_train)
+                        
+                        # Predecir
+                        future = m.make_future_dataframe(periods=horizon_idx, freq='MS')
+                        forecast = m.predict(future)
+                        
+                        # GUARDAR EN SESIÓN (Para que SARIMA lo vea)
+                        if 'forecasted_regressors' not in st.session_state:
+                            st.session_state['forecasted_regressors'] = {}
+                        
+                        # Guardamos con el nombre simple (ONI, SOI) para facilitar el merge después
+                        key_name = idx_sel.split()[0] # "ONI (El Niño)" -> "ONI"
+                        st.session_state['forecasted_regressors'][key_name] = forecast[['ds', 'yhat']].rename(columns={'yhat': key_name})
+                        
+                        st.success(f"✅ Pronóstico de {key_name} generado exitosamente ({horizon_idx} meses). Ahora puedes ir a 'Tendencias' y seleccionarlo como regresor.")
+                        
+                        # Visualizar
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=df_train['ds'], y=df_train['y'], name='Histórico', line=dict(color='black')))
+                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='Pronóstico', line=dict(color='red')))
+                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_upper'], line=dict(width=0), showlegend=False))
+                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_lower'], line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)', name='Incertidumbre'))
+                        
+                        fig.update_layout(title=f"Proyección de {idx_sel}", yaxis_title="Valor Índice", height=500)
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"Error en el entrenamiento: {e}")
 
 def display_trends_and_forecast_tab(**kwargs):
     st.subheader("📉 Tendencias, Pronósticos y Riesgo")
@@ -2624,6 +2647,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
