@@ -1341,33 +1341,34 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         # Filtrar datos de ESTA estación
                         st_data = stats_sub[stats_sub[Config.STATION_NAME_COL] == st_name]
                         
-                        # --- LÓGICA INTELIGENTE DE PROMEDIO ANUAL ---
-                        if not st_data.empty:
-                            # 1. Contar meses con datos por año
-                            counts = st_data.groupby(Config.YEAR_COL).size()
-                            # 2. Años válidos (>= 10 meses)
-                            years_ok = counts[counts >= 10].index
-                            
-                            if len(years_ok) > 0:
-                                # Promedio de años completos
-                                val_anual = st_data[st_data[Config.YEAR_COL].isin(years_ok)].groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum().mean()
-                                n_years_valid = len(years_ok)
-                            else:
-                                # Fallback: Estimar desde mensual
-                                val_mensual = monthly_mean.get(st_name, 0)
-                                val_anual = val_mensual * 12
-                                n_years_valid = 0 # Indicador de datos incompletos
-                        else:
-                            val_anual = 0
-                            n_years_valid = 0
-                        # --------------------------------------------
+                        # --- LÓGICA DE CÁLCULO CORREGIDA ---
+                        val_mensual = 0
+                        val_anual = 0
+                        n_years_valid = 0
 
-                        val_mensual = monthly_mean.get(st_name, 0)
+                        if not st_data.empty:
+                            # 1. Promedio Mensual (de todos los datos > 0)
+                            val_mensual = st_data[st_data[Config.PRECIPITATION_COL] > 0][Config.PRECIPITATION_COL].mean()
+                            
+                            # 2. Años Completos (>= 10 meses con datos)
+                            counts = st_data[st_data[Config.PRECIPITATION_COL] > 0].groupby(Config.YEAR_COL).size()
+                            years_ok = counts[counts >= 10].index
+                            n_years_valid = len(years_ok)
+                            
+                            # 3. Promedio Anual (Solo de años completos)
+                            if n_years_valid > 0:
+                                df_years = st_data[st_data[Config.YEAR_COL].isin(years_ok)]
+                                val_anual = df_years.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum().mean()
+                            else:
+                                # Fallback: Si no hay años completos, estimar
+                                val_anual = val_mensual * 12
+                        # -----------------------------------
+
                         mun = row.get(Config.MUNICIPALITY_COL, 'N/A')
                         alt = row.get(Config.ALTITUDE_COL, 'N/A')
                         subcuenca = basin_map.get(st_name, "Fuera de red")
 
-                        # HTML Popup Estilizado
+                        # HTML Popup
                         html = f"""
                         <div style='font-family:sans-serif; font-size:12px; min-width:220px'>
                             <h5 style='margin:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:4px'>{st_name}</h5>
@@ -2600,6 +2601,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
