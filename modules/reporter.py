@@ -27,20 +27,21 @@ class PDFReport(FPDF):
         self.set_text_color(128)
         self.cell(0, 10, f'Página {self.page_no()}/{{nb}}', 0, 0, 'C')
 
+    # RENOMBRADO PARA CONSISTENCIA
     def print_chapter_title(self, num, label):
         self.set_font('Arial', 'B', 14)
         self.set_fill_color(220, 230, 250)
         self.set_text_color(0)
-        # Ajuste para aceptar num como string o int
         title_text = f"{num}. {label}" if str(num).isdigit() else label
         self.cell(0, 10, title_text, 0, 1, 'L', 1)
         self.ln(4)
 
-    def print_section_body(self, body): # Aseguramos que este también coincida
+    # RENOMBRADO PARA CONSISTENCIA
+    def print_chapter_body(self, body):
         self.set_font('Arial', '', 11)
         self.multi_cell(0, 5, body)
         self.ln()
-        
+
     def add_plot_image(self, img_bytes, title="", w=170, h=90):
         if img_bytes:
             try:
@@ -61,24 +62,13 @@ class PDFReport(FPDF):
             except: pass
 
 def create_static_map(gdf_stations, gdf_subcuencas=None):
-    """Genera mapa estático con Matplotlib."""
     try:
         fig, ax = plt.subplots(figsize=(10, 8))
-        
-        # Capas
         if gdf_subcuencas is not None and not gdf_subcuencas.empty:
             gdf_subcuencas.plot(ax=ax, color='#e6f2ff', edgecolor='blue', alpha=0.5, zorder=1)
-
         if gdf_stations is not None and not gdf_stations.empty:
             gdf_stations.plot(ax=ax, color='red', markersize=40, edgecolor='white', zorder=2)
-            # Etiquetas simples
-            if len(gdf_stations) < 25:
-                for x, y, label in zip(gdf_stations.geometry.x, gdf_stations.geometry.y, gdf_stations[Config.STATION_NAME_COL]):
-                    ax.annotate(label[:10], xy=(x, y), xytext=(3, 3), textcoords="offset points", fontsize=7)
-
-        ax.set_title("Localización de Estaciones", fontsize=12)
         ax.set_axis_off()
-        
         buf = io.BytesIO()
         plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
         buf.seek(0)
@@ -87,56 +77,41 @@ def create_static_map(gdf_stations, gdf_subcuencas=None):
     except: return None
 
 def generate_pdf_report(df_long, gdf_stations, analysis_results, **kwargs):
-    """Genera el PDF completo (CORREGIDO)."""
     try:
         pdf = PDFReport()
         pdf.alias_nb_pages()
         
-        # --- PORTADA ---
+        # PORTADA
         pdf.add_page()
         pdf.ln(60)
-        if os.path.exists(Config.LOGO_PATH):
+        if os.path.exists(Config.LOGO_PATH): 
             try: pdf.image(Config.LOGO_PATH, x=75, w=60)
             except: pass
         pdf.ln(20)
         pdf.set_font('Arial', 'B', 24)
         pdf.cell(0, 10, "REPORTE TÉCNICO", 0, 1, 'C')
         pdf.set_font('Arial', '', 16)
-        pdf.cell(0, 10, "Análisis Hidroclimático Regional", 0, 1, 'C')
+        pdf.cell(0, 10, "Análisis Hidroclimático y Pronósticos", 0, 1, 'C')
         pdf.ln(20)
-        pdf.set_font('Arial', 'I', 12)
+        pdf.set_font('Arial', '', 12)
         pdf.cell(0, 8, f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1, 'C')
-        pdf.cell(0, 8, f"Estaciones Analizadas: {len(gdf_stations)}", 0, 1, 'C')
-
-        # --- 1. RESUMEN ---
+        
+        # 1. RESUMEN
         pdf.add_page()
-        # LLAMADA CORREGIDA: (num, label)
+        # USA print_chapter_title
         pdf.print_chapter_title(1, 'Resumen Ejecutivo')
-        
-        ppt_total = df_long[Config.PRECIPITATION_COL].sum() if not df_long.empty else 0
-        ppt_prom = df_long[Config.PRECIPITATION_COL].mean() if not df_long.empty else 0
-        
-        pdf.chapter_body(
-            f"El presente informe consolida el análisis hidrometeorológico realizado. "
-            f"Promedio mensual global: {ppt_prom:.1f} mm. "
-            f"Acumulado histórico total analizado: {ppt_total:,.0f} mm."
-        )
+        n = len(gdf_stations) if gdf_stations is not None else 0
+        # USA print_chapter_body
+        pdf.print_chapter_body(f"Análisis realizado sobre {n} estaciones. Este documento consolida la estadística descriptiva, tendencias históricas y pronósticos generados por el sistema.")
 
-        # --- 2. MAPA ---
-        # LLAMADA CORREGIDA
+        # 2. MAPA
         pdf.print_chapter_title(2, 'Contexto Espacial')
-        gdf_munis = kwargs.get('gdf_municipios')
-        gdf_subc = kwargs.get('gdf_subcuencas')
-        fig_map = create_context_map_static(gdf_stations, gdf_munis, gdf_subc)
-        
-        if fig_map:
-            pdf.add_matplotlib_figure(fig_map, "Ubicación de Estaciones y Cuencas")
-        else:
-            pdf.chapter_body("Mapa no disponible.")
+        subc = kwargs.get('gdf_subcuencas')
+        map_img = create_context_map_static(gdf_stations, gdf_subcuencas=subc)
+        if map_img: pdf.add_plot_image(map_img, "Mapa de Estaciones", h=120)
 
-        # --- 3. GRÁFICOS ---
+        # 3. GRÁFICOS
         pdf.add_page()
-        # LLAMADA CORREGIDA
         pdf.print_chapter_title(3, 'Análisis Gráfico')
         
         keys = [
@@ -146,63 +121,31 @@ def generate_pdf_report(df_long, gdf_stations, analysis_results, **kwargs):
             ('report_fig_dist', 'Distribución Estadística')
         ]
         
-        count = 0
         for k, title in keys:
             if k in st.session_state and st.session_state[k]:
                 try:
                     img = st.session_state[k].to_image(format="png", width=1000, height=500, scale=2)
                     pdf.add_plot_image(img, title, h=90)
-                    count += 1
-                    if count % 2 == 0: pdf.add_page()
                 except: pass
-        
-        if count == 0:
-            pdf.chapter_body("Nota: Visualice los gráficos en la app para incluirlos aquí.")
 
-        # --- 4. TABLA ---
+        # 4. ESTADÍSTICAS
         pdf.add_page()
-        # LLAMADA CORREGIDA
         pdf.print_chapter_title(4, 'Estadísticas por Estación')
-        
         if not df_long.empty:
-            stats = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].agg(['mean', 'max', 'min']).reset_index()
-            
-            pdf.set_font('Arial', 'B', 9)
-            pdf.set_fill_color(240, 240, 240)
-            col_w = [95, 30, 30, 30]
-            
-            pdf.cell(col_w[0], 8, "Estación", 1, 0, 'C', 1)
-            pdf.cell(col_w[1], 8, "Media", 1, 0, 'C', 1)
-            pdf.cell(col_w[2], 8, "Máx", 1, 0, 'C', 1)
-            pdf.cell(col_w[3], 8, "Mín", 1, 1, 'C', 1)
-            
-            pdf.set_font('Arial', '', 9)
-            for _, row in stats.iterrows():
-                if pdf.get_y() > 270:
-                    pdf.add_page()
-                    pdf.set_font('Arial', 'B', 9)
-                    pdf.cell(col_w[0], 8, "Estación (cont.)", 1, 0, 'C', 1)
-                    pdf.ln()
-                    pdf.set_font('Arial', '', 9)
+            stats = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].agg(['mean', 'max']).reset_index()
+            pdf.set_font('Arial', 'B', 10)
+            pdf.cell(100, 8, "Estación", 1); pdf.cell(40, 8, "Promedio", 1); pdf.cell(40, 8, "Máximo", 1); pdf.ln()
+            pdf.set_font('Arial', '', 10)
+            for _, r in stats.iterrows():
+                pdf.cell(100, 7, str(r[Config.STATION_NAME_COL])[:45], 1)
+                pdf.cell(40, 7, f"{r['mean']:.1f}", 1, 0, 'R')
+                pdf.cell(40, 7, f"{r['max']:.1f}", 1, 0, 'R')
+                pdf.ln()
 
-                name = str(row[Config.STATION_NAME_COL])[:50]
-                pdf.cell(col_w[0], 6, name, 1)
-                pdf.cell(col_w[1], 6, f"{row['mean']:.1f}", 1, 0, 'R')
-                pdf.cell(col_w[2], 6, f"{row['max']:.1f}", 1, 0, 'R')
-                pdf.cell(col_w[3], 6, f"{row['min']:.1f}", 1, 1, 'R')
-
-        # Guardar
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            pdf.output(tmp_file.name)
-            tmp_path = tmp_file.name
-        
-        with open(tmp_path, "rb") as f:
-            pdf_bytes = f.read()
-        os.remove(tmp_path)
-        
-        return pdf_bytes
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            pdf.output(tmp.name)
+            return open(tmp.name, "rb").read()
 
     except Exception as e:
         st.error(f"Error reporte: {e}")
         return None
-
