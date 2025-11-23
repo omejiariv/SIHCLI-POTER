@@ -2586,7 +2586,7 @@ def display_land_cover_analysis_tab(**kwargs):
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
 
-# NUEVA PESTAÑA: CORRECCIÓN DE SESGO
+# PESTAÑA: CORRECCIÓN DE SESGO (VERSIÓN BLINDADA)
 # -----------------------------------------------------------------------------
 def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🛰️ Corrección de Sesgo (Estaciones vs. Satélite)")
@@ -2602,115 +2602,141 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
     # 1. Configuración
     c1, c2 = st.columns(2)
     with c1:
-        # Selección de periodo para el análisis
         min_y, max_y = int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max())
-        rng = st.slider("Período de Calibración:", min_y, max_y, (max_y-10, max_y), key="bias_rng")
+        rng = st.slider("Período de Calibración:", min_y, max_y, (max(min_y, max_y-10), max_y), key="bias_rng")
     with c2:
         method = st.selectbox("Método de Interpolación del Sesgo:", ["IDW", "Spline"], key="bias_meth")
 
     if st.button("🚀 Calcular Corrección de Sesgo"):
-        with st.spinner("1/3. Obteniendo datos satelitales históricos (ERA5)..."):
+        # Importar función de API aquí para asegurar disponibilidad
+        from modules.openmeteo_api import get_historical_climate_average
+        
+        with st.spinner("1/3. Procesando datos de estaciones..."):
             # A. Obtener Ppt Real (Estaciones) promedio en el periodo
             mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
-            # Filtrar años incompletos
-            valid_data = df_long[mask].groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].count()
-            valid_data = valid_data[valid_data >= 10].index # Tuplas (Est, Año)
             
-            df_valid = df_long[mask].set_index([Config.STATION_NAME_COL, Config.YEAR_COL]).loc[valid_data].reset_index()
-            # Promedio anual real
+            # Filtrar años incompletos (mismo criterio que en mapas avanzados)
+            df_subset = df_long[mask].copy()
+            if df_subset.empty:
+                st.error("No hay datos de estaciones para el periodo seleccionado.")
+                return
+
+            # Conteo de meses por año
+            counts = df_subset[df_subset[Config.PRECIPITATION_COL] > 0].groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).size()
+            valid_years = counts[counts >= 10].index
+            
+            # Promedio anual real (solo años válidos)
+            df_valid = df_subset.set_index([Config.STATION_NAME_COL, Config.YEAR_COL]).loc[valid_years].reset_index()
             ppt_stations = df_valid.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].sum().groupby(Config.STATION_NAME_COL).mean().reset_index()
             
             # Unir con geometría
             gdf_calib = pd.merge(gdf_stations, ppt_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
             
-            # B. Obtener Ppt Satelital (ERA5) para los mismos puntos
+            if gdf_calib.empty:
+                st.warning("No se encontraron estaciones con datos suficientes (>10 meses/año) en este periodo.")
+                return
+
+        with st.spinner("2/3. Obteniendo datos satelitales históricos (ERA5)..."):
+            # B. Obtener Ppt Satelital (ERA5)
             lats = gdf_calib['latitude'].tolist()
             lons = gdf_calib['longitude'].tolist()
-            # Llamada a Open-Meteo (Suma de precipitación diaria)
+            
             df_sat = get_historical_climate_average(
                 lats, lons, "precipitation_sum", 
                 f"{rng[0]}-01-01", f"{rng[1]}-12-31"
             )
             
             if df_sat is not None and not df_sat.empty:
-                # 1. Convertir a Anual
+                # El API devuelve promedio diario, convertimos a anual (x365.25)
                 df_sat['ppt_sat'] = df_sat['valor_promedio'] * 365.25
                 
-                # 2. UNIÓN ROBUSTA POR COORDENADAS (En vez de por orden/índice)
-                # Redondeamos coordenadas a 4 decimales para asegurar coincidencia con la petición
-                df_sat['lat_round'] = df_sat['latitude'].round(4)
-                df_sat['lon_round'] = df_sat['longitude'].round(4)
+                # --- UNIÓN ROBUSTA POR COORDENADAS (FIX) ---
+                # Redondeamos para asegurar coincidencia (lat/lon pueden variar en el último decimal)
+                df_sat['lat_r'] = df_sat['latitude'].round(4)
+                df_sat['lon_r'] = df_sat['longitude'].round(4)
+                gdf_calib['lat_r'] = gdf_calib['latitude'].round(4)
+                gdf_calib['lon_r'] = gdf_calib['longitude'].round(4)
                 
-                gdf_calib_match = gdf_calib.copy()
-                gdf_calib_match['lat_round'] = gdf_calib_match['latitude'].round(4)
-                gdf_calib_match['lon_round'] = gdf_calib_match['longitude'].round(4)
-                
-                # Merge seguro
-                df_sat_merged = pd.merge(
-                    df_sat, 
-                    gdf_calib_match[[Config.STATION_NAME_COL, 'lat_round', 'lon_round']],
-                    on=['lat_round', 'lon_round'],
+                # Merge seguro usando coordenadas
+                df_merged = pd.merge(
+                    gdf_calib, 
+                    df_sat[['lat_r', 'lon_r', 'ppt_sat']], 
+                    on=['lat_r', 'lon_r'], 
                     how='inner'
                 )
                 
-                if df_sat_merged.empty:
-                    st.error("Error: No se pudieron emparejar los datos satelitales con las estaciones (coordenadas no coinciden).")
+                if df_merged.empty:
+                    st.error("Error crítico: No se pudieron cruzar las coordenadas de estaciones con los datos satelitales.")
                 else:
-                    # 3. Calcular Sesgo (usando el DF unido correctamente)
-                    from modules.analysis import calculate_bias_correction_metrics
-                    df_bias = calculate_bias_correction_metrics(gdf_calib, df_sat_merged)
+                    # C. Calcular Métricas de Sesgo
+                    # Bias = Estación / Satélite
+                    df_merged['bias_factor'] = df_merged[Config.PRECIPITATION_COL] / df_merged['ppt_sat'].replace(0, 0.01)
+                    df_merged['bias_diff'] = df_merged[Config.PRECIPITATION_COL] - df_merged['ppt_sat']
                     
-                    if df_bias is not None:
-                    st.success("Cálculo completado.")
+                    # Limpieza de outliers extremos (factores > 10 o < 0.1)
+                    df_merged = df_merged[df_merged['bias_factor'].between(0.1, 10)]
                     
-                    # Visualización Resultados
-                    tab_mapa, tab_datos = st.tabs(["🗺️ Mapa de Corrección", "📋 Tabla de Sesgos"])
+                    st.success(f"Cálculo completado. {len(df_merged)} estaciones calibradas.")
+                    
+                    # --- VISUALIZACIÓN ---
+                    tab_mapa, tab_datos = st.tabs(["🗺️ Mapas Comparativos", "📋 Tabla de Sesgos"])
                     
                     with tab_datos:
-                        # Formatear tabla
-                        show_df = df_bias[[Config.STATION_NAME_COL, Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor', 'bias_diff']].rename(
-                            columns={Config.PRECIPITATION_COL: 'Ppt Estación', 'ppt_sat': 'Ppt Satélite', 'bias_factor': 'Factor (Est/Sat)', 'bias_diff': 'Diferencia (mm)'}
+                        st.markdown("#### Factores de Corrección por Estación")
+                        show_df = df_merged[[Config.STATION_NAME_COL, Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor', 'bias_diff']].rename(
+                            columns={Config.PRECIPITATION_COL: 'Ppt Estación (mm)', 'ppt_sat': 'Ppt Satélite (mm)', 'bias_factor': 'Factor Corrección', 'bias_diff': 'Diferencia (mm)'}
                         )
                         st.dataframe(show_df.style.format("{:.2f}"), use_container_width=True)
                         
-                        avg_bias = show_df['Factor (Est/Sat)'].mean()
-                        st.info(f"**Factor de Corrección Promedio:** {avg_bias:.2f}x (El satélite {'subestima' if avg_bias > 1 else 'sobreestima'} la lluvia en un {abs(1-avg_bias)*100:.1f}%)")
+                        avg_bias = show_df['Factor Corrección'].mean()
+                        st.info(f"**Diagnóstico Global:** El satélite tiende a {'subestimar' if avg_bias > 1 else 'sobreestimar'} la lluvia en un {abs(1-avg_bias)*100:.1f}% (Factor promedio: {avg_bias:.2f}).")
 
                     with tab_mapa:
-                        # Mapa comparativo
-                        c1, c2 = st.columns(2)
+                        c_m1, c_m2 = st.columns(2)
                         
-                        # Interpolación del Factor de Sesgo
+                        # Preparar interpolación
                         from scipy.interpolate import griddata
-                        b = gdf_stations.total_bounds
-                        gx, gy = np.mgrid[b[0]:b[2]:100j, b[1]:b[3]:100j]
-                        pts = np.column_stack((gdf_calib.longitude, gdf_calib.latitude))
+                        bounds = gdf_stations.total_bounds
+                        # Margen del 10%
+                        pad_x = (bounds[2] - bounds[0]) * 0.1
+                        pad_y = (bounds[3] - bounds[1]) * 0.1
                         
-                        # Grilla de Sesgo
-                        vals_bias = df_bias['bias_factor'].values
-                        grid_bias = griddata(pts, vals_bias, (gx, gy), method='linear') # IDW simple
+                        grid_lon = np.linspace(bounds[0]-pad_x, bounds[2]+pad_x, 100)
+                        grid_lat = np.linspace(bounds[1]-pad_y, bounds[3]+pad_y, 100)
+                        gx, gy = np.meshgrid(grid_lon, grid_lat)
                         
-                        # Grilla de Ppt Satélite (Simulada con interpolación de los puntos satelitales para el ejemplo visual)
-                        vals_sat = df_bias['ppt_sat'].values
-                        grid_sat = griddata(pts, vals_sat, (gx, gy), method='cubic')
+                        pts = df_merged[['longitude', 'latitude']].values
                         
-                        # Grilla Corregida = Satélite * Sesgo
-                        grid_corregida = grid_sat * grid_bias
+                        # 1. Mapa Satélite (Interpolado de los puntos satelitales)
+                        # Usamos los puntos donde tenemos datos
+                        vals_sat = df_merged['ppt_sat'].values
+                        method_scipy = 'cubic' if method == 'Spline' else 'linear'
                         
-                        with c1:
-                            st.markdown("**Lluvia Satelital (Sin Corregir)**")
-                            fig1 = go.Figure(go.Contour(z=grid_sat.T, x=gx[:,0], y=gy[0,:], colorscale='Blues'))
-                            fig1.update_layout(height=400, margin=dict(l=0,r=0,t=0,b=0))
-                            st.plotly_chart(fig1, use_container_width=True)
+                        try:
+                            gz_sat = griddata(pts, vals_sat, (gx, gy), method=method_scipy)
                             
-                        with c2:
-                            st.markdown("**Lluvia Corregida (Bias Correction)**")
-                            fig2 = go.Figure(go.Contour(z=grid_corregida.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis'))
-                            # Añadir estaciones para referencia
-                            fig2.add_trace(go.Scatter(x=gdf_calib.longitude, y=gdf_calib.latitude, mode='markers', marker=dict(color='red', size=5), name='Estaciones'))
-                            fig2.update_layout(height=400, margin=dict(l=0,r=0,t=0,b=0))
-                            st.plotly_chart(fig2, use_container_width=True)
-
+                            # 2. Mapa Factor de Sesgo
+                            vals_bias = df_merged['bias_factor'].values
+                            gz_bias = griddata(pts, vals_bias, (gx, gy), method='linear') # Sesgo suele ser más suave, linear es seguro
+                            
+                            # 3. Mapa Corregido = Satélite * Sesgo
+                            gz_corr = gz_sat * gz_bias
+                            
+                            with c_m1:
+                                st.markdown("**Lluvia Satelital (Original ERA5)**")
+                                fig1 = go.Figure(go.Contour(z=gz_sat, x=grid_lon, y=grid_lat, colorscale='Blues', colorbar=dict(title='mm/año')))
+                                fig1.add_trace(go.Scatter(x=df_merged.longitude, y=df_merged.latitude, mode='markers', marker=dict(color='black', size=4), name='Puntos'))
+                                fig1.update_layout(height=450, margin=dict(l=0,r=0,t=0,b=0))
+                                st.plotly_chart(fig1, use_container_width=True)
+                                
+                            with c_m2:
+                                st.markdown("**Lluvia Corregida (Bias Correction)**")
+                                fig2 = go.Figure(go.Contour(z=gz_corr, x=grid_lon, y=grid_lat, colorscale='Viridis', colorbar=dict(title='mm/año')))
+                                fig2.add_trace(go.Scatter(x=df_merged.longitude, y=df_merged.latitude, mode='markers', marker=dict(color='red', size=5), name='Estaciones'))
+                                fig2.update_layout(height=450, margin=dict(l=0,r=0,t=0,b=0))
+                                st.plotly_chart(fig2, use_container_width=True)
+                                
+                        except Exception as e:
+                            st.error(f"Error en la interpolación visual: {e}")
             else:
-                st.error("Error al obtener datos satelitales.")
-
+                st.error("No se pudieron obtener datos de la API de Open-Meteo o la respuesta fue vacía.")
