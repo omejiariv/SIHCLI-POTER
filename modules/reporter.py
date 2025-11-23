@@ -27,18 +27,20 @@ class PDFReport(FPDF):
         self.set_text_color(128)
         self.cell(0, 10, f'Página {self.page_no()}/{{nb}}', 0, 0, 'C')
 
-    def chapter_title(self, label):
+    def print_chapter_title(self, num, label):
         self.set_font('Arial', 'B', 14)
         self.set_fill_color(220, 230, 250)
         self.set_text_color(0)
-        self.cell(0, 10, label, 0, 1, 'L', 1)
+        # Ajuste para aceptar num como string o int
+        title_text = f"{num}. {label}" if str(num).isdigit() else label
+        self.cell(0, 10, title_text, 0, 1, 'L', 1)
         self.ln(4)
 
-    def chapter_body(self, body):
+    def print_section_body(self, body): # Aseguramos que este también coincida
         self.set_font('Arial', '', 11)
         self.multi_cell(0, 5, body)
         self.ln()
-
+        
     def add_plot_image(self, img_bytes, title="", w=170, h=90):
         if img_bytes:
             try:
@@ -156,3 +158,4 @@ def generate_pdf_report(df_long, gdf_stations, analysis_results, **kwargs):
     except Exception as e:
         st.error(f"Error reporte: {e}")
         return None
+
