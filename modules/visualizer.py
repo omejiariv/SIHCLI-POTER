@@ -2636,7 +2636,7 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
                 st.warning("No se encontraron estaciones con datos suficientes (>10 meses/año) en este periodo.")
                 return
 
-            with st.spinner("2/3. Obteniendo datos satelitales históricos (ERA5)..."):
+        with st.spinner("2/3. Obteniendo datos satelitales históricos (ERA5)..."):
             # B. Obtener Ppt Satelital (ERA5)
             # Aseguramos el orden de las estaciones
             gdf_calib = gdf_calib.reset_index(drop=True)
@@ -2732,3 +2732,4 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
                     st.warning(f"Discrepancia de datos: Se enviaron {len(gdf_calib)} estaciones pero se recibieron {len(df_sat)} del satélite. Intente con menos estaciones.")
             else:
                 st.error("No se pudieron obtener datos de la API de Open-Meteo.")
+
