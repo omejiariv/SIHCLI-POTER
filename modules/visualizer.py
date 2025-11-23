@@ -2633,18 +2633,34 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
             )
             
             if df_sat is not None and not df_sat.empty:
-                # El API devuelve promedio diario, convertimos a anual aprox (x365)
+                # 1. Convertir a Anual
                 df_sat['ppt_sat'] = df_sat['valor_promedio'] * 365.25
                 
-                # Unir por coordenadas (aproximadas) para asignar nombre
-                # (Truco: Asignamos por orden ya que la API devuelve en el mismo orden solicitado)
-                df_sat[Config.STATION_NAME_COL] = gdf_calib[Config.STATION_NAME_COL].values
+                # 2. UNIÓN ROBUSTA POR COORDENADAS (En vez de por orden/índice)
+                # Redondeamos coordenadas a 4 decimales para asegurar coincidencia con la petición
+                df_sat['lat_round'] = df_sat['latitude'].round(4)
+                df_sat['lon_round'] = df_sat['longitude'].round(4)
                 
-                # C. Calcular Sesgo
-                from modules.analysis import calculate_bias_correction_metrics
-                df_bias = calculate_bias_correction_metrics(gdf_calib, df_sat)
+                gdf_calib_match = gdf_calib.copy()
+                gdf_calib_match['lat_round'] = gdf_calib_match['latitude'].round(4)
+                gdf_calib_match['lon_round'] = gdf_calib_match['longitude'].round(4)
                 
-                if df_bias is not None:
+                # Merge seguro
+                df_sat_merged = pd.merge(
+                    df_sat, 
+                    gdf_calib_match[[Config.STATION_NAME_COL, 'lat_round', 'lon_round']],
+                    on=['lat_round', 'lon_round'],
+                    how='inner'
+                )
+                
+                if df_sat_merged.empty:
+                    st.error("Error: No se pudieron emparejar los datos satelitales con las estaciones (coordenadas no coinciden).")
+                else:
+                    # 3. Calcular Sesgo (usando el DF unido correctamente)
+                    from modules.analysis import calculate_bias_correction_metrics
+                    df_bias = calculate_bias_correction_metrics(gdf_calib, df_sat_merged)
+                    
+                    if df_bias is not None:
                     st.success("Cálculo completado.")
                     
                     # Visualización Resultados
@@ -2697,3 +2713,4 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
 
             else:
                 st.error("Error al obtener datos satelitales.")
+
