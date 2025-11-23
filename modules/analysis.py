@@ -757,3 +757,34 @@ def calculate_duration_curve(series_mensual, runoff_coeff, area_km2):
         "trend_y": trend_y
     }
 
+# --- 4. CORRECCIÓN DE SESGO (BIAS CORRECTION) ---
+def calculate_bias_correction_metrics(df_stations, df_satellite):
+    """
+    Calcula el sesgo (Bias) entre estaciones y satélite.
+    Retorna DataFrame con métricas por estación.
+    """
+    try:
+        # Unir por estación
+        df_merge = pd.merge(
+            df_stations[[Config.STATION_NAME_COL, Config.PRECIPITATION_COL, 'geometry']],
+            df_satellite[[Config.STATION_NAME_COL, 'ppt_sat']],
+            on=Config.STATION_NAME_COL
+        )
+        
+        if df_merge.empty: return None
+        
+        # Calcular métricas
+        # Bias = P_estacion / P_satelite (Factor de corrección multiplicativo)
+        # Evitar división por cero
+        df_merge['bias_factor'] = df_merge[Config.PRECIPITATION_COL] / df_merge['ppt_sat'].replace(0, 0.01)
+        
+        # Diff = P_estacion - P_satelite (Sesgo aditivo)
+        df_merge['bias_diff'] = df_merge[Config.PRECIPITATION_COL] - df_merge['ppt_sat']
+        
+        # Limpieza de valores extremos (outliers)
+        df_merge = df_merge[df_merge['bias_factor'].between(0.1, 10)] # Filtro de seguridad
+        
+        return df_merge
+    except Exception as e:
+        print(f"Error cálculo sesgo: {e}")
+        return None
