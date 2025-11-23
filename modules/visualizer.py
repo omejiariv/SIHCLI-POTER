@@ -1405,55 +1405,51 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 # PESTAÑA DE PRONÓSTICO CLIMÁTICO (INDICES + GENERADOR)
 # -----------------------------------------------------------------------------
 def display_climate_forecast_tab(**kwargs):
-    st.subheader("🔮 Pronóstico Climático (Índices Globales)")
+    st.subheader("🔮 Pronóstico Climático (Índices)")
     df_enso = kwargs.get('df_enso')
-    tab_hist, tab_iri, tab_gen = st.tabs(["📜 Evolución Histórica", "🌎 Pronóstico Oficial (IRI/CPC)", "⚙️ Generador de Regresores"])
-
+    df_long = kwargs.get('df_long')
+    
+    # RESTAURADA PESTAÑA GENERADOR
+    tab_hist, tab_iri, tab_gen = st.tabs(["📜 Historia", "🌎 IRI Oficial", "⚙️ Generador Regresores"])
+    
     with tab_hist:
         if df_enso is not None:
             idx = st.selectbox("Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
             if idx in df_enso.columns:
-                # Limpieza de fechas
-                d = df_enso.copy()
-                if d[Config.DATE_COL].dtype == 'object': d[Config.DATE_COL] = d[Config.DATE_COL].apply(parse_spanish_date)
-                d = d.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
-                fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Historia: {idx}")
-                st.plotly_chart(fig, use_container_width=True)
+                d = df_enso.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
+                st.plotly_chart(px.line(d, x=Config.DATE_COL, y=idx), use_container_width=True)
 
     with tab_iri:
         df_iri = get_iri_enso_forecast()
         if not df_iri.empty:
-            fig = px.line(df_iri, x='Fecha', y='Valor', color='Modelo', title="Pluma IRI")
+            fig = px.line(df_iri, x='Fecha', y='Valor', color='Modelo')
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", width=700)
 
     with tab_gen:
-        st.markdown("#### Entrenar Pronóstico de Índice (Prophet)")
+        # IOD INCLUIDO EXPLÍCITAMENTE
+        st.markdown("#### Entrenar Pronóstico de Índices (ONI, SOI, IOD)")
+        indices = {}
         if df_enso is not None:
-            # Preparar datos limpios
-            d_clean = df_enso.copy()
-            if d_clean[Config.DATE_COL].dtype == 'object': d_clean[Config.DATE_COL] = d_clean[Config.DATE_COL].apply(parse_spanish_date)
-            d_clean = d_clean.dropna(subset=[Config.DATE_COL])
-            
-            idx_sel = st.selectbox("Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL])
-            hor = st.slider("Meses Futuro:", 12, 60, 24)
-            
-            if st.button("Generar Pronóstico"):
-                with st.spinner("Entrenando..."):
-                    try:
-                        df_train = d_clean[[Config.DATE_COL, idx_sel]].rename(columns={Config.DATE_COL:'ds', idx_sel:'y'}).dropna()
-                        m = Prophet().fit(df_train)
-                        fut = m.make_future_dataframe(periods=hor, freq='MS')
-                        fc = m.predict(fut)
-                        
-                        if 'forecasted_regressors' not in st.session_state: st.session_state['forecasted_regressors'] = {}
-                        # Guardar con nombre simple (ONI, SOI)
-                        key = "ONI" if "oni" in idx_sel else "SOI"
-                        st.session_state['forecasted_regressors'][key] = fc[['ds', 'yhat']].rename(columns={'yhat': key})
-                        st.success(f"Regresor {key} generado.")
-                        st.plotly_chart(px.line(fc, x='ds', y='yhat', title="Pronóstico"), use_container_width=True)
-                    except Exception as e: st.error(f"Error: {e}")
+            if Config.ENSO_ONI_COL in df_enso.columns: indices['ONI'] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.DATE_COL:'ds', Config.ENSO_ONI_COL:'y'}).dropna()
+            if Config.SOI_COL in df_enso.columns: indices['SOI'] = df_enso[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.DATE_COL:'ds', Config.SOI_COL:'y'}).dropna()
+            if Config.IOD_COL in df_enso.columns: indices['IOD'] = df_enso[[Config.DATE_COL, Config.IOD_COL]].rename(columns={Config.DATE_COL:'ds', Config.IOD_COL:'y'}).dropna()
+        
+        sel_idx = st.selectbox("Índice:", list(indices.keys()))
+        hor = st.slider("Horizonte (meses):", 12, 60, 24)
+        
+        if st.button(f"Generar Pronóstico {sel_idx}"):
+            with st.spinner("Entrenando..."):
+                try:
+                    m = Prophet().fit(indices[sel_idx])
+                    fut = m.make_future_dataframe(periods=hor, freq='MS')
+                    fc = m.predict(fut)
+                    if 'forecasted_regressors' not in st.session_state: st.session_state['forecasted_regressors'] = {}
+                    st.session_state['forecasted_regressors'][sel_idx] = fc[['ds', 'yhat']].rename(columns={'yhat': sel_idx})
+                    st.success(f"Regresor {sel_idx} guardado.")
+                    st.plotly_chart(px.line(fc, x='ds', y='yhat'), use_container_width=True)
+                except Exception as e: st.error(f"Error: {e}")
 # -----------------------------------------------------------------------------
 
 def display_trends_and_forecast_tab(**kwargs):
@@ -2589,6 +2585,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
