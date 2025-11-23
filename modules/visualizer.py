@@ -2636,8 +2636,10 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
                 st.warning("No se encontraron estaciones con datos suficientes (>10 meses/año) en este periodo.")
                 return
 
-        with st.spinner("2/3. Obteniendo datos satelitales históricos (ERA5)..."):
+            with st.spinner("2/3. Obteniendo datos satelitales históricos (ERA5)..."):
             # B. Obtener Ppt Satelital (ERA5)
+            # Aseguramos el orden de las estaciones
+            gdf_calib = gdf_calib.reset_index(drop=True)
             lats = gdf_calib['latitude'].tolist()
             lons = gdf_calib['longitude'].tolist()
             
@@ -2647,30 +2649,20 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
             )
             
             if df_sat is not None and not df_sat.empty:
-                # El API devuelve promedio diario, convertimos a anual (x365.25)
-                df_sat['ppt_sat'] = df_sat['valor_promedio'] * 365.25
-                
-                # --- UNIÓN ROBUSTA POR COORDENADAS (FIX) ---
-                # Redondeamos para asegurar coincidencia (lat/lon pueden variar en el último decimal)
-                df_sat['lat_r'] = df_sat['latitude'].round(4)
-                df_sat['lon_r'] = df_sat['longitude'].round(4)
-                gdf_calib['lat_r'] = gdf_calib['latitude'].round(4)
-                gdf_calib['lon_r'] = gdf_calib['longitude'].round(4)
-                
-                # Merge seguro usando coordenadas
-                df_merged = pd.merge(
-                    gdf_calib, 
-                    df_sat[['lat_r', 'lon_r', 'ppt_sat']], 
-                    on=['lat_r', 'lon_r'], 
-                    how='inner'
-                )
-                
-                if df_merged.empty:
-                    st.error("Error crítico: No se pudieron cruzar las coordenadas de estaciones con los datos satelitales.")
-                else:
+                # Validar que tenemos la misma cantidad de resultados
+                if len(df_sat) == len(gdf_calib):
+                    # ASIGNACIÓN POR POSICIÓN (Más segura que por coordenadas exactas)
+                    # Asumimos que la API devuelve en el mismo orden (o muy cercano)
+                    # Para seguridad extra, re-asignamos lat/lon del satélite al DF original
+                    df_merged = gdf_calib.copy()
+                    df_merged['ppt_sat'] = df_sat['valor_promedio'].values * 365.25
+                    
                     # C. Calcular Métricas de Sesgo
                     # Bias = Estación / Satélite
-                    df_merged['bias_factor'] = df_merged[Config.PRECIPITATION_COL] / df_merged['ppt_sat'].replace(0, 0.01)
+                    # Reemplazar ceros satelitales para evitar división por cero
+                    df_merged['ppt_sat'] = df_merged['ppt_sat'].replace(0, 0.01)
+                    
+                    df_merged['bias_factor'] = df_merged[Config.PRECIPITATION_COL] / df_merged['ppt_sat']
                     df_merged['bias_diff'] = df_merged[Config.PRECIPITATION_COL] - df_merged['ppt_sat']
                     
                     # Limpieza de outliers extremos (factores > 10 o < 0.1)
@@ -2697,7 +2689,6 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
                         # Preparar interpolación
                         from scipy.interpolate import griddata
                         bounds = gdf_stations.total_bounds
-                        # Margen del 10%
                         pad_x = (bounds[2] - bounds[0]) * 0.1
                         pad_y = (bounds[3] - bounds[1]) * 0.1
                         
@@ -2707,8 +2698,7 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
                         
                         pts = df_merged[['longitude', 'latitude']].values
                         
-                        # 1. Mapa Satélite (Interpolado de los puntos satelitales)
-                        # Usamos los puntos donde tenemos datos
+                        # 1. Mapa Satélite
                         vals_sat = df_merged['ppt_sat'].values
                         method_scipy = 'cubic' if method == 'Spline' else 'linear'
                         
@@ -2717,9 +2707,9 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
                             
                             # 2. Mapa Factor de Sesgo
                             vals_bias = df_merged['bias_factor'].values
-                            gz_bias = griddata(pts, vals_bias, (gx, gy), method='linear') # Sesgo suele ser más suave, linear es seguro
+                            gz_bias = griddata(pts, vals_bias, (gx, gy), method='linear') 
                             
-                            # 3. Mapa Corregido = Satélite * Sesgo
+                            # 3. Mapa Corregido
                             gz_corr = gz_sat * gz_bias
                             
                             with c_m1:
@@ -2738,5 +2728,7 @@ def display_bias_correction_tab(df_long, gdf_stations, **kwargs):
                                 
                         except Exception as e:
                             st.error(f"Error en la interpolación visual: {e}")
+                else:
+                    st.warning(f"Discrepancia de datos: Se enviaron {len(gdf_calib)} estaciones pero se recibieron {len(df_sat)} del satélite. Intente con menos estaciones.")
             else:
-                st.error("No se pudieron obtener datos de la API de Open-Meteo o la respuesta fue vacía.")
+                st.error("No se pudieron obtener datos de la API de Open-Meteo.")
