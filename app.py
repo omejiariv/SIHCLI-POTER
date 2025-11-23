@@ -93,7 +93,8 @@ def main():
         "🔗 Correlación", 
         "🌊 ENSO", 
         "🌊 Extremos",
-        "🌍 Mapas Avanzados", 
+        "🌍 Mapas Avanzados",
+        "🧪 Corrección de Sesgo",
         "🌿 Cobertura", 
         "🌱 Zonas Vida", 
         "🌡️ Clima Futuro", 
@@ -142,16 +143,20 @@ def main():
     with tabs[11]: 
         display_advanced_maps_tab(**display_args)
 
-    with tabs[12]: 
-        display_land_cover_analysis_tab(**display_args)
+    with tabs[12]: # Ajusta el índice según corresponda
+        from modules.visualizer import display_bias_correction_tab
+        display_bias_correction_tab(**display_args)
 
     with tabs[13]: 
-        display_life_zones_tab(**display_args)
+        display_land_cover_analysis_tab(**display_args)
 
     with tabs[14]: 
-        display_climate_scenarios_tab(**display_args)
+        display_life_zones_tab(**display_args)
 
     with tabs[15]: 
+        display_climate_scenarios_tab(**display_args)
+
+    with tabs[16]: 
         st.header("Generar Reporte PDF")
         if st.button("Generar Reporte Ejecutivo", type="primary"):
             with st.spinner("Generando..."):
@@ -173,5 +178,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
