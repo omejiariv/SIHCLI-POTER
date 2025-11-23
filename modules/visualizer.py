@@ -2592,6 +2592,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
     st.subheader("🛰️ Corrección de Sesgo (Estaciones vs. Satélite)")
     st.info("Comparación de lluvia observada (Estaciones) vs. estimada (ERA5-Land).")
     
+    # Usar estaciones filtradas
     target_gdf = gdf_filtered if gdf_filtered is not None and not gdf_filtered.empty else gdf_stations
     
     if df_long.empty or target_gdf is None or target_gdf.empty:
@@ -2610,127 +2611,134 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
         from scipy.spatial import cKDTree
         
         with st.spinner("1/3. Procesando datos observados..."):
+            # Filtrar datos por fecha y estaciones
             mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1]) & \
                    (df_long[Config.STATION_NAME_COL].isin(target_gdf[Config.STATION_NAME_COL]))
             df_subset = df_long[mask].copy()
             
             if df_subset.empty: st.error("Sin datos en el periodo."); return
 
-            # Cálculo Correcto Promedio Anual
+            # --- CORRECCIÓN MATEMÁTICA CRÍTICA ---
+            # 1. Calcular la SUMA de lluvia para CADA AÑO (Total Anual)
             ann_sums = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-            ann_sums = ann_sums[ann_sums[Config.PRECIPITATION_COL] > 0]
+            
+            # 2. Filtrar años incompletos (ej. < 50mm/año es sospechoso)
+            ann_sums = ann_sums[ann_sums[Config.PRECIPITATION_COL] > 50]
+            
+            # 3. Calcular el PROMEDIO de los totales anuales (Media Anual Real)
             ppt_stations = ann_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
             
+            # Unir con geometría de las estaciones
             gdf_calib = pd.merge(target_gdf, ppt_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
             
             if gdf_calib.empty: st.warning("No se pudieron calcular promedios válidos."); return
 
-        with st.spinner("2/3. Descargando satélite..."):
+        with st.spinner("2/3. Descargando satélite y sincronizando..."):
+            # Preparar coordenadas para API
             gdf_calib = gdf_calib.reset_index(drop=True)
-            lats, lons = gdf_calib['latitude'].tolist(), gdf_calib['longitude'].tolist()
+            lats_est = gdf_calib['latitude'].tolist()
+            lons_est = gdf_calib['longitude'].tolist()
             
-            df_sat = get_historical_climate_average(lats, lons, "precipitation_sum", f"{rng[0]}-01-01", f"{rng[1]}-12-31")
+            # Llamada a Open-Meteo
+            df_sat = get_historical_climate_average(lats_est, lons_est, "precipitation_sum", f"{rng[0]}-01-01", f"{rng[1]}-12-31")
             
             if df_sat is not None and not df_sat.empty:
-                # --- EMPAREJAMIENTO POR DISTANCIA (NEAREST NEIGHBOR) ---
-                # 1. Coordenadas originales (Estaciones)
+                # El satélite devuelve promedio diario -> convertir a anual (x365.25)
+                df_sat['ppt_sat'] = df_sat['valor_promedio'] * 365.25
+                
+                # --- EMPAREJAMIENTO ROBUSTO (NEAREST NEIGHBOR) ---
+                # Esto soluciona el problema de "Enviadas X, Recibidas Y" y diferencias de coordenadas
+                
+                # Coordenadas Estaciones (Objetivo)
                 coords_est = np.column_stack((gdf_calib['latitude'], gdf_calib['longitude']))
-                # 2. Coordenadas recibidas (Satélite)
+                # Coordenadas Satélite (Fuente)
                 coords_sat = np.column_stack((df_sat['latitude'], df_sat['longitude']))
                 
-                # 3. Buscar el vecino más cercano
-                tree = cKDTree(coords_est)
-                dists, indexes = tree.query(coords_sat)
+                # Árbol KD para buscar el punto satelital más cercano a cada estación
+                tree = cKDTree(coords_sat)
+                dists, indexes = tree.query(coords_est)
                 
-                # 4. Asignar nombre de estación basado en el índice más cercano
-                # Solo si la distancia es razonable (< 0.05 grados ~= 5km)
+                # Asignar datos del satélite a la estación correspondiente
+                # (Solo si está a menos de ~5km, aprox 0.05 grados)
+                gdf_calib['ppt_sat'] = np.nan
+                gdf_calib['lat_sat'] = np.nan
+                gdf_calib['lon_sat'] = np.nan
+                
+                # Asignamos valores usando los índices encontrados
                 valid_matches = dists < 0.05
+                if np.any(valid_matches):
+                    # Índices en df_sat
+                    idx_sat = indexes[valid_matches]
+                    # Índices en gdf_calib
+                    idx_est = np.where(valid_matches)[0]
+                    
+                    gdf_calib.loc[idx_est, 'ppt_sat'] = df_sat.iloc[idx_sat]['ppt_sat'].values
+                    gdf_calib.loc[idx_est, 'lat_sat'] = df_sat.iloc[idx_sat]['latitude'].values
+                    gdf_calib.loc[idx_est, 'lon_sat'] = df_sat.iloc[idx_sat]['longitude'].values
                 
-                df_sat_matched = df_sat[valid_matches].copy()
-                matched_indexes = indexes[valid_matches]
-                
-                df_sat_matched[Config.STATION_NAME_COL] = gdf_calib.iloc[matched_indexes][Config.STATION_NAME_COL].values
-                
-                # Convertir a anual
-                df_sat_matched['ppt_sat'] = df_sat_matched['valor_promedio'] * 365.25
-                
-                # 5. Merge final usando el nombre
-                df_merged = pd.merge(gdf_calib, df_sat_matched[[Config.STATION_NAME_COL, 'ppt_sat']], on=Config.STATION_NAME_COL, how='inner')
+                # Filtrar las que lograron match
+                df_merged = gdf_calib.dropna(subset=['ppt_sat']).copy()
                 
                 if not df_merged.empty:
-                    # Cálculos
+                    # CÁLCULO DE FACTORES
                     df_merged['bias_factor'] = df_merged[Config.PRECIPITATION_COL] / df_merged['ppt_sat'].replace(0, 0.01)
                     df_merged['bias_diff'] = df_merged[Config.PRECIPITATION_COL] - df_merged['ppt_sat']
+                    
+                    # Limpieza de outliers
                     df_merged = df_merged[df_merged['bias_factor'].between(0.1, 10)]
-
+                    
                     # --- VISUALIZACIÓN ---
-                    tab_mapa, tab_datos = st.tabs(["🗺️ Mapas", "📋 Datos y Descarga"])
+                    tab_mapa, tab_datos = st.tabs(["🗺️ Mapas", "📋 Datos"])
                     
                     with tab_datos:
-                        show = df_merged[[Config.STATION_NAME_COL, Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor', 'bias_diff']]
-                        show.columns = ['Estación', 'Ppt Real', 'Ppt Sat', 'Factor', 'Diferencia']
+                        cols_show = [Config.STATION_NAME_COL, Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor', 'bias_diff']
+                        show = df_merged[cols_show].rename(columns={
+                            Config.PRECIPITATION_COL: 'Ppt Real (mm)', 
+                            'ppt_sat': 'Ppt Sat (mm)', 
+                            'bias_factor': 'Factor', 
+                            'bias_diff': 'Dif (mm)'
+                        })
                         
-                        st.dataframe(
-                            show.style.format({
-                                'Ppt Real': '{:.1f}', 
-                                'Ppt Sat': '{:.1f}', 
-                                'Factor': '{:.2f}', 
-                                'Diferencia': '{:.1f}'
-                            }), 
-                            use_container_width=True
-                        )
+                        # Formato diccionario seguro
+                        st.dataframe(show.style.format({
+                            'Ppt Real (mm)': '{:.1f}', 'Ppt Sat (mm)': '{:.1f}', 
+                            'Factor': '{:.2f}', 'Dif (mm)': '{:.1f}'
+                        }), use_container_width=True)
                         
-                        csv = df_merged.to_csv(index=False).encode('utf-8')
-                        st.download_button("📥 Descargar Calibración", csv, "bias_correction.csv", "text/csv")
+                        # Descarga completa con coordenadas
+                        csv_full = df_merged[[Config.STATION_NAME_COL, 'latitude', 'longitude', 'lat_sat', 'lon_sat', Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor']].to_csv(index=False).encode('utf-8')
+                        st.download_button("📥 Descargar CSV Detallado (con coordenadas)", csv_full, "calibracion_satelite_detalle.csv", "text/csv")
 
                     with tab_mapa:
-                        c_m1, c_m2 = st.columns(2)
+                        c1, c2 = st.columns(2)
+                        # Interpolación
+                        from scipy.interpolate import griddata
+                        b = target_gdf.total_bounds
+                        px_ = (b[2]-b[0])*0.1; py_ = (b[3]-b[1])*0.1
+                        gx, gy = np.mgrid[b[0]-px_:b[2]+px_:100j, b[1]-py_:b[3]+py_:100j]
                         
-                        # ... (Lógica de interpolación griddata se mantiene igual) ...
-                        # (Asegúrate de mantener el bloque de griddata aquí)
-
-                        with c_m1:
-                            st.markdown("**Lluvia Satelital (ERA5-Land)**")
-                            fig1 = go.Figure(go.Contour(
-                                z=z_sat, x=grid_lon, y=grid_lat, 
-                                colorscale='Blues', 
-                                colorbar=dict(title='mm/año'),
-                                contours=dict(coloring='heatmap', showlabels=True)
-                            ))
-                            # Puntos Satélite con Info
-                            fig1.add_trace(go.Scatter(
-                                x=df_merged.longitude, y=df_merged.latitude, 
-                                mode='markers', 
-                                marker=dict(color='black', size=5), 
-                                name='Puntos Satélite',
-                                text=df_merged.apply(lambda row: f"Estación: {row[Config.STATION_NAME_COL]}<br>Satélite: {row['ppt_sat']:.0f} mm", axis=1),
-                                hoverinfo='text'
-                            ))
-                            fig1.update_layout(height=450, margin=dict(l=0,r=0,t=30,b=0))
-                            st.plotly_chart(fig1, use_container_width=True)
+                        pts = df_merged[['longitude', 'latitude']].values
+                        try:
+                            # Mapas
+                            meth = 'cubic' if method=='Spline' else 'linear'
+                            z_sat = griddata(pts, df_merged['ppt_sat'], (gx, gy), method=meth)
+                            z_bias = griddata(pts, df_merged['bias_factor'], (gx, gy), method='linear') # Factor siempre suave
+                            z_corr = z_sat * z_bias
                             
-                        with c_m2:
-                            st.markdown("**Lluvia Corregida (Bias Correction)**")
-                            fig2 = go.Figure(go.Contour(
-                                z=z_corr, x=grid_lon, y=grid_lat, 
-                                colorscale='Viridis', 
-                                colorbar=dict(title='mm/año'),
-                                contours=dict(coloring='heatmap', showlabels=True)
-                            ))
-                            # Estaciones Reales con Info
-                            fig2.add_trace(go.Scatter(
-                                x=df_merged.longitude, y=df_merged.latitude, 
-                                mode='markers', 
-                                marker=dict(color='red', size=6, line=dict(width=1, color='white')), 
-                                name='Estaciones Reales',
-                                text=df_merged.apply(lambda row: f"Estación: {row[Config.STATION_NAME_COL]}<br>Real: {row[Config.PRECIPITATION_COL]:.0f} mm<br>Factor: {row['bias_factor']:.2f}x", axis=1),
-                                hoverinfo='text'
-                            ))
-                            fig2.update_layout(height=450, margin=dict(l=0,r=0,t=30,b=0))
-                            st.plotly_chart(fig2, use_container_width=True)
-                        except: st.warning("Pocos puntos para interpolar.")
+                            with c1:
+                                st.markdown("**Satélite (Crudo - Interpolado)**")
+                                fig1 = go.Figure(go.Contour(z=z_sat, x=gx[:,0], y=gy[0,:], colorscale='Blues', colorbar_title='mm'))
+                                fig1.add_trace(go.Scatter(x=pts[:,0], y=pts[:,1], mode='markers', marker_color='black', showlegend=False))
+                                fig1.update_layout(height=450, margin=dict(l=0,r=0,b=0,t=30))
+                                st.plotly_chart(fig1, use_container_width=True)
+                            with c2:
+                                st.markdown("**Corregido (Bias Correction)**")
+                                fig2 = go.Figure(go.Contour(z=z_corr, x=gx[:,0], y=gy[0,:], colorscale='Viridis', colorbar_title='mm'))
+                                fig2.add_trace(go.Scatter(x=pts[:,0], y=pts[:,1], mode='markers', marker_color='red', showlegend=False))
+                                fig2.update_layout(height=450, margin=dict(l=0,r=0,b=0,t=30))
+                                st.plotly_chart(fig2, use_container_width=True)
+                        except Exception as e: st.error(f"Error visualizando mapas: {e}")
                 else:
-                    st.error("Error crítico: No se pudo emparejar ninguna estación con los datos satelitales.")
+                    st.error("No hubo coincidencias espaciales entre estaciones y satélite.")
             else:
-                st.error("Error conectando con Open-Meteo.")
-
+                st.error("La API satelital no retornó datos.")
