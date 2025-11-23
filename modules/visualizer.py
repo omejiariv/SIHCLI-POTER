@@ -1459,51 +1459,49 @@ def display_climate_forecast_tab(**kwargs):
 def display_trends_and_forecast_tab(**kwargs):
     st.subheader("📉 Tendencias, Pronósticos y Riesgo")
     
+    # Recuperar datos
     df_monthly = kwargs.get('df_monthly_filtered')
+    df_anual = kwargs.get('df_anual_melted')
     stations = kwargs.get('stations_for_analysis')
+    gdf_stations = kwargs.get('gdf_stations')
 
     if not stations or df_monthly is None or df_monthly.empty:
         st.warning("Seleccione estaciones en el panel lateral.")
         return
 
-    # 1. CONFIGURACIÓN DE LA SERIE
+    # 1. SELECTOR GLOBAL DE SERIE (Estación o Regional)
     st.markdown("##### Configuración de la Serie de Tiempo")
-    mode_fc = st.radio("Modo de Análisis:", ["Estación Individual", "Serie Regional (Promedio)"], horizontal=True, key="fc_mode")
+    mode_fc = st.radio("Modo de Análisis:", ["Estación Individual", "Serie Regional (Promedio)"], horizontal=True, key="fc_mode_selector")
 
     ts_clean = None
     station_name_title = ""
 
     try:
         if mode_fc == "Estación Individual":
-            sel_st = st.selectbox("Seleccionar Estación:", stations, key="trend_st_sel")
-            if sel_st:
-                st_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == sel_st].copy()
-                st_data = st_data.set_index(Config.DATE_COL).sort_index()
-                # Forzar frecuencia y rellenar
-                ts_clean = st_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time')
-                station_name_title = sel_st
+            selected_station = st.selectbox("Seleccionar Estación:", stations, key="trend_st")
+            if selected_station:
+                station_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == selected_station].sort_values(Config.DATE_COL).set_index(Config.DATE_COL)
+                ts_clean = station_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time').dropna()
+                station_name_title = selected_station
         else:
+            # Promedio Regional
             station_name_title = "Serie Regional (Promedio)"
-            # Agrupar por fecha para obtener el promedio de todas las estaciones seleccionadas
             reg_data = df_monthly.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
-            ts_clean = reg_data.asfreq('MS').interpolate(method='time')
+            ts_clean = reg_data.asfreq('MS').interpolate(method='time').dropna()
 
-        # Limpieza final
-        if ts_clean is not None:
-            ts_clean = ts_clean.dropna()
-
-        # VALIDACIÓN VISUAL (DEBUG)
-        if ts_clean is None or len(ts_clean) < 36:
-            st.error(f"Datos insuficientes ({len(ts_clean) if ts_clean is not None else 0} meses). Se requieren al menos 36 meses continuos.")
-            # Mostrar qué datos hay para diagnosticar
-            with st.expander("Ver datos disponibles"):
-                st.dataframe(ts_clean)
+        # Validación final
+        if ts_clean is None or len(ts_clean) < 24:
+            st.error(f"Datos insuficientes (<24 meses) para {station_name_title}. Intente seleccionar otras estaciones.")
             return
 
     except Exception as e:
         st.error(f"Error preparando los datos: {e}")
         return
 
+    # --- DEFINICIÓN DE REGRESORES DISPONIBLES (CORRECCIÓN: AL INICIO) ---
+    # Definimos esto aquí para que esté visible tanto para SARIMA como para Prophet
+    avail_regs = list(st.session_state.get('forecasted_regressors', {}).keys())
+    
     # 2. PESTAÑAS
     tabs = st.tabs(["Tendencias", "Descomposición", "Autocorrelación", "SARIMA", "Prophet", "Comparación", "Mapa Riesgo"])
 
@@ -2591,6 +2589,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
