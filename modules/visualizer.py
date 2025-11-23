@@ -1527,41 +1527,45 @@ def display_climate_forecast_tab(**kwargs):
 def display_trends_and_forecast_tab(**kwargs):
     st.subheader("📉 Tendencias, Pronósticos y Riesgo")
     
-    # Recuperar datos
     df_monthly = kwargs.get('df_monthly_filtered')
-    df_anual = kwargs.get('df_anual_melted') # Este es el dato clave
     stations = kwargs.get('stations_for_analysis')
-    gdf_stations = kwargs.get('gdf_stations')
 
     if not stations or df_monthly is None or df_monthly.empty:
         st.warning("Seleccione estaciones en el panel lateral.")
         return
 
-    # 1. Configuración de la Serie de Tiempo
-    st.markdown("##### Configuración")
-    mode_fc = st.radio("Modo de Análisis:", ["Estación Individual", "Serie Regional (Promedio)"], horizontal=True, key="fc_mode_selector")
+    # 1. CONFIGURACIÓN DE LA SERIE
+    st.markdown("##### Configuración de la Serie de Tiempo")
+    mode_fc = st.radio("Modo de Análisis:", ["Estación Individual", "Serie Regional (Promedio)"], horizontal=True, key="fc_mode")
 
     ts_clean = None
     station_name_title = ""
 
     try:
         if mode_fc == "Estación Individual":
-            selected_station = st.selectbox("Seleccionar Estación:", stations, key="trend_st")
-            if selected_station:
-                station_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == selected_station].copy()
-                station_data = station_data.set_index(Config.DATE_COL).sort_index()
-                ts_clean = station_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time')
-                station_name_title = selected_station
+            sel_st = st.selectbox("Seleccionar Estación:", stations, key="trend_st_sel")
+            if sel_st:
+                st_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == sel_st].copy()
+                st_data = st_data.set_index(Config.DATE_COL).sort_index()
+                # Forzar frecuencia y rellenar
+                ts_clean = st_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time')
+                station_name_title = sel_st
         else:
             station_name_title = "Serie Regional (Promedio)"
+            # Agrupar por fecha para obtener el promedio de todas las estaciones seleccionadas
             reg_data = df_monthly.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
             ts_clean = reg_data.asfreq('MS').interpolate(method='time')
 
+        # Limpieza final
         if ts_clean is not None:
             ts_clean = ts_clean.dropna()
 
+        # VALIDACIÓN VISUAL (DEBUG)
         if ts_clean is None or len(ts_clean) < 36:
             st.error(f"Datos insuficientes ({len(ts_clean) if ts_clean is not None else 0} meses). Se requieren al menos 36 meses continuos.")
+            # Mostrar qué datos hay para diagnosticar
+            with st.expander("Ver datos disponibles"):
+                st.dataframe(ts_clean)
             return
 
     except Exception as e:
@@ -1607,13 +1611,13 @@ def display_trends_and_forecast_tab(**kwargs):
             c2.plotly_chart(px.bar(x=range(len(lag_pacf)), y=lag_pacf, title="PACF"), use_container_width=True)
         except: pass
 
-    # --- TAB 4: SARIMA (FUSIONADO: MANUAL + REGRESORES) ---
+    # --- TAB 4: SARIMA (BLINDADO) ---
     with tabs[3]:
-        st.markdown("#### Pronóstico de Precipitación Mensual (Modelo SARIMA)")
+        st.markdown("#### Pronóstico SARIMA")
         
-        # 1. Configuración de Regresores (NUEVO)
+        # Regresores
         avail_regs = list(st.session_state.get('forecasted_regressors', {}).keys())
-        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI) [Opcional]:", avail_regs, help="Variables climáticas para mejorar la predicción.")
+        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI):", avail_regs, key="sar_reg_multi")
         
         reg_df = None
         if sel_regs:
@@ -1621,64 +1625,34 @@ def display_trends_and_forecast_tab(**kwargs):
                 dfs = [st.session_state['forecasted_regressors'][k] for k in sel_regs]
                 from functools import reduce
                 reg_df = reduce(lambda l,r: pd.merge(l,r,on='ds', how='outer'), dfs).rename(columns={'ds': Config.DATE_COL})
-                # Rellenar huecos en regresores
-                reg_df = reg_df.interpolate(method='linear').bfill().ffill()
+                # Alinear fechas del regresor con la serie principal
+                reg_df = reg_df.set_index(Config.DATE_COL).reindex(ts_clean.index).interpolate(method='time').bfill().ffill().reset_index()
             except: pass
 
-        # 2. Configuración de Parámetros (TU CÓDIGO ORIGINAL)
-        with st.expander("Ajuste Manual de Parámetros SARIMA", expanded=False):
-            st.markdown("Ajuste (p,d,q) no estacional y (P,D,Q) estacional (s=12).")
-            c_p, c_d, c_q = st.columns(3)
-            p = c_p.slider("p (AR)", 0, 3, 1, key="sp"); d = c_d.slider("d (I)", 0, 2, 1, key="sd"); q = c_q.slider("q (MA)", 0, 3, 1, key="sq")
-            c_P, c_D, c_Q = st.columns(3)
-            P = c_P.slider("P (ARs)", 0, 2, 1, key="sP"); D = c_D.slider("D (Is)", 0, 2, 1, key="sD"); Q = c_Q.slider("Q (MAs)", 0, 2, 1, key="sQ")
-            
-        horizon = st.slider("Horizonte (Meses):", 12, 48, 12, key="sh")
+        hor = st.slider("Horizonte (Meses):", 12, 48, 12, key="sar_h_slider")
         
-        if st.button("Calcular SARIMA"):
+        if st.button("Calcular SARIMA", key="btn_sarima"):
             from modules.forecasting import generate_sarima_forecast
-            with st.spinner(f"Entrenando SARIMA({p},{d},{q})x({P},{D},{Q},12)..."):
+            with st.spinner("Entrenando..."):
                 try:
-                    # Preparar datos (ts_clean ya viene de arriba, sea estación o regional)
                     ts_in = ts_clean.reset_index()
-                    # Calcular test size seguro
-                    t_size = max(1, min(12, int(len(ts_clean)*0.2)))
+                    # Test size dinámico pero seguro (mínimo 6 meses, máximo 24)
+                    t_size = max(6, min(24, int(len(ts_clean)*0.2)))
                     
-                    # Llamada a la función robusta del backend
                     _, fc, ci, met, _ = generate_sarima_forecast(
-                        ts_in, 
-                        order=(p,d,q), 
-                        seasonal_order=(P,D,Q,12), 
-                        horizon=horizon, 
-                        test_size=t_size, 
-                        regressors=reg_df
+                        ts_in, order=(1,1,1), seasonal_order=(1,1,1,12), 
+                        horizon=hor, test_size=t_size, regressors=reg_df
                     )
+                    st.success(f"RMSE: {met['RMSE']:.1f}")
                     
-                    st.success(f"Modelo Ajustado. RMSE (Test): {met['RMSE']:.1f} mm")
-                    
-                    # Visualización
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Histórico"))
-                    fig.add_trace(go.Scatter(x=fc.index, y=fc, name="Pronóstico", line=dict(color='red', dash='dash')))
-                    
-                    # Intervalo
-                    if not ci.empty:
-                        fig.add_trace(go.Scatter(
-                            x=pd.concat([pd.Series(ci.index), pd.Series(ci.index)[::-1]]),
-                            y=pd.concat([ci.iloc[:,0], ci.iloc[:,1][::-1]]),
-                            fill='toself', fillcolor='rgba(255,0,0,0.1)', line=dict(width=0), name='Confianza 95%'
-                        ))
-                    
-                    fig.update_layout(title=f"Pronóstico SARIMA - {station_name_title}", xaxis_title="Fecha", yaxis_title="Precipitación (mm)")
+                    fig.add_trace(go.Scatter(x=fc.index, y=fc, name="Pronóstico", line=dict(color='red')))
                     st.plotly_chart(fig, use_container_width=True)
                     st.session_state['sarima_res'] = fc
-                    
-                    # Descarga CSV
-                    csv = pd.DataFrame({'Fecha': fc.index, 'Pronostico': fc.values}).to_csv(index=False).encode('utf-8')
-                    st.download_button("📥 Descargar Pronóstico CSV", csv, "sarima_forecast.csv", "text/csv")
-                    
-                except Exception as e:
-                    st.error(f"Error en cálculo SARIMA: {e}")
+                except Exception as e: 
+                    st.error(f"Error SARIMA: {e}")
+                    st.error("Consejo: Intente sin regresores externos o con un rango de fechas más corto.")
 
     # --- TAB 5: PROPHET ---
     with tabs[4]:
@@ -2657,6 +2631,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
