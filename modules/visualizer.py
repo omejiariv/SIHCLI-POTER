@@ -1543,54 +1543,103 @@ def display_trends_and_forecast_tab(**kwargs):
             c2.plotly_chart(px.bar(x=range(len(lag_pacf)), y=lag_pacf, title="PACF"), use_container_width=True)
         except: pass
 
-    # --- TAB 4: SARIMA (BLINDADO) ---
-    with tabs[3]: # SARIMA
-        st.markdown("#### SARIMA")
-        # Regresores
-        avail = list(st.session_state.get('forecasted_regressors', {}).keys())
-        sels = st.multiselect("Regresores:", avail)
+    # --- TAB 4: SARIMA (CON REGRESORES) ---
+    with tabs[3]:
+        st.markdown("#### Pronóstico SARIMA")
+        
+        # Selector de Regresores (Usando avail_regs definido arriba)
+        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI/IOD):", avail_regs, key="sarima_regs_sel", help="Debe generarlos primero en la pestaña 'Pronóstico Climático'")
+        
         reg_df = None
-        if sels:
-            from functools import reduce
-            l = [st.session_state['forecasted_regressors'][k] for k in sels]
-            reg_df = reduce(lambda x,y: pd.merge(x,y,on='ds',how='outer'), l).rename(columns={'ds':Config.DATE_COL})
+        if sel_regs:
+            try:
+                reg_list = [st.session_state['forecasted_regressors'][k] for k in sel_regs]
+                from functools import reduce
+                reg_df = reduce(lambda left,right: pd.merge(left,right,on='ds', how='outer'), reg_list)
+                reg_df = reg_df.rename(columns={'ds': Config.DATE_COL})
+                # Rellenar posibles huecos en los regresores
+                reg_df = reg_df.sort_values(Config.DATE_COL).interpolate(method='linear').bfill().ffill()
+            except Exception as e:
+                st.error(f"Error preparando regresores: {e}")
 
-        h = st.slider("Horizonte:", 12, 48, 12)
+        horizon = st.slider("Horizonte (Meses):", 12, 48, 12, key="h_sarima")
+        
         if st.button("Calcular SARIMA"):
             from modules.forecasting import generate_sarima_forecast
-            with st.spinner("Calculando..."):
+            with st.spinner("Calculando SARIMA..."):
                 try:
-                    _, fc, _, _, _ = generate_sarima_forecast(ts.reset_index(), (1,1,1), (1,1,1,12), h, regressors=reg_df)
-                    st.plotly_chart(px.line(fc, title="Pronóstico"), use_container_width=True)
+                    ts_in = ts_clean.reset_index()
+                    # Test size seguro
+                    t_size = max(1, min(12, int(len(ts_clean)*0.2)))
+                    
+                    _, fc, ci, met, _ = generate_sarima_forecast(
+                        ts_in, order=(1,1,1), seasonal_order=(1,1,1,12), 
+                        horizon=horizon, test_size=t_size, regressors=reg_df
+                    )
+                    st.success(f"Modelo Ajustado. RMSE: {met['RMSE']:.1f}")
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Histórico"))
+                    fig.add_trace(go.Scatter(x=fc.index, y=fc, name="Pronóstico", line=dict(color='red')))
+                    
+                    # Intervalo de confianza
+                    if not ci.empty:
+                        fig.add_trace(go.Scatter(
+                            x=pd.concat([pd.Series(ci.index), pd.Series(ci.index)[::-1]]),
+                            y=pd.concat([ci.iloc[:, 0], ci.iloc[:, 1][::-1]]),
+                            fill='toself', fillcolor='rgba(255,0,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
+                            name='Intervalo Confianza'
+                        ))
+                    st.plotly_chart(fig, use_container_width=True)
                     st.session_state['sarima_res'] = fc
-                except Exception as e: st.error(f"Error: {e}")
+                except Exception as e:
+                    st.error(f"Error SARIMA: {e}")
 
-    # --- TAB 5: PROPHET ---
+    # --- TAB 5: PROPHET (CON REGRESORES) ---
     with tabs[4]:
         st.markdown("#### Pronóstico Prophet")
-        sel_regs_p = st.multiselect("Usar Regresor Externo:", avail_regs, key="pro_reg")
+        
+        # Selector de Regresores (Usando avail_regs definido arriba)
+        sel_regs_p = st.multiselect("Usar Regresor Externo (ONI/SOI/IOD):", avail_regs, key="prophet_regs_sel")
+        
         reg_df_p = None
         if sel_regs_p:
             try:
-                dfs = [st.session_state['forecasted_regressors'][k] for k in sel_regs_p]
+                reg_list = [st.session_state['forecasted_regressors'][k] for k in sel_regs_p]
                 from functools import reduce
-                reg_df_p = reduce(lambda l,r: pd.merge(l,r,on='ds', how='outer'), dfs)
+                reg_df_p = reduce(lambda left,right: pd.merge(left,right,on='ds', how='outer'), reg_list)
+                # Rellenar huecos
+                reg_df_p = reg_df_p.sort_values('ds').interpolate(method='linear').bfill().ffill()
             except: pass
 
-        hor_p = st.slider("Horizonte:", 12, 48, 12, key="pro_h")
+        horizon_p = st.slider("Horizonte (Meses):", 12, 48, 12, key="h_prophet")
+        
         if st.button("Calcular Prophet"):
             from modules.forecasting import generate_prophet_forecast
-            with st.spinner("Entrenando..."):
+            with st.spinner("Calculando Prophet..."):
                 try:
                     ts_in = ts_clean.reset_index()
-                    _, fc, met = generate_prophet_forecast(ts_in, hor_p, regressors=reg_df_p)
-                    st.success(f"RMSE: {met['RMSE']:.1f}")
+                    # Test size seguro
+                    t_size = max(1, min(12, int(len(ts_clean)*0.2)))
+                    
+                    _, fc, met = generate_prophet_forecast(ts_in, horizon_p, test_size=t_size, regressors=reg_df_p)
+                    st.success(f"Modelo Ajustado. RMSE: {met['RMSE']:.1f}")
+                    
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Historia"))
+                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Histórico"))
                     fig.add_trace(go.Scatter(x=fc['ds'], y=fc['yhat'], name="Pronóstico", line=dict(color='green')))
+                    
+                    # Intervalo de confianza
+                    fig.add_trace(go.Scatter(
+                        x=pd.concat([fc['ds'], fc['ds'][::-1]]),
+                        y=pd.concat([fc['yhat_upper'], fc['yhat_lower'][::-1]]),
+                        fill='toself', fillcolor='rgba(0,255,0,0.1)', line=dict(color='rgba(255,255,255,0)'),
+                        name='Intervalo Confianza'
+                    ))
                     st.plotly_chart(fig, use_container_width=True)
                     st.session_state['prophet_res'] = fc[['ds', 'yhat']].set_index('ds')['yhat']
-                except Exception as e: st.error(f"Error Prophet: {e}")
+                except Exception as e:
+                    st.error(f"Error Prophet: {e}")
 
     # --- TAB 6: COMPARACIÓN ---
     with tabs[5]:
@@ -2542,6 +2591,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
