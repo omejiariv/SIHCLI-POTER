@@ -27,6 +27,35 @@ from scipy.interpolate import Rbf
 from modules.analysis import estimate_temperature, calculate_water_balance_turc, classify_holdridge_point, calculate_morphometry, calculate_hydrological_balance, calculate_hypsometric_curve, calculate_spei
 from modules.analysis import generate_life_zone_raster, calculate_return_periods, calculate_percentiles_extremes, calculate_duration_curve, calculate_climatic_indices
 
+
+
+# --- FUNCIÓN DE LIMPIEZA DE EMERGENCIA ---
+def safe_clean_timeseries(df, date_col, value_col):
+    """Limpia y estandariza una serie de tiempo a la fuerza."""
+    if df is None or df.empty: return pd.Series(dtype=float)
+    df = df.copy()
+    
+    # 1. Forzar Datetime (con errores a NaT)
+    # Manejo específico para español si falla el estándar
+    try:
+        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    except:
+        # Intento manual de reemplazo español
+        df[date_col] = df[date_col].astype(str).str.lower().replace(
+            {'ene':'jan','feb':'feb','mar':'mar','abr':'apr','may':'may','jun':'jun',
+             'jul':'jul','ago':'aug','sep':'sep','oct':'oct','nov':'nov','dic':'dec'}, regex=True)
+        df[date_col] = pd.to_datetime(df[date_col], format='%b-%y', errors='coerce')
+
+    # 2. Limpiar
+    df = df.dropna(subset=[date_col, value_col])
+    df = df.set_index(date_col).sort_index()
+    
+    # 3. Resample y Relleno
+    # Eliminar duplicados de índice
+    df = df[~df.index.duplicated(keep='first')]
+    ts = df[value_col].asfreq('MS').interpolate(method='time')
+    return ts.dropna()
+
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
@@ -2631,6 +2660,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
