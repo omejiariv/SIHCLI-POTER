@@ -1607,11 +1607,13 @@ def display_trends_and_forecast_tab(**kwargs):
             c2.plotly_chart(px.bar(x=range(len(lag_pacf)), y=lag_pacf, title="PACF"), use_container_width=True)
         except: pass
 
-    # --- TAB 4: SARIMA (CORREGIDO) ---
+    # --- TAB 4: SARIMA (FUSIONADO: MANUAL + REGRESORES) ---
     with tabs[3]:
-        st.markdown("#### Pronóstico SARIMA")
+        st.markdown("#### Pronóstico de Precipitación Mensual (Modelo SARIMA)")
+        
+        # 1. Configuración de Regresores (NUEVO)
         avail_regs = list(st.session_state.get('forecasted_regressors', {}).keys())
-        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI):", avail_regs, key="sar_reg")
+        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI) [Opcional]:", avail_regs, help="Variables climáticas para mejorar la predicción.")
         
         reg_df = None
         if sel_regs:
@@ -1619,32 +1621,64 @@ def display_trends_and_forecast_tab(**kwargs):
                 dfs = [st.session_state['forecasted_regressors'][k] for k in sel_regs]
                 from functools import reduce
                 reg_df = reduce(lambda l,r: pd.merge(l,r,on='ds', how='outer'), dfs).rename(columns={'ds': Config.DATE_COL})
+                # Rellenar huecos en regresores
+                reg_df = reg_df.interpolate(method='linear').bfill().ffill()
             except: pass
 
-        hor = st.slider("Horizonte:", 12, 48, 12, key="sar_h")
+        # 2. Configuración de Parámetros (TU CÓDIGO ORIGINAL)
+        with st.expander("Ajuste Manual de Parámetros SARIMA", expanded=False):
+            st.markdown("Ajuste (p,d,q) no estacional y (P,D,Q) estacional (s=12).")
+            c_p, c_d, c_q = st.columns(3)
+            p = c_p.slider("p (AR)", 0, 3, 1, key="sp"); d = c_d.slider("d (I)", 0, 2, 1, key="sd"); q = c_q.slider("q (MA)", 0, 3, 1, key="sq")
+            c_P, c_D, c_Q = st.columns(3)
+            P = c_P.slider("P (ARs)", 0, 2, 1, key="sP"); D = c_D.slider("D (Is)", 0, 2, 1, key="sD"); Q = c_Q.slider("Q (MAs)", 0, 2, 1, key="sQ")
+            
+        horizon = st.slider("Horizonte (Meses):", 12, 48, 12, key="sh")
         
         if st.button("Calcular SARIMA"):
             from modules.forecasting import generate_sarima_forecast
-            with st.spinner("Entrenando..."):
+            with st.spinner(f"Entrenando SARIMA({p},{d},{q})x({P},{D},{Q},12)..."):
                 try:
+                    # Preparar datos (ts_clean ya viene de arriba, sea estación o regional)
                     ts_in = ts_clean.reset_index()
-                    # CORRECCIÓN DE TAMAÑO TEST: Asegurar que sea válido
+                    # Calcular test size seguro
                     t_size = max(1, min(12, int(len(ts_clean)*0.2)))
                     
-                    _, fc, ci, met, _ = generate_sarima_forecast(ts_in, (1,1,1), (1,1,1,12), hor, test_size=t_size, regressors=reg_df)
-                    st.success(f"RMSE: {met['RMSE']:.1f}")
+                    # Llamada a la función robusta del backend
+                    _, fc, ci, met, _ = generate_sarima_forecast(
+                        ts_in, 
+                        order=(p,d,q), 
+                        seasonal_order=(P,D,Q,12), 
+                        horizon=horizon, 
+                        test_size=t_size, 
+                        regressors=reg_df
+                    )
                     
+                    st.success(f"Modelo Ajustado. RMSE (Test): {met['RMSE']:.1f} mm")
+                    
+                    # Visualización
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Historia"))
-                    fig.add_trace(go.Scatter(x=fc.index, y=fc, name="Pronóstico", line=dict(color='red')))
-                    # Intervalo seguro
+                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Histórico"))
+                    fig.add_trace(go.Scatter(x=fc.index, y=fc, name="Pronóstico", line=dict(color='red', dash='dash')))
+                    
+                    # Intervalo
                     if not ci.empty:
-                        fig.add_trace(go.Scatter(x=pd.concat([pd.Series(ci.index), pd.Series(ci.index)[::-1]]), 
-                                                 y=pd.concat([ci.iloc[:,0], ci.iloc[:,1][::-1]]), 
-                                                 fill='toself', fillcolor='rgba(255,0,0,0.1)', line=dict(width=0), name='Confianza'))
+                        fig.add_trace(go.Scatter(
+                            x=pd.concat([pd.Series(ci.index), pd.Series(ci.index)[::-1]]),
+                            y=pd.concat([ci.iloc[:,0], ci.iloc[:,1][::-1]]),
+                            fill='toself', fillcolor='rgba(255,0,0,0.1)', line=dict(width=0), name='Confianza 95%'
+                        ))
+                    
+                    fig.update_layout(title=f"Pronóstico SARIMA - {station_name_title}", xaxis_title="Fecha", yaxis_title="Precipitación (mm)")
                     st.plotly_chart(fig, use_container_width=True)
                     st.session_state['sarima_res'] = fc
-                except Exception as e: st.error(f"Error SARIMA: {e}")
+                    
+                    # Descarga CSV
+                    csv = pd.DataFrame({'Fecha': fc.index, 'Pronostico': fc.values}).to_csv(index=False).encode('utf-8')
+                    st.download_button("📥 Descargar Pronóstico CSV", csv, "sarima_forecast.csv", "text/csv")
+                    
+                except Exception as e:
+                    st.error(f"Error en cálculo SARIMA: {e}")
 
     # --- TAB 5: PROPHET ---
     with tabs[4]:
@@ -2623,6 +2657,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
