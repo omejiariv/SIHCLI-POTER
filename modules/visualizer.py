@@ -2707,7 +2707,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     show = df_merged[[Config.STATION_NAME_COL, Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor', 'bias_diff']].rename(
                         columns={Config.PRECIPITATION_COL:'Ppt Real (mm)', 'ppt_sat':'Ppt Sat (mm)', 'bias_factor':'Factor (x)', 'bias_diff':'Dif (mm)'}
                     )
-                    st.dataframe(show.style.format("{:.2f}"), use_container_width=True)
+                    st.dataframe(show.style.format("{'Ppt Real (mm)': '{:.2f}', 'Ppt Sat (mm)': '{:.2f}', 'Factor (x)': '{:.2f}', 'Dif (mm)': '{:.2f}'}"), use_container_width=True)
                     mean_bias = show['Factor (x)'].mean()
                     st.info(f"**Factor Promedio Regional:** {mean_bias:.2f} (El satélite {'subestima' if mean_bias>1 else 'sobreestima'} la lluvia).")
 
@@ -2752,3 +2752,4 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
 
             else:
                 st.error("La API satelital no devolvió datos. Verifique su conexión o intente más tarde.")
+
