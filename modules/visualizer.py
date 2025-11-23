@@ -2638,76 +2638,70 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
             df_sat = get_historical_climate_average(lats, lons, "precipitation_sum", f"{rng[0]}-01-01", f"{rng[1]}-12-31")
             
             if df_sat is not None and not df_sat.empty:
-                # Asignación inteligente
-                if len(df_sat) == len(gdf_calib):
-                    df_merged = gdf_calib.copy()
-                    # Satélite diario -> Anual (x365.25)
-                    df_merged['ppt_sat'] = df_sat['valor_promedio'].values * 365.25
+                # Convertir a anual
+                df_sat['ppt_sat'] = df_sat['valor_promedio'].values * 365.25
+                
+                # Redondear para merge
+                df_sat['lat_r'] = df_sat['latitude'].round(2)
+                df_sat['lon_r'] = df_sat['longitude'].round(2)
+                gdf_calib['lat_r'] = gdf_calib['latitude'].round(2)
+                gdf_calib['lon_r'] = gdf_calib['longitude'].round(2)
+                
+                # Merge (Inner join: solo nos quedamos con las que tienen datos satelitales)
+                df_merged = pd.merge(
+                    gdf_calib, 
+                    df_sat[['lat_r', 'lon_r', 'ppt_sat']], 
+                    on=['lat_r', 'lon_r'], 
+                    how='inner'
+                )
+                
+                # VALIDACIÓN FLEXIBLE
+                if not df_merged.empty:
+                    # Advertir si se perdieron estaciones
+                    if len(df_merged) < len(gdf_calib):
+                        st.warning(f"Atención: Se obtuvieron datos satelitales para {len(df_merged)} de las {len(gdf_calib)} estaciones enviadas. Algunas estaciones se omitieron.")
                     
-                    # Cálculos de Sesgo
-                    # Factor = Real / Satélite
+                    # --- CÁLCULOS Y VISUALIZACIÓN (Igual que antes) ---
                     df_merged['bias_factor'] = df_merged[Config.PRECIPITATION_COL] / df_merged['ppt_sat'].replace(0, 0.01)
                     df_merged['bias_diff'] = df_merged[Config.PRECIPITATION_COL] - df_merged['ppt_sat']
-                    
-                    # Filtrar outliers extremos (factores > 10 o < 0.1 suelen ser errores de datos)
                     df_merged = df_merged[df_merged['bias_factor'].between(0.1, 10)]
 
-                    # --- VISUALIZACIÓN ---
-                    tab_mapa, tab_datos = st.tabs(["🗺️ Mapas", "📋 Datos y Descarga"])
+                    tab_mapa, tab_datos = st.tabs(["🗺️ Mapas", "📋 Datos"])
                     
                     with tab_datos:
                         show = df_merged[[Config.STATION_NAME_COL, Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor', 'bias_diff']]
-                        # Renombrar para visualización
                         show.columns = ['Estación', 'Ppt Real', 'Ppt Sat', 'Factor', 'Diferencia']
+                        st.dataframe(show.style.format({'Ppt Real': '{:.1f}', 'Ppt Sat': '{:.1f}', 'Factor': '{:.2f}', 'Diferencia': '{:.1f}'}), use_container_width=True)
                         
-                        # FORMATO SEGURO (Diccionario explícito)
-                        st.dataframe(
-                            show.style.format({
-                                'Ppt Real': '{:.1f}', 
-                                'Ppt Sat': '{:.1f}', 
-                                'Factor': '{:.2f}', 
-                                'Diferencia': '{:.1f}'
-                            }), 
-                            use_container_width=True
-                        )
-                        
-                        # Botón Descarga
                         csv = df_merged.to_csv(index=False).encode('utf-8')
-                        st.download_button("📥 Descargar Calibración", csv, "bias_correction.csv", "text/csv")
+                        st.download_button("📥 Descargar", csv, "bias.csv", "text/csv")
 
                     with tab_mapa:
                         c1, c2 = st.columns(2)
-                        # Interpolación para mapas
                         from scipy.interpolate import griddata
                         b = target_gdf.total_bounds
-                        # Margen
-                        pad_x = (b[2]-b[0])*0.1; pad_y = (b[3]-b[1])*0.1
+                        pad_x, pad_y = (b[2]-b[0])*0.1, (b[3]-b[1])*0.1
                         gx, gy = np.mgrid[b[0]-pad_x:b[2]+pad_x:100j, b[1]-pad_y:b[3]+pad_y:100j]
-                        
                         pts = df_merged[['longitude', 'latitude']].values
                         meth = 'cubic' if method=='Spline' else 'linear'
                         
                         try:
-                            # Mapa 1: Satélite Crudo (Interpolado)
                             z_sat = griddata(pts, df_merged['ppt_sat'], (gx, gy), method=meth)
-                            # Mapa 2: Corregido = Satélite * Factor Interpolado
-                            z_factor = griddata(pts, df_merged['bias_factor'], (gx, gy), method='linear') # Factor siempre linear para suavidad
-                            z_corr = z_sat * z_factor
+                            z_corr = z_sat * griddata(pts, df_merged['bias_factor'], (gx, gy), method='linear')
                             
                             with c1:
-                                st.markdown("**Satélite (Crudo)**")
-                                fig1 = go.Figure(go.Contour(z=z_sat, x=gx[:,0], y=gy[0,:], colorscale='Blues'))
+                                fig1 = go.Figure(go.Contour(z=z_sat, x=gx[:,0], y=gy[0,:], colorscale='Blues', colorbar=dict(title='mm')))
                                 fig1.add_trace(go.Scatter(x=pts[:,0], y=pts[:,1], mode='markers', marker_color='black', showlegend=False))
-                                fig1.update_layout(height=400, margin=dict(l=0,r=0,b=0,t=30))
+                                fig1.update_layout(title="Satélite (Crudo)", height=400, margin=dict(l=0,r=0,b=0,t=30))
                                 st.plotly_chart(fig1, use_container_width=True)
                             with c2:
-                                st.markdown("**Corregido (Bias Correction)**")
-                                fig2 = go.Figure(go.Contour(z=z_corr, x=gx[:,0], y=gy[0,:], colorscale='Viridis'))
+                                fig2 = go.Figure(go.Contour(z=z_corr, x=gx[:,0], y=gy[0,:], colorscale='Viridis', colorbar=dict(title='mm')))
                                 fig2.add_trace(go.Scatter(x=pts[:,0], y=pts[:,1], mode='markers', marker_color='red', showlegend=False))
-                                fig2.update_layout(height=400, margin=dict(l=0,r=0,b=0,t=30))
+                                fig2.update_layout(title="Corregido (Bias)", height=400, margin=dict(l=0,r=0,b=0,t=30))
                                 st.plotly_chart(fig2, use_container_width=True)
-                        except: st.warning("No hay suficientes puntos para interpolar los mapas.")
+                        except: st.warning("Pocos puntos para interpolar mapa.")
                 else:
-                    st.error(f"Error de sincronización: Enviadas {len(gdf_calib)}, Recibidas {len(df_sat)}. Intente menos estaciones.")
+                    st.error("Error crítico: Ninguna estación coincidió con los datos satelitales recuperados.")
             else:
-                st.error("Error conectando con Open-Meteo.")
+                st.error("Error de conexión con API Satelital.")
+
