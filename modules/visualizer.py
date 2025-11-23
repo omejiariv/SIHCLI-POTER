@@ -1,3 +1,5 @@
+
+
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
@@ -1525,16 +1527,17 @@ def display_climate_forecast_tab(**kwargs):
 def display_trends_and_forecast_tab(**kwargs):
     st.subheader("📉 Tendencias, Pronósticos y Riesgo")
     
+    # Recuperar datos
     df_monthly = kwargs.get('df_monthly_filtered')
     stations = kwargs.get('stations_for_analysis')
-    
+
     if not stations or df_monthly is None or df_monthly.empty:
-        st.warning("No hay datos suficientes para generar pronósticos. Seleccione estaciones o amplíe el rango de fechas.")
+        st.warning("Seleccione estaciones en el panel lateral.")
         return
 
-    # 1. Configuración de la Serie
-    st.markdown("##### Configuración de la Serie de Tiempo")
-    mode_fc = st.radio("Modo de Análisis:", ["Estación Individual", "Serie Regional (Promedio)"], horizontal=True)
+    # 1. CONFIGURACIÓN DE LA SERIE DE TIEMPO
+    st.markdown("##### Configuración")
+    mode_fc = st.radio("Modo de Análisis:", ["Estación Individual", "Serie Regional (Promedio)"], horizontal=True, key="fc_mode_selector")
 
     ts_clean = None
     station_name_title = ""
@@ -1628,10 +1631,8 @@ def display_trends_and_forecast_tab(**kwargs):
     # --- TAB 4: SARIMA ---
     with tabs[3]:
         st.markdown("#### Pronóstico SARIMA")
-        
-        # Regresores
         avail_regs = list(st.session_state.get('forecasted_regressors', {}).keys())
-        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI):", avail_regs)
+        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI):", avail_regs, key="sar_reg")
         
         reg_df = None
         if sel_regs:
@@ -1641,23 +1642,22 @@ def display_trends_and_forecast_tab(**kwargs):
                 reg_df = reduce(lambda l,r: pd.merge(l,r,on='ds', how='outer'), dfs).rename(columns={'ds': Config.DATE_COL})
             except: pass
 
-        hor = st.slider("Horizonte (Meses):", 12, 48, 12, key="sar_h")
-        
+        hor = st.slider("Horizonte:", 12, 48, 12, key="sar_h")
         if st.button("Calcular SARIMA"):
             from modules.forecasting import generate_sarima_forecast
             with st.spinner("Entrenando..."):
                 try:
-                    # Reiniciar índice para pasar DF limpio
                     ts_in = ts_clean.reset_index()
-                    # Test size dinámico (20% de los datos o 12 meses, lo que sea menor)
                     t_size = min(12, int(len(ts_clean)*0.2))
-                    
                     _, fc, ci, met, _ = generate_sarima_forecast(ts_in, (1,1,1), (1,1,1,12), hor, test_size=t_size, regressors=reg_df)
-                    
                     st.success(f"RMSE: {met['RMSE']:.1f}")
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Historia"))
+                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Histórico"))
                     fig.add_trace(go.Scatter(x=fc.index, y=fc, name="Pronóstico", line=dict(color='red')))
+                    # Intervalo
+                    fig.add_trace(go.Scatter(x=pd.concat([pd.Series(ci.index), pd.Series(ci.index)[::-1]]), 
+                                             y=pd.concat([ci.iloc[:,0], ci.iloc[:,1][::-1]]), 
+                                             fill='toself', fillcolor='rgba(255,0,0,0.1)', line=dict(width=0), name='Confianza'))
                     st.plotly_chart(fig, use_container_width=True)
                     st.session_state['sarima_res'] = fc
                 except Exception as e: st.error(f"Error SARIMA: {e}")
@@ -2664,6 +2664,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
