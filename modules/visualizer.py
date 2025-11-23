@@ -1544,36 +1544,34 @@ def display_trends_and_forecast_tab(**kwargs):
 
     try:
         if mode_fc == "Estación Individual":
-            sel_st = st.selectbox("Seleccionar Estación:", stations)
-            if sel_st:
-                # Filtrar y ordenar
-                st_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == sel_st].copy()
-                st_data = st_data.set_index(Config.DATE_COL).sort_index()
-                # Limpieza: Frecuencia mensual + Interpolación
-                ts_clean = st_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time')
-                station_name_title = sel_st
+            selected_station = st.selectbox("Seleccionar Estación:", stations, key="trend_st")
+            if selected_station:
+                # Filtrar y preparar datos
+                station_data = df_monthly[df_monthly[Config.STATION_NAME_COL] == selected_station].copy()
+                station_data = station_data.set_index(Config.DATE_COL).sort_index()
+                # Crear serie limpia DIRECTAMENTE
+                ts_clean = station_data[Config.PRECIPITATION_COL].asfreq('MS').interpolate(method='time')
+                station_name_title = selected_station
         else:
             # Promedio Regional
             station_name_title = "Serie Regional (Promedio)"
-            # Agrupar por fecha y promediar
+            # Agrupar
             reg_data = df_monthly.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
+            # Crear serie limpia DIRECTAMENTE
             ts_clean = reg_data.asfreq('MS').interpolate(method='time')
 
-        # Limpieza final de nulos (bordes)
+        # Limpieza final de nulos
         if ts_clean is not None:
             ts_clean = ts_clean.dropna()
 
-        # VALIDACIÓN CRÍTICA: ¿Hay datos suficientes?
+        # VALIDACIÓN
         if ts_clean is None or len(ts_clean) < 36:
-            st.error(f"Datos insuficientes ({len(ts_clean) if ts_clean is not None else 0} meses). Se requieren al menos 36 meses continuos para entrenar modelos SARIMA/Prophet.")
+            st.error(f"Datos insuficientes ({len(ts_clean) if ts_clean is not None else 0} meses). Se requieren al menos 36 meses continuos para los modelos.")
             return
 
     except Exception as e:
         st.error(f"Error preparando los datos: {e}")
         return
-        
-    # Limpieza y Frecuencia (Blindaje contra errores)
-    ts_clean = ts_source.asfreq('MS').interpolate(method='time').dropna()
 
     # 2. ESTRUCTURA DE 7 PESTAÑAS (RECUPERADA)
     tabs = st.tabs([
@@ -2664,6 +2662,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
