@@ -11,22 +11,21 @@ import io
 
 class PDFReport(FPDF):
     def header(self):
-        # Logo
-        if os.path.exists(Config.LOGO_PATH):
-            try:
-                # Ajustar posición (x, y, w)
-                self.image(Config.LOGO_PATH, 10, 8, 30)
-            except: pass
-            
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, 'Reporte Hidroclimático Ejecutivo', 0, 0, 'R')
-        self.ln(15)
+        if self.page_no() > 1:
+            if os.path.exists(Config.LOGO_PATH):
+                try: self.image(Config.LOGO_PATH, 10, 8, 25)
+                except: pass
+            self.set_font('Arial', 'B', 10)
+            self.cell(0, 5, Config.APP_TITLE[:60]+"...", 0, 1, 'R')
+            self.set_font('Arial', 'I', 8)
+            self.cell(0, 5, f'Fecha: {datetime.now().strftime("%Y-%m-%d")}', 0, 1, 'R')
+            self.ln(10)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
         self.set_text_color(128)
-        self.cell(0, 10, f'Generado por SIHCLI-POTER - Página {self.page_no()}/{{nb}}', 0, 0, 'C')
+        self.cell(0, 10, f'Página {self.page_no()}/{{nb}}', 0, 0, 'C')
 
     def chapter_title(self, label):
         self.set_font('Arial', 'B', 14)
@@ -39,155 +38,121 @@ class PDFReport(FPDF):
         self.set_font('Arial', '', 11)
         self.multi_cell(0, 5, body)
         self.ln()
-        
-    def add_image_from_bytes(self, img_bytes, w=180, h=100, title=""):
+
+    def add_plot_image(self, img_bytes, title="", w=170, h=90):
         if img_bytes:
             try:
-                # Guardar bytes en archivo temporal porque FPDF lo requiere
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_img:
-                    tmp_img.write(img_bytes)
-                    tmp_path = tmp_img.name
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                    tmp.write(img_bytes)
+                    tmp_path = tmp.name
+                
+                if self.get_y() + h > 260: self.add_page()
                 
                 if title:
-                    self.set_font('Arial', 'B', 10)
-                    self.cell(0, 6, title, 0, 1, 'C')
+                    self.set_font('Arial', 'B', 11)
+                    self.cell(0, 8, title, 0, 1, 'C')
                 
-                # Centrar imagen
-                self.image(tmp_path, x=(210-w)/2, w=w, h=h)
+                x = (210 - w) / 2
+                self.image(tmp_path, x=x, w=w, h=h)
                 self.ln(5)
                 os.remove(tmp_path)
-            except:
-                self.cell(0, 10, "[Error al insertar imagen]", 0, 1)
+            except: pass
 
-def create_static_map(gdf_stations):
-    """Genera un mapa estático simple con Matplotlib para el PDF."""
+def create_static_map(gdf_stations, gdf_subcuencas=None):
+    """Genera mapa estático con Matplotlib."""
     try:
-        fig, ax = plt.subplots(figsize=(8, 6))
+        fig, ax = plt.subplots(figsize=(10, 8))
         
-        # Pintar estaciones
-        gdf_stations.plot(ax=ax, color='blue', markersize=50, alpha=0.7, edgecolor='k')
+        # Capas
+        if gdf_subcuencas is not None and not gdf_subcuencas.empty:
+            gdf_subcuencas.plot(ax=ax, color='#e6f2ff', edgecolor='blue', alpha=0.5, zorder=1)
+
+        if gdf_stations is not None and not gdf_stations.empty:
+            gdf_stations.plot(ax=ax, color='red', markersize=40, edgecolor='white', zorder=2)
+            # Etiquetas simples
+            if len(gdf_stations) < 25:
+                for x, y, label in zip(gdf_stations.geometry.x, gdf_stations.geometry.y, gdf_stations[Config.STATION_NAME_COL]):
+                    ax.annotate(label[:10], xy=(x, y), xytext=(3, 3), textcoords="offset points", fontsize=7)
+
+        ax.set_title("Localización de Estaciones", fontsize=12)
+        ax.set_axis_off()
         
-        # Etiquetas
-        for idx, row in gdf_stations.iterrows():
-            ax.annotate(text=row[Config.STATION_NAME_COL][:10], xy=(row.geometry.x, row.geometry.y), 
-                        xytext=(3, 3), textcoords="offset points", fontsize=8)
-        
-        ax.set_title("Ubicación de Estaciones Seleccionadas")
-        ax.set_xlabel("Longitud")
-        ax.set_ylabel("Latitud")
-        ax.grid(True, linestyle='--', alpha=0.5)
-        
-        # Guardar en bytes
-        img_buf = io.BytesIO()
-        plt.savefig(img_buf, format='png', dpi=100, bbox_inches='tight')
-        img_buf.seek(0)
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
         plt.close(fig)
-        return img_buf.read()
-    except:
-        return None
+        return buf.read()
+    except: return None
 
 def generate_pdf_report(df_long, gdf_stations, analysis_results, **kwargs):
-    """Genera el PDF completo."""
     try:
         pdf = PDFReport()
         pdf.alias_nb_pages()
+        
+        # PORTADA
         pdf.add_page()
-
-        # --- 1. RESUMEN EJECUTIVO ---
-        pdf.chapter_title('1. Resumen Ejecutivo')
+        pdf.ln(60)
+        if os.path.exists(Config.LOGO_PATH): pdf.image(Config.LOGO_PATH, x=75, w=60)
+        pdf.ln(20)
+        pdf.set_font('Arial', 'B', 24)
+        pdf.cell(0, 10, "REPORTE TÉCNICO", 0, 1, 'C')
+        pdf.set_font('Arial', '', 16)
+        pdf.cell(0, 10, "Análisis Hidroclimático y Pronósticos", 0, 1, 'C')
+        pdf.ln(20)
+        pdf.set_font('Arial', '', 12)
+        pdf.cell(0, 8, f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1, 'C')
         
-        n_est = analysis_results.get("n_estaciones", 0)
-        rango = analysis_results.get("rango", "N/A")
-        
-        # Calcular totales rápidos
-        ppt_total = df_long[Config.PRECIPITATION_COL].sum()
-        ppt_prom = df_long[Config.PRECIPITATION_COL].mean()
-        
-        intro = (f"El presente informe detalla el análisis hidroclimático para el periodo {rango}. "
-                 f"Se han procesado datos de {n_est} estaciones de monitoreo.\n\n"
-                 f"Resumen Estadístico:\n"
-                 f"- Precipitación Promedio Mensual del sistema: {ppt_prom:.1f} mm\n"
-                 f"- Precipitación Total Acumulada (histórica): {ppt_total:,.0f} mm")
-        pdf.chapter_body(intro)
-
-        # --- 2. MAPA DE LOCALIZACIÓN ---
-        pdf.chapter_title('2. Localización Espacial')
-        map_bytes = create_static_map(gdf_stations)
-        if map_bytes:
-            pdf.add_image_from_bytes(map_bytes, w=140, h=100, title="Mapa de Estaciones")
-        else:
-            pdf.chapter_body("No se pudo generar el mapa estático.")
-
-        # --- 3. ANÁLISIS GRÁFICO (Desde Session State) ---
+        # 1. RESUMEN
         pdf.add_page()
-        pdf.chapter_title('3. Análisis Gráfico')
-        
-        # Recuperar figuras guardadas
-        fig_anual = st.session_state.get('report_fig_anual')
-        fig_mensual = st.session_state.get('report_fig_mensual')
-        fig_ciclo = st.session_state.get('report_fig_ciclo')
+        pdf.print_chapter_title("1. Resumen Ejecutivo")
+        n = len(gdf_stations) if gdf_stations is not None else 0
+        pdf.chapter_body(f"Análisis realizado sobre {n} estaciones. Este documento consolida la estadística descriptiva, tendencias históricas y pronósticos generados por el sistema.")
 
-        # Convertir Plotly a Imagen (Requiere Kaleido instalado en el servidor)
-        # Si falla, pondrá un mensaje de error pero generará el PDF
-        if fig_anual:
-            try:
-                img_bytes = fig_anual.to_image(format="png", width=800, height=400, scale=1.5)
-                pdf.add_image_from_bytes(img_bytes, w=170, h=80, title="Serie Anual")
-            except:
-                pdf.chapter_body("[Gráfico Anual no disponible: Falta librería de exportación]")
+        # 2. MAPA
+        pdf.print_chapter_title("2. Contexto Espacial")
+        subc = kwargs.get('gdf_subcuencas')
+        map_img = create_context_map_static(gdf_stations, gdf_subcuencas=subc)
+        if map_img: pdf.add_plot_image(map_img, "Mapa de Estaciones", h=120)
 
-        if fig_ciclo:
-            try:
-                img_bytes = fig_ciclo.to_image(format="png", width=800, height=400, scale=1.5)
-                pdf.add_image_from_bytes(img_bytes, w=170, h=80, title="Ciclo Anual Promedio")
-            except: pass
+        # 3. GRÁFICOS CAPTURADOS (Session State)
+        pdf.add_page()
+        pdf.print_chapter_title("3. Análisis Visual")
+        
+        # Lista de claves de gráficos que guardamos en visualizer.py
+        keys = [
+            ('report_fig_anual', 'Serie Histórica Anual'),
+            ('report_fig_mensual', 'Régimen Mensual'),
+            ('report_fig_ciclo', 'Ciclo Anual'),
+            ('report_fig_dist', 'Distribución Estadística')
+        ]
+        
+        for k, title in keys:
+            if k in st.session_state and st.session_state[k]:
+                try:
+                    # Intentar convertir Plotly a imagen (requiere Kaleido)
+                    img = st.session_state[k].to_image(format="png", width=1000, height=500, scale=2)
+                    pdf.add_plot_image(img, title, h=90)
+                except: pass
 
-        if fig_mensual:
-            pdf.add_page()
-            try:
-                img_bytes = fig_mensual.to_image(format="png", width=800, height=400, scale=1.5)
-                pdf.add_image_from_bytes(img_bytes, w=170, h=80, title="Serie Mensual Detallada")
-            except: pass
+        # 4. ESTADÍSTICAS
+        pdf.add_page()
+        pdf.print_chapter_title("4. Estadísticas Clave")
+        if not df_long.empty:
+            stats = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].agg(['mean', 'max']).reset_index()
+            pdf.set_font('Arial', 'B', 10)
+            pdf.cell(100, 8, "Estación", 1); pdf.cell(40, 8, "Promedio", 1); pdf.cell(40, 8, "Máximo", 1); pdf.ln()
+            pdf.set_font('Arial', '', 10)
+            for _, r in stats.iterrows():
+                pdf.cell(100, 7, str(r[Config.STATION_NAME_COL])[:45], 1)
+                pdf.cell(40, 7, f"{r['mean']:.1f}", 1, 0, 'R')
+                pdf.cell(40, 7, f"{r['max']:.1f}", 1, 0, 'R')
+                pdf.ln()
 
-        # --- 4. TABLA RESUMEN ---
-        pdf.chapter_title('4. Resumen por Estación')
-        
-        # Crear tabla simple
-        pdf.set_font('Arial', 'B', 9)
-        # Encabezados
-        pdf.cell(80, 8, 'Estación', 1)
-        pdf.cell(30, 8, 'Altitud', 1)
-        pdf.cell(40, 8, 'Ppt Media (mm)', 1)
-        pdf.ln()
-        
-        # Datos
-        pdf.set_font('Arial', '', 9)
-        stats = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        
-        # Unir altitud
-        stats = stats.merge(gdf_stations[[Config.STATION_NAME_COL, Config.ALTITUDE_COL]], on=Config.STATION_NAME_COL, how='left')
-        
-        for _, row in stats.iterrows():
-            name = str(row[Config.STATION_NAME_COL])[:35] # Recortar nombre largo
-            alt = str(row.get(Config.ALTITUDE_COL, 'N/A'))
-            val = f"{row[Config.PRECIPITATION_COL]:.1f}"
-            
-            pdf.cell(80, 7, name, 1)
-            pdf.cell(30, 7, alt, 1)
-            pdf.cell(40, 7, val, 1)
-            pdf.ln()
-
-        # Generar
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            pdf.output(tmp_file.name)
-            tmp_path = tmp_file.name
-        
-        with open(tmp_path, "rb") as f:
-            pdf_bytes = f.read()
-        os.remove(tmp_path)
-            
-        return pdf_bytes
+        # Output
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            pdf.output(tmp.name)
+            return open(tmp.name, "rb").read()
 
     except Exception as e:
-        print(f"Error PDF: {e}")
+        st.error(f"Error reporte: {e}")
         return None
