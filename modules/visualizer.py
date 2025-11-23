@@ -28,34 +28,6 @@ from modules.analysis import estimate_temperature, calculate_water_balance_turc,
 from modules.analysis import generate_life_zone_raster, calculate_return_periods, calculate_percentiles_extremes, calculate_duration_curve, calculate_climatic_indices
 
 
-
-# --- FUNCIÓN DE LIMPIEZA DE EMERGENCIA ---
-def safe_clean_timeseries(df, date_col, value_col):
-    """Limpia y estandariza una serie de tiempo a la fuerza."""
-    if df is None or df.empty: return pd.Series(dtype=float)
-    df = df.copy()
-    
-    # 1. Forzar Datetime (con errores a NaT)
-    # Manejo específico para español si falla el estándar
-    try:
-        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-    except:
-        # Intento manual de reemplazo español
-        df[date_col] = df[date_col].astype(str).str.lower().replace(
-            {'ene':'jan','feb':'feb','mar':'mar','abr':'apr','may':'may','jun':'jun',
-             'jul':'jul','ago':'aug','sep':'sep','oct':'oct','nov':'nov','dic':'dec'}, regex=True)
-        df[date_col] = pd.to_datetime(df[date_col], format='%b-%y', errors='coerce')
-
-    # 2. Limpiar
-    df = df.dropna(subset=[date_col, value_col])
-    df = df.set_index(date_col).sort_index()
-    
-    # 3. Resample y Relleno
-    # Eliminar duplicados de índice
-    df = df[~df.index.duplicated(keep='first')]
-    ts = df[value_col].asfreq('MS').interpolate(method='time')
-    return ts.dropna()
-
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
@@ -1434,122 +1406,53 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 # -----------------------------------------------------------------------------
 def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático (Índices Globales)")
-    
     df_enso = kwargs.get('df_enso')
-    df_long = kwargs.get('df_long') # Necesario si queremos usar SOI/IOD del histórico
-    
-    # 3 Pestañas: Pasado, Futuro Oficial, Futuro Propio (Regresor)
     tab_hist, tab_iri, tab_gen = st.tabs(["📜 Evolución Histórica", "🌎 Pronóstico Oficial (IRI/CPC)", "⚙️ Generador de Regresores"])
 
-    # --- PESTAÑA 1: HISTORIA ---
     with tab_hist:
-        if df_enso is None or df_enso.empty:
-            st.warning("No hay datos de índices climáticos cargados.")
-        else:
-            st.info("Análisis de la evolución histórica de los índices que afectan la región.")
-            index_col = st.selectbox("Seleccione Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL], index=0)
-            
-            if index_col in df_enso.columns:
-                # CORRECCIÓN DE FECHAS Y ORDENAMIENTO
-                data = df_enso.copy()
-                
-                # Asegurar formato datetime
-                if data[Config.DATE_COL].dtype == 'object':
-                    data[Config.DATE_COL] = data[Config.DATE_COL].apply(parse_spanish_date)
-                else:
-                    data[Config.DATE_COL] = pd.to_datetime(data[Config.DATE_COL], errors='coerce')
-                
-                # Eliminar NaT (fechas inválidas) y ordenar
-                data = data.dropna(subset=[Config.DATE_COL, index_col]).sort_values(Config.DATE_COL)
-                
-                # Graficar
-                fig = px.line(data, x=Config.DATE_COL, y=index_col, title=f"Evolución Histórica: {index_col}")
-                
-                # Líneas de referencia solo para ONI
-                if index_col == Config.ENSO_ONI_COL:
-                    fig.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
-                    fig.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
-                    
+        if df_enso is not None:
+            idx = st.selectbox("Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
+            if idx in df_enso.columns:
+                # Limpieza de fechas
+                d = df_enso.copy()
+                if d[Config.DATE_COL].dtype == 'object': d[Config.DATE_COL] = d[Config.DATE_COL].apply(parse_spanish_date)
+                d = d.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
+                fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Historia: {idx}")
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning(f"Columna {index_col} no encontrada.")
 
-    # --- PESTAÑA 2: PRONÓSTICO IRI ---
     with tab_iri:
-        st.markdown("#### Pluma de Predicción ENSO (IRI/CPC)")
-        with st.spinner("Conectando con servidores del IRI..."):
-            df_iri = get_iri_enso_forecast()
+        df_iri = get_iri_enso_forecast()
         if not df_iri.empty:
-            last_obs = df_iri[df_iri['Tipo'] == 'Observado']['Fecha'].max()
-            df_plot = df_iri[df_iri['Fecha'] >= (last_obs - pd.DateOffset(months=4))]
-            fig_plume = go.Figure()
-            for model in df_plot['Modelo'].unique():
-                sub = df_plot[df_plot['Modelo'] == model]
-                tipo = sub.iloc[0]['Tipo']
-                color, width, opac, name = ('black', 4, 1, "Observado") if tipo == 'Observado' else (('blue', 3, 1, model) if 'AVG' in model.upper() else ('orange', 1, 0.3, "Dinámicos"))
-                if tipo == 'Estadístico': color, name = 'green', "Estadísticos"
-                
-                show_leg = True if width > 1 else False
-                fig_plume.add_trace(go.Scatter(x=sub['Fecha'], y=sub['Valor'], mode='lines', line=dict(color=color, width=width), opacity=opac, name=name, showlegend=show_leg, hoverinfo='text+y', text=model))
-            
-            fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
-            fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
-            fig_plume.update_layout(title=f"Pronóstico Multimodelo ENSO", yaxis_title="Anomalía SST (°C)", height=550, hovermode="x unified")
-            st.plotly_chart(fig_plume, use_container_width=True)
+            fig = px.line(df_iri, x='Fecha', y='Valor', color='Modelo', title="Pluma IRI")
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", width=700)
 
-    # --- PESTAÑA 3: GENERADOR (LA PIEZA FALTANTE) ---
     with tab_gen:
-        st.markdown("#### Entrenar Pronóstico de Índice Climático (Prophet)")
-        
-        indices_data = {}
+        st.markdown("#### Entrenar Pronóstico de Índice (Prophet)")
         if df_enso is not None:
-            # CORRECCIÓN: Parseo robusto de fechas
-            df_enso_clean = df_enso.copy()
-            # Intentar convertir fechas
-            if df_enso_clean[Config.DATE_COL].dtype == 'object':
-                df_enso_clean[Config.DATE_COL] = df_enso_clean[Config.DATE_COL].apply(parse_spanish_date)
+            # Preparar datos limpios
+            d_clean = df_enso.copy()
+            if d_clean[Config.DATE_COL].dtype == 'object': d_clean[Config.DATE_COL] = d_clean[Config.DATE_COL].apply(parse_spanish_date)
+            d_clean = d_clean.dropna(subset=[Config.DATE_COL])
             
-            df_enso_clean = df_enso_clean.dropna(subset=[Config.DATE_COL]).sort_values(Config.DATE_COL)
-
-            if Config.ENSO_ONI_COL in df_enso_clean.columns: 
-                indices_data["ONI (El Niño)"] = df_enso_clean[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.ENSO_ONI_COL:'y', Config.DATE_COL:'ds'}).dropna()
-            if Config.SOI_COL in df_enso_clean.columns: 
-                indices_data["SOI"] = df_enso_clean[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.SOI_COL:'y', Config.DATE_COL:'ds'}).dropna()
-            if Config.IOD_COL in df_enso_clean.columns: 
-                indices_data["IOD"] = df_enso_clean[[Config.DATE_COL, Config.IOD_COL]].rename(columns={Config.IOD_COL:'y', Config.DATE_COL:'ds'}).dropna()
-
-        if not indices_data: 
-            st.warning("No hay datos suficientes o formato de fecha inválido.")
-        else:
-            # ... (Resto de la lógica del generador igual) ...
-            c1, c2 = st.columns(2)
-            idx_sel = c1.selectbox("Índice para Pronosticar:", list(indices_data.keys()))
-            horizon_idx = c2.slider("Meses a Futuro:", 12, 60, 24)
+            idx_sel = st.selectbox("Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL])
+            hor = st.slider("Meses Futuro:", 12, 60, 24)
             
-            if st.button(f"🚀 Generar Pronóstico {idx_sel}"):
-                with st.spinner(f"Entrenando Prophet para {idx_sel}..."):
+            if st.button("Generar Pronóstico"):
+                with st.spinner("Entrenando..."):
                     try:
-                        df_train = indices_data[idx_sel]
-                        m = Prophet(weekly_seasonality=False, daily_seasonality=False).fit(df_train)
-                        future = m.make_future_dataframe(periods=horizon_idx, freq='MS')
-                        forecast = m.predict(future)
+                        df_train = d_clean[[Config.DATE_COL, idx_sel]].rename(columns={Config.DATE_COL:'ds', idx_sel:'y'}).dropna()
+                        m = Prophet().fit(df_train)
+                        fut = m.make_future_dataframe(periods=hor, freq='MS')
+                        fc = m.predict(fut)
                         
-                        # GUARDAR EN SESIÓN
                         if 'forecasted_regressors' not in st.session_state: st.session_state['forecasted_regressors'] = {}
-                        # Guardamos con nombre simple para facilitar el uso
-                        key_name = idx_sel.split()[0] # "ONI" de "ONI (El Niño)"
-                        st.session_state['forecasted_regressors'][key_name] = forecast[['ds', 'yhat']].rename(columns={'yhat': key_name})
-                        
-                        st.success(f"✅ Pronóstico de {key_name} guardado. Disponible en pestaña 'Tendencias'.")
-                        
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(x=df_train['ds'], y=df_train['y'], name='Histórico', line=dict(color='black')))
-                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='Pronóstico', line=dict(color='red')))
-                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_upper'], line=dict(width=0), showlegend=False))
-                        fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat_lower'], line=dict(width=0), fill='tonexty', fillcolor='rgba(255,0,0,0.2)', name='Incertidumbre'))
-                        st.plotly_chart(fig, use_container_width=True)
+                        # Guardar con nombre simple (ONI, SOI)
+                        key = "ONI" if "oni" in idx_sel else "SOI"
+                        st.session_state['forecasted_regressors'][key] = fc[['ds', 'yhat']].rename(columns={'yhat': key})
+                        st.success(f"Regresor {key} generado.")
+                        st.plotly_chart(px.line(fc, x='ds', y='yhat', title="Pronóstico"), use_container_width=True)
                     except Exception as e: st.error(f"Error: {e}")
 # -----------------------------------------------------------------------------
 
@@ -2660,6 +2563,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
