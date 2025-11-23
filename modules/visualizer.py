@@ -1544,47 +1544,26 @@ def display_trends_and_forecast_tab(**kwargs):
         except: pass
 
     # --- TAB 4: SARIMA (BLINDADO) ---
-    with tabs[3]:
-        st.markdown("#### Pronóstico SARIMA")
-        
+    with tabs[3]: # SARIMA
+        st.markdown("#### SARIMA")
         # Regresores
-        avail_regs = list(st.session_state.get('forecasted_regressors', {}).keys())
-        sel_regs = st.multiselect("Usar Regresor Externo (ONI/SOI):", avail_regs, key="sar_reg_multi")
-        
+        avail = list(st.session_state.get('forecasted_regressors', {}).keys())
+        sels = st.multiselect("Regresores:", avail)
         reg_df = None
-        if sel_regs:
-            try:
-                dfs = [st.session_state['forecasted_regressors'][k] for k in sel_regs]
-                from functools import reduce
-                reg_df = reduce(lambda l,r: pd.merge(l,r,on='ds', how='outer'), dfs).rename(columns={'ds': Config.DATE_COL})
-                # Alinear fechas del regresor con la serie principal
-                reg_df = reg_df.set_index(Config.DATE_COL).reindex(ts_clean.index).interpolate(method='time').bfill().ffill().reset_index()
-            except: pass
+        if sels:
+            from functools import reduce
+            l = [st.session_state['forecasted_regressors'][k] for k in sels]
+            reg_df = reduce(lambda x,y: pd.merge(x,y,on='ds',how='outer'), l).rename(columns={'ds':Config.DATE_COL})
 
-        hor = st.slider("Horizonte (Meses):", 12, 48, 12, key="sar_h_slider")
-        
-        if st.button("Calcular SARIMA", key="btn_sarima"):
+        h = st.slider("Horizonte:", 12, 48, 12)
+        if st.button("Calcular SARIMA"):
             from modules.forecasting import generate_sarima_forecast
-            with st.spinner("Entrenando..."):
+            with st.spinner("Calculando..."):
                 try:
-                    ts_in = ts_clean.reset_index()
-                    # Test size dinámico pero seguro (mínimo 6 meses, máximo 24)
-                    t_size = max(6, min(24, int(len(ts_clean)*0.2)))
-                    
-                    _, fc, ci, met, _ = generate_sarima_forecast(
-                        ts_in, order=(1,1,1), seasonal_order=(1,1,1,12), 
-                        horizon=hor, test_size=t_size, regressors=reg_df
-                    )
-                    st.success(f"RMSE: {met['RMSE']:.1f}")
-                    
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=ts_clean.index[-60:], y=ts_clean[-60:], name="Histórico"))
-                    fig.add_trace(go.Scatter(x=fc.index, y=fc, name="Pronóstico", line=dict(color='red')))
-                    st.plotly_chart(fig, use_container_width=True)
+                    _, fc, _, _, _ = generate_sarima_forecast(ts.reset_index(), (1,1,1), (1,1,1,12), h, regressors=reg_df)
+                    st.plotly_chart(px.line(fc, title="Pronóstico"), use_container_width=True)
                     st.session_state['sarima_res'] = fc
-                except Exception as e: 
-                    st.error(f"Error SARIMA: {e}")
-                    st.error("Consejo: Intente sin regresores externos o con un rango de fechas más corto.")
+                except Exception as e: st.error(f"Error: {e}")
 
     # --- TAB 5: PROPHET ---
     with tabs[4]:
@@ -2563,6 +2542,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
     except Exception as e:
         st.error(f"Error procesando cobertura: {e}")
+
 
 
 
