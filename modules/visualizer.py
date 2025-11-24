@@ -904,32 +904,84 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
                 st.error("No se pudo obtener el pronóstico.")
 
 def display_satellite_imagery_tab(gdf_filtered):
-    """Muestra imágenes satelitales WMS."""
-    st.subheader("🛰️ Imágenes Satelitales")
-    
-    wms_url = "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/east04.cgi?"
-    try:
-        m = folium.Map(location=[4.5, -74.0], zoom_start=5)
-        folium.raster_layers.WmsTileLayer(
-            url=wms_url, layers='xc04', fmt='image/png', name='Infrarrojo',
-            attr='IEM/GOES', transparent=True, overlay=True
-        ).add_to(m)
-        
-        if gdf_filtered is not None and not gdf_filtered.empty:
-            # Añadir puntos simples
-            data = gdf_filtered.copy()
-            if 'latitude' not in data.columns:
-                data['latitude'] = data.geometry.y
-                data['longitude'] = data.geometry.x
-            
-            for _, row in data.iterrows():
-                folium.CircleMarker([row['latitude'], row['longitude']], radius=2, color='red').add_to(m)
+    """
+    Muestra imágenes satelitales robustas (Base Esri + Nubes NASA GOES).
+    """
+    st.subheader("🛰️ Imágenes Satelitales (Tiempo Real)")
+    st.info("Capas: Terreno (Esri) + Nubosidad Infrarroja (GOES-16 NASA).")
 
-        st_folium(m, height=500, width="100%")
-    except Exception as e:
-        st.error(f"Error cargando mapa: {e}")
+    col_map, col_info = st.columns([3, 1])
 
-    # --- Placeholders para el resto de pestañas ---
+    with col_map:
+        try:
+            # Centro del mapa (Promedio de estaciones o default Colombia)
+            if gdf_filtered is not None and not gdf_filtered.empty:
+                # Asegurar que tenemos lat/lon
+                if 'latitude' not in gdf_filtered.columns:
+                    gdf_filtered['latitude'] = gdf_filtered.geometry.y
+                    gdf_filtered['longitude'] = gdf_filtered.geometry.x
+                
+                center_lat = gdf_filtered['latitude'].mean()
+                center_lon = gdf_filtered['longitude'].mean()
+            else:
+                center_lat, center_lon = 6.0, -75.0
+
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=6)
+
+            # 1. CAPA BASE: Esri World Imagery (Satélite de alta resolución, terreno)
+            folium.TileLayer(
+                tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attr='Esri',
+                name='Esri Satélite (Terreno)',
+                overlay=False,
+                control=True
+            ).add_to(m)
+
+            # 2. CAPA OVERLAY: GOES-16 Infrarrojo (Nubes) - NASA GIBS WMS
+            # Esta URL es mucho más estable que la de Iowa State
+            folium.raster_layers.WmsTileLayer(
+                url='https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
+                name='Nubes (GOES-16 IR)',
+                layers='GOES-East_ABI_Band13_Clean_Infrared',
+                styles='',
+                fmt='image/png',
+                transparent=True,
+                attr='NASA GIBS',
+                opacity=0.6,
+                overlay=True
+            ).add_to(m)
+
+            # 3. PUNTOS DE ESTACIONES (Si existen)
+            if gdf_filtered is not None and not gdf_filtered.empty:
+                # Cluster de marcadores para no saturar
+                from folium.plugins import MarkerCluster
+                mc = MarkerCluster(name="Estaciones").add_to(m)
+                
+                for _, row in gdf_filtered.iterrows():
+                    folium.CircleMarker(
+                        location=[row['latitude'], row['longitude']],
+                        radius=4,
+                        color='yellow',
+                        fill=True,
+                        fill_color='red',
+                        fill_opacity=0.7,
+                        popup=f"Est: {row.get('nom_est', 'N/A')}"
+                    ).add_to(mc)
+
+            folium.LayerControl().add_to(m)
+            st_folium(m, height=550, width="100%")
+
+        except Exception as e:
+            st.error(f"Error cargando el mapa satelital: {e}")
+            st.code(str(e)) # Muestra el error técnico para depurar
+
+    with col_info:
+        st.markdown("""
+        **Leyenda:**
+        - 🌍 **Fondo:** Imágenes satelitales de alta resolución (Esri).
+        - ☁️ **Nubes:** Capa infrarroja del satélite GOES-16 (actualizada cada 15 min por NASA).
+        - 📍 **Puntos:** Tus estaciones monitoreadas.
+        """)
 
 def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
     import geopandas as gpd
@@ -2867,4 +2919,5 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
