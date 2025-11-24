@@ -314,14 +314,11 @@ def display_welcome_tab():
 def get_iri_enso_forecast():
     """Obtiene la tabla de probabilidades del IRI."""
     url_prob = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/?enso_tab=enso-cpc_plume"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        response = requests.get(url_prob, headers=headers, timeout=15)
-        if response.status_code == 200:
-            dfs = pd.read_html(io.StringIO(response.text), match="Season")
+        r = requests.get(url_prob, headers=headers, timeout=15)
+        if r.status_code == 200:
+            dfs = pd.read_html(io.StringIO(r.text), match="Season")
             if dfs:
                 df = dfs[0]
                 df.columns = ['Trimestre', 'La Niña', 'Neutral', 'El Niño']
@@ -330,8 +327,7 @@ def get_iri_enso_forecast():
                     df_melted['Probabilidad'] = df_melted['Probabilidad'].astype(str).str.replace('%', '').astype(float)
                 return df_melted
     except Exception as e:
-        print(f"Advertencia (IRI Scraping): {e}")
-        
+        print(f"Advertencia IRI: {e}")
     return pd.DataFrame()
     
 # 2. NUEVA PESTAÑA UNIFICADA: MONITOREO Y TIEMPO REAL
@@ -1470,7 +1466,6 @@ def display_climate_forecast_tab(**kwargs):
         if df_enso is not None:
             c1, _ = st.columns([1,3])
             idx = c1.selectbox("Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
-            
             if idx in df_enso.columns:
                 d = df_enso.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
                 fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Evolución: {idx.upper()}")
@@ -1478,20 +1473,17 @@ def display_climate_forecast_tab(**kwargs):
                     fig.add_hline(y=0.5, line_dash="dot", line_color="red", annotation_text="El Niño")
                     fig.add_hline(y=-0.5, line_dash="dot", line_color="blue", annotation_text="La Niña")
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning(f"Índice {idx} no encontrado.")
 
     # --- TAB 2: PRONÓSTICO IRI ---
     with tab_iri:
         st.markdown("#### Pronóstico ENSO (IRI / CPC)")
         
-        with st.spinner("Consultando IRI..."):
+        with st.spinner("Consultando datos en vivo..."):
             df_iri = get_iri_enso_forecast()
         
         url_plume = "https://iri.columbia.edu/climate/ENSO/current/info/figure3.png"
         
         c1, c2 = st.columns(2)
-        
         with c1:
             st.markdown("**Probabilidades**")
             if not df_iri.empty:
@@ -1503,25 +1495,19 @@ def display_climate_forecast_tab(**kwargs):
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning("No se pudo cargar la tabla.")
+                st.warning("No se pudo cargar la tabla de probabilidades.")
 
         with c2:
             st.markdown("**Pluma de Modelos**")
-            
-            # Intentar descarga segura
-            img_data = fetch_secure_image(url_plume)
-            
-            if img_data:
-                # BLINDAJE: Try/Except específico para st.image
-                try:
-                    st.image(img_data, caption="Pronóstico SST Niño 3.4", use_container_width=True)
-                except Exception:
-                    # Si falla PIL (UnidentifiedImageError), mostramos el fallback sin romper la app
-                    st.error("No se pudo renderizar la imagen (Formato no reconocido).")
-                    st.markdown(f"🔗 [Ver imagen oficial en IRI]({url_plume})")
-            else:
-                st.warning("Imagen bloqueada por el servidor fuente.")
-                st.markdown(f"🔗 [Haga clic aquí para ver la imagen original]({url_plume})")
+            # HTML EMBEDDING DIRECTO (Bypass de bloqueo de servidor)
+            html_img = f"""
+                <div style="display: flex; justify-content: center; flex-direction: column; align-items: center;">
+                    <img src="{url_plume}" alt="Pluma de Modelos IRI" style="width: 100%; border-radius: 5px;">
+                    <p style="font-size: 0.8em; color: gray;">Imagen cargada directamente desde IRI Columbia</p>
+                </div>
+            """
+            st.markdown(html_img, unsafe_allow_html=True)
+            st.markdown(f"🔗 [Ver imagen original]({url_plume})")
 
     # --- TAB 3: PROPHET ---
     with tab_gen:
@@ -1532,7 +1518,7 @@ def display_climate_forecast_tab(**kwargs):
             for col, name in cols_map.items():
                 if col in df_enso.columns:
                     indices[name] = df_enso[[Config.DATE_COL, col]].rename(columns={Config.DATE_COL:'ds', col:'y'}).dropna()
-
+        
         if indices:
             sel_idx = st.selectbox("Índice:", list(indices.keys()))
             hor = st.slider("Meses:", 6, 60, 24)
@@ -2963,6 +2949,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
