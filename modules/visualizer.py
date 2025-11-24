@@ -978,21 +978,16 @@ def display_satellite_imagery_tab(gdf_filtered):
 def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
     """
     Módulo Completo de Análisis Espacial e Hidrológico.
-    Integra: Interpolación Regional, Comparación, Balance Hídrico, Curvas FDC/Hipsométricas y Popups Ricos.
+    Incluye: Interpolación, Comparación, Balance, Curvas y Notas Metodológicas Desplegables.
     """
     st.subheader("🌍 Superficies de Interpolación y Análisis Hidrológico")
     
-    # Control de Modo
     mode = st.radio("Modo de Análisis:", ["Regional (Comparación)", "Por Cuenca (Detallado)"], horizontal=True)
 
-    # --- LÓGICA DE INTERPOLACIÓN ROBUSTA ---
+    # --- LÓGICA DE INTERPOLACIÓN ---
     def run_interp(df_puntos, metodo, bounds_box):
-        """Genera la malla de interpolación (gx, gy, gz)."""
         try:
-            # Grid denso (100x100)
             gx, gy = np.mgrid[bounds_box[0]:bounds_box[1]:100j, bounds_box[2]:bounds_box[3]:100j]
-            
-            # Limpiar coordenadas duplicadas para evitar errores de matriz singular en RBF
             df_unique = df_puntos.drop_duplicates(subset=['longitude', 'latitude'])
             pts = df_unique[['longitude', 'latitude']].values
             vals = df_unique[Config.PRECIPITATION_COL].values
@@ -1000,353 +995,275 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             if len(pts) < 3: return None, None, None
 
             if "Kriging" in metodo or "RBF" in metodo:
-                # Rbf 'thin_plate' es excelente para topografía y lluvia (suave y extrapola bien para llenar huecos)
                 rbf = Rbf(pts[:,0], pts[:,1], vals, function='thin_plate')
                 gz = rbf(gx, gy)
             else:
-                # IDW / Spline (Scipy griddata) - Puede dejar huecos fuera del Convex Hull
                 method_scipy = 'cubic' if 'Spline' in metodo else 'linear'
                 gz = griddata(pts, vals, (gx, gy), method=method_scipy)
-                
             return gx, gy, gz
         except Exception as e:
-            print(f"Error Interpolación: {e}")
+            print(f"Error Interp: {e}")
             return None, None, None
 
-    # --- LÓGICA DE CÁLCULO DE LLUVIA ANUAL REAL ---
+    # --- CÁLCULO DE PROMEDIOS REALES ---
     def calcular_promedios_reales(df_datos):
-        """Calcula Ppt Anual sumando solo años completos (>10 meses)."""
         if df_datos.empty: return pd.DataFrame()
-        
-        # 1. Contar registros por año/estación
         conteo = df_datos[df_datos[Config.PRECIPITATION_COL] >= 0].groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).size()
-        # 2. Identificar años válidos (ej. >= 10 meses de datos)
         anos_validos = conteo[conteo >= 10].index
-        
-        # 3. Filtrar datos originales
         df_filtrado = df_datos.set_index([Config.STATION_NAME_COL, Config.YEAR_COL]).loc[anos_validos].reset_index()
-        
-        # 4. Suma Anual -> Promedio Multianual
         suma_anual = df_filtrado.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-        promedio_multianual = suma_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        
-        return promedio_multianual
+        return suma_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
 
     # ==========================================================================
     # MODO 1: REGIONAL (COMPARACIÓN)
     # ==========================================================================
     if mode == "Regional (Comparación)":
         st.markdown("#### 🆚 Comparación de Periodos Climáticos")
-        st.info("Visualice cambios en el patrón de lluvias entre dos periodos.")
-
+        
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("###### Periodo 1 (Referencia)")
             r1 = st.slider("Rango P1:", 1980, 2024, (1990, 2000), key="r1")
             m1 = st.selectbox("Método P1:", ["Kriging (RBF)", "IDW (Lineal)", "Spline"], key="m1")
         with c2:
-            st.markdown("###### Periodo 2 (Reciente)")
             r2 = st.slider("Rango P2:", 1980, 2024, (2010, 2020), key="r2")
             m2 = st.selectbox("Método P2:", ["Kriging (RBF)", "IDW (Lineal)", "Spline"], key="m2")
 
-        if st.button("🚀 Generar Comparación"):
-            
-            def plot_panel(rng, meth, col, tag):
-                # Filtrar
+        if st.button("🚀 Generar Mapas"):
+            def plot_panel(rng, meth, col):
                 mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
-                df_sub = df_long[mask]
-                
-                # Calcular Promedios Reales
-                df_avg = calcular_promedios_reales(df_sub)
-                
+                df_avg = calcular_promedios_reales(df_long[mask])
                 if df_avg.empty:
-                    col.warning(f"Sin datos válidos para {rng}")
+                    col.warning("Sin datos suficientes.")
                     return
-
-                # Unir con geometría
-                df_map = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
+                df_m = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
                 
-                if len(df_map) > 2:
-                    # Bounds con margen para que no quede apretado
-                    bounds = [
-                        df_map.longitude.min() - 0.1, df_map.longitude.max() + 0.1,
-                        df_map.latitude.min() - 0.1, df_map.latitude.max() + 0.1
-                    ]
-                    
-                    # Interpolar
-                    gx, gy, gz = run_interp(df_map, meth, bounds)
-                    
+                if len(df_m) > 2:
+                    bounds = [df_m.longitude.min()-0.1, df_m.longitude.max()+0.1, df_m.latitude.min()-0.1, df_m.latitude.max()+0.1]
+                    gx, gy, gz = run_interp(df_m, meth, bounds)
                     if gz is not None:
-                        # Mapa Plotly
                         fig = go.Figure(go.Contour(
-                            z=gz.T, x=gx[:,0], y=gy[0,:], 
-                            colorscale='Viridis', 
-                            colorbar=dict(title='mm/año', len=0.5),
-                            contours=dict(start=0, end=5000, size=200) # Isoyetas fijas para comparar mejor
+                            z=gz.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis', 
+                            colorbar=dict(title='mm/año', len=0.5), contours=dict(start=0, end=5000, size=200)
                         ))
-                        fig.add_trace(go.Scatter(
-                            x=df_map.longitude, y=df_map.latitude, mode='markers',
-                            marker=dict(color='black', size=4),
-                            text=df_map.apply(lambda x: f"{x[Config.STATION_NAME_COL]}: {x[Config.PRECIPITATION_COL]:.0f} mm", axis=1),
-                            name="Estaciones"
-                        ))
-                        fig.update_layout(
-                            title=f"Ppt Media Anual ({rng[0]}-{rng[1]})",
-                            margin=dict(l=0, r=0, b=0, t=40),
-                            height=400
-                        )
+                        fig.add_trace(go.Scatter(x=df_m.longitude, y=df_m.latitude, mode='markers', marker=dict(color='black', size=3)))
+                        fig.update_layout(title=f"Ppt Media ({rng[0]}-{rng[1]})", margin=dict(l=0,r=0,b=0,t=30), height=350)
                         col.plotly_chart(fig, use_container_width=True)
             
-            plot_panel(r1, m1, c1, "A")
-            plot_panel(r2, m2, c2, "B")
+            plot_panel(r1, m1, c1)
+            plot_panel(r2, m2, c2)
+            
+            with st.expander("ℹ️ Nota Metodológica: Interpolación Espacial"):
+                st.markdown("""
+                **Métodos de Interpolación:**
+                * **IDW (Distancia Inversa):** Asume que la influencia de una estación disminuye con la distancia. Útil para densidades altas.
+                * **Kriging/RBF (Radial Basis Function):** Método geoestadístico avanzado (Thin Plate Spline) que genera superficies suaves y continuas, ideal para variables climáticas como la lluvia.
+                * **Spline:** Ajuste polinómico local, bueno para capturar tendencias suaves.
+                """)
 
     # ==========================================================================
-    # MODO 2: ANÁLISIS DE CUENCA (DETALLADO + CÓDIGOS RECUPERADOS)
+    # MODO 2: ANÁLISIS DE CUENCA
     # ==========================================================================
     else:
         st.markdown("#### ⛰️ Análisis Hidrológico Detallado por Cuenca")
         
-        if gdf_subcuencas is None or gdf_subcuencas.empty:
-            st.warning("⚠️ No se ha cargado la capa de Cuencas/Subcuencas.")
-            return
-
-        # Selector Inteligente de Cuenca
+        if gdf_subcuencas is None or gdf_subcuencas.empty: st.warning("Sin capa de cuencas."); return
         col_name = next((c for c in gdf_subcuencas.columns if 'nombre' in c.lower() or 'cuenca' in c.lower()), gdf_subcuencas.columns[0])
-        lista_cuencas = sorted(gdf_subcuencas[col_name].unique().astype(str))
-        sel_cuencas = st.multiselect("Seleccionar Cuenca(s):", lista_cuencas)
+        sel_cuencas = st.multiselect("Seleccionar Cuenca(s):", sorted(gdf_subcuencas[col_name].unique().astype(str)))
         
         if sel_cuencas:
-            c_par1, c_par2 = st.columns(2)
-            rng_cuenca = c_par1.slider("Periodo Climático:", 1980, 2025, (2000, 2020), key="r_basin")
-            meth_cuenca = c_par2.selectbox("Método Interpolación:", ["Kriging (RBF)", "IDW"], key="m_basin")
+            c_p1, c_p2 = st.columns(2)
+            rng_c = c_p1.slider("Periodo:", 1980, 2025, (2000, 2020))
+            meth_c = c_p2.selectbox("Método:", ["Kriging (RBF)", "IDW"])
             
             if st.button("⚡ Analizar Cuenca"):
-                with st.spinner("Procesando geometría, hidrología y morfometría..."):
+                with st.spinner("Procesando modelo hidrológico..."):
+                    # 1. Geometría y Buffer
+                    sub = gdf_subcuencas[gdf_subcuencas[col_name].isin(sel_cuencas)]
+                    geom_union = gpd.GeoDataFrame({'geometry': [sub.unary_union]}, crs=gdf_subcuencas.crs)
+                    buf = geom_union.geometry.buffer(0.3).unary_union
+                    gdf_buf = gpd.GeoDataFrame({'geometry': [buf]}, crs=gdf_stations.crs)
                     
-                    # 1. Geometría de la Cuenca y Buffer
-                    gdf_sel = gdf_subcuencas[gdf_subcuencas[col_name].isin(sel_cuencas)]
-                    geom_union = gpd.GeoDataFrame({'geometry': [gdf_sel.unary_union]}, crs=gdf_subcuencas.crs)
+                    # 2. Filtrar Estaciones y Datos
+                    stns_zone = gpd.sjoin(gdf_stations, gdf_buf, predicate='intersects')
+                    if stns_zone.empty: st.error("Sin estaciones cercanas."); return
                     
-                    # Buffer de búsqueda (0.3 grados ~ 30km) para incluir estaciones cercanas
-                    buffer_geom = geom_union.geometry.buffer(0.3).unary_union
-                    gdf_buffer = gpd.GeoDataFrame({'geometry': [buffer_geom]}, crs=gdf_stations.crs)
+                    mask = (df_long[Config.STATION_NAME_COL].isin(stns_zone[Config.STATION_NAME_COL].unique())) & \
+                           (df_long[Config.YEAR_COL] >= rng_c[0]) & (df_long[Config.YEAR_COL] <= rng_c[1])
+                    df_raw = df_long[mask].copy()
                     
-                    # 2. Intersección Espacial (Estaciones dentro del Buffer)
-                    stns_cercanas = gpd.sjoin(gdf_stations, gdf_buffer, predicate='intersects')
+                    # Promedios Reales
+                    df_ppt = calcular_promedios_reales(df_raw)
+                    df_interp = pd.merge(df_ppt, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
                     
-                    if stns_cercanas.empty:
-                        st.error("No se encontraron estaciones dentro o cerca de la cuenca seleccionada.")
-                        return
+                    if len(df_interp) >= 3:
+                        # Interpolación
+                        b = geom_union.total_bounds
+                        bounds = [b[0]-0.05, b[2]+0.05, b[1]-0.05, b[3]+0.05]
+                        gx, gy, gz = run_interp(df_interp, meth_c, bounds)
                         
-                    ids_stns = stns_cercanas[Config.STATION_NAME_COL].unique()
-                    
-                    # 3. Filtrado Temporal y Cálculo de Promedios
-                    mask_time = (df_long[Config.STATION_NAME_COL].isin(ids_stns)) & \
-                                (df_long[Config.YEAR_COL] >= rng_cuenca[0]) & \
-                                (df_long[Config.YEAR_COL] <= rng_cuenca[1])
-                    
-                    df_subset_raw = df_long[mask_time].copy() # Datos crudos para FDC y Popups
-                    
-                    # Promedio Anual Robusto (para interpolación)
-                    df_ppt_media = calcular_promedios_reales(df_subset_raw)
-                    
-                    # Merge final para interpolar
-                    df_to_interp = pd.merge(df_ppt_media, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
-                    
-                    if len(df_to_interp) >= 3:
-                        # 4. Interpolación sobre el Bounding Box del Buffer
-                        b = buffer_geom.bounds # minx, miny, maxx, maxy
-                        bounds_interp = [b[0], b[2], b[1], b[3]] # Orden para mgrid: xmin, xmax, ymin, ymax
-                        
-                        gx, gy, gz = run_interp(df_to_interp, meth_cuenca, bounds_interp)
-                        
-                        # Valor medio de la cuenca (Promedio del raster interpolado)
-                        # Idealmente se haría mask con el polígono, aquí usamos promedio general del box ponderado
-                        ppt_media_cuenca = np.nanmean(gz) if gz is not None else df_to_interp[Config.PRECIPITATION_COL].mean()
-                        
-                        # 5. Cálculos Hidrológicos (Restaurando tus funciones)
-                        morph = calculate_morphometry(geom_union)
-                        bal = calculate_hydrological_balance(ppt_media_cuenca, morph.get('alt_prom_m', 1500), geom_union)
-                        
-                        # Curva Duración (Serie temporal agregada)
-                        serie_cuenca = df_subset_raw.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
-                        c_escorrentia = bal.get('Q_mm', 0) / bal.get('P', 1) if bal.get('P', 1) > 0 else 0.4
-                        fdc_data = calculate_duration_curve(serie_cuenca, c_escorrentia, morph.get('area_km2', 100))
-                        
-                        # Índices Climáticos
-                        indices = calculate_climatic_indices(serie_cuenca, morph.get('alt_prom_m', 1500))
-                        
-                        # Guardar en sesión
-                        st.session_state['basin_results'] = {
-                            'ready': True,
-                            'gz': gz, 'gx': gx, 'gy': gy,
-                            'df_interp': df_to_interp,
-                            'df_raw': df_subset_raw,
-                            'gdf_cuenca': geom_union,
-                            'gdf_buffer': gdf_buffer,
-                            'bal': bal,
-                            'morph': morph,
-                            'fdc_data': fdc_data,
-                            'indices': indices,
-                            'bounds': bounds_interp,
-                            'names': ", ".join(sel_cuencas)
-                        }
-                    else:
-                        st.error("Insuficientes estaciones (<3) con datos válidos en este periodo y zona.")
+                        ppt_med = np.nanmean(gz) if gz is not None else df_interp[Config.PRECIPITATION_COL].mean()
+                        if np.isnan(ppt_med) or ppt_med <= 0: ppt_med = df_interp[Config.PRECIPITATION_COL].mean()
 
-            # --- VISUALIZACIÓN DE RESULTADOS ---
-            res = st.session_state.get('basin_results')
+                        # Cálculos
+                        morph = calculate_morphometry(geom_union)
+                        bal = calculate_hydrological_balance(ppt_med, morph.get('alt_prom_m', 1500), geom_union)
+                        
+                        bs_ts = df_raw.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
+                        c_run = bal.get('Q_mm', 0) / bal.get('P', 1) if bal.get('P', 1) > 0 else 0.4
+                        fdc = calculate_duration_curve(bs_ts, c_run, morph.get('area_km2', 100))
+                        idx = calculate_climatic_indices(bs_ts, morph.get('alt_prom_m', 1500))
+
+                        st.session_state['basin_res'] = {
+                            'ready': True, 'gz': gz, 'gx': gx, 'gy': gy, 'df_i': df_interp, 'df_r': df_raw,
+                            'gdf_c': geom_union, 'gdf_b': gdf_buf, 'bal': bal, 'morph': morph, 'fdc': fdc, 
+                            'idx': idx, 'bounds': bounds, 'names': ", ".join(sel_cuencas)
+                        }
+                    else: st.error("Insuficientes estaciones (<3) para interpolar.")
+
+            # --- MOSTRAR RESULTADOS ---
+            res = st.session_state.get('basin_res')
             if res and res.get('ready'):
                 
-                # 1. Mapa de Interpolación (Plotly) con Contorno de Cuenca
-                st.markdown(f"##### 🌧️ Precipitación Interpolada: {res['names']}")
+                # 1. Mapa de Isoyetas
+                st.markdown(f"##### 🌧️ Mapa de Isoyetas: {res['names']}")
                 fig = go.Figure(go.Contour(
-                    z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:], 
-                    colorscale='Blues', colorbar=dict(title='mm/año'),
-                    contours=dict(start=0, end=6000, size=200, showlabels=True)
+                    z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:], colorscale='Blues', 
+                    colorbar=dict(title='mm/año'), contours=dict(start=0, end=6000, size=250, showlabels=True)
                 ))
-                # Estaciones
-                fig.add_trace(go.Scatter(
-                    x=res['df_interp'].longitude, y=res['df_interp'].latitude,
-                    mode='markers', marker=dict(color='red', size=6, line=dict(width=1, color='white')),
-                    text=res['df_interp'][Config.STATION_NAME_COL], name="Estaciones"
-                ))
-                # Silueta Cuenca
+                fig.add_trace(go.Scatter(x=res['df_i'].longitude, y=res['df_i'].latitude, mode='markers', marker_color='red', name="Estaciones"))
                 try:
-                    poly = res['gdf_cuenca'].geometry.iloc[0]
-                    if poly.geom_type == 'Polygon':
-                        xs, ys = poly.exterior.xy
-                        fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='black', width=3), name="Cuenca"))
-                    elif poly.geom_type == 'MultiPolygon':
-                        for p in poly.geoms:
-                            xs, ys = p.exterior.xy
-                            fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='black', width=3), showlegend=False))
+                    g = res['gdf_c'].geometry.iloc[0]
+                    x, y = g.exterior.xy if g.geom_type=='Polygon' else g.geoms[0].exterior.xy
+                    fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=3), name="Cuenca"))
                 except: pass
-                
                 fig.update_layout(height=500, margin=dict(l=0,r=0,b=0,t=30))
                 st.plotly_chart(fig, use_container_width=True)
+                
+                with st.expander("ℹ️ Nota sobre Interpolación"):
+                    st.write("Este mapa muestra la distribución espacial de la lluvia media anual interpolada a partir de las estaciones puntuales, usando un modelo matemático para estimar los valores en toda la cuenca.")
 
-                # --- BLOQUE DE BALANCE Y MORFOMETRÍA RESTAURADO ---
+                # 2. Balance y Morfometría
                 st.markdown("---")
-                b = res['bal']
-                m = res['morph']
-                
                 st.subheader("💧 Balance Hídrico y Morfometría")
+                b, m = res['bal'], res['morph']
                 
-                # Fila 1: Morfometría Básica
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Área Cuenca", f"{m['area_km2']*100:.0f} ha") # km2 a ha
+                c1.metric("Área", f"{m['area_km2']:.1f} km²")
                 c2.metric("Perímetro", f"{m['perimetro_km']:.1f} km")
-                c3.metric("Altitud Media", f"{m['alt_prom_m']:.0f} msnm")
-                c4.metric("Pendiente Media", f"{m['pendiente_prom']:.1f} %")
+                c3.metric("Altitud Media", f"{m['alt_prom_m']:.0f} m")
+                c4.metric("Pendiente", f"{m['pendiente_prom']:.1f} %")
                 
-                # Fila 2: Hidrología (Balance)
                 k1, k2, k3, k4 = st.columns(4)
-                k1.metric("Precipitación Media (P)", f"{b.get('P',0):.0f} mm/año")
-                k2.metric("Evapotranspiración (ET)", f"{b.get('ET',0):.0f} mm/año")
+                k1.metric("Ppt Media (P)", f"{b.get('P',0):.0f} mm")
+                k2.metric("ET Real", f"{b.get('ET',0):.0f} mm")
+                k3.metric("Caudal (Q)", f"{b.get('Q_m3s',0):.2f} m³/s")
+                k4.metric("Rendimiento", f"{b.get('Q_ls_km2',0):.1f} L/s/km²")
                 
-                # ESD (Exceso de Precipitación / Escorrentía Directa en mm)
-                esd_mm = max(0, b.get('Q_mm', 0))
-                k3.metric("Escorrentía (ESD)", f"{esd_mm:.0f} mm/año")
-                
-                # Caudal en L/s
-                vol_mm3 = b.get('Vol', 0) # Millones de m3
-                # L/s = (Mm3 * 10^9) / (31536000 segundos/año)
-                q_ls = (vol_mm3 * 1_000_000_000) / 31536000 if vol_mm3 > 0 else 0
-                k4.metric("Caudal Medio (Q)", f"{q_ls:.0f} L/s")
-                
-                # Volumen Total
-                st.success(f"**Volumen Total Anual Ofertado:** {vol_mm3:.2f} Millones de m³")
+                st.success(f"**Volumen Total Anual Ofertado:** {b.get('Vol',0):.2f} Millones de m³")
 
-                with st.expander("ℹ️ Metodología del Balance Hídrico"):
+                with st.expander("ℹ️ Metodología: Balance Hídrico de Turc"):
                     st.markdown("""
-                    **Método de Turc (Balance de Largo Plazo):**
-                    Estimación de escorrentía media anual basada en P y T.
-                    * **P:** Lluvia promedio interpolada.
-                    * **ET:** Evapotranspiración Real (Turc).
-                    * **Q:** Caudal (P - ET).
+                    **Fórmula de Turc:** Estima la escorrentía anual media ($Q$) basándose en la precipitación ($P$) y la temperatura media ($T$).
+                    $$ E = \\frac{P}{\\sqrt{0.9 + \\frac{P^2}{L(T)^2}}} $$
+                    Donde $L(T)$ es una función de la temperatura. El caudal $Q = P - E$.
+                    Este método es ampliamente utilizado para balances de largo plazo en cuencas con datos limitados.
                     """)
 
-                # --- CURVA DE DURACIÓN (FDC) ---
-                if res.get('fdc_data'):
+                # 3. Índices Climáticos
+                st.markdown("---")
+                st.subheader("🌡️ Índices Climáticos")
+                idx = res.get('idx', {})
+                i1, i2 = st.columns(2)
+                with i1: 
+                    st.metric("Índice de Aridez (Martonne)", f"{idx.get('martonne_val',0):.1f}", delta=idx.get('martonne_class',''))
+                with i2: 
+                    st.metric("Índice de Erosividad (Fournier)", f"{idx.get('fournier_val',0):.1f}", delta=idx.get('fournier_class',''))
+                
+                with st.expander("ℹ️ Interpretación de Índices"):
+                    st.markdown("""
+                    * **Índice de Martonne:** Clasifica el clima según su grado de aridez. 
+                      * $<10$: Desértico | $10-20$: Semiárido | $>20$: Húmedo.
+                    * **Índice de Fournier:** Evalúa la agresividad de la lluvia y el potencial de erosión del suelo. 
+                      * Se basa en la relación entre la lluvia del mes más húmedo y la lluvia anual.
+                    """)
+
+                # 4. Curva de Duración (FDC)
+                if res.get('fdc'):
                     st.markdown("---")
                     st.subheader("📉 Curva de Duración de Caudales (FDC)")
-                    
-                    fdc_data = res['fdc_data']
-                    df_fdc = fdc_data['data']
-                    eq = fdc_data['equation']
-                    r2 = fdc_data['r_squared']
-
+                    df_fdc = res['fdc']['data']
                     f1, f2 = st.columns([3, 1])
                     with f1:
-                        fig_fdc = px.line(df_fdc, x="Probabilidad Excedencia (%)", y="Caudal (m³/s)", title="Disponibilidad Hídrica")
-                        fig_fdc.update_traces(fill='tozeroy')
-                        fig_fdc.update_layout(height=350)
-                        st.plotly_chart(fig_fdc, use_container_width=True)
+                        fig_f = px.line(df_fdc, x="Probabilidad Excedencia (%)", y="Caudal (m³/s)", title="Disponibilidad Hídrica")
+                        fig_f.update_traces(fill='tozeroy')
+                        st.plotly_chart(fig_f, use_container_width=True)
                     with f2:
-                        st.markdown("**Modelo Matemático:**")
-                        st.latex(eq.replace('P', 'P_{exc}'))
-                        st.caption(f"**R²:** {r2:.4f}")
+                        st.markdown("**Ecuación:**")
+                        st.latex(res['fdc']['equation'].replace('P', 'P_{exc}'))
+                        st.caption(f"R²: {res['fdc']['r_squared']:.4f}")
+                    
+                    with st.expander("ℹ️ ¿Qué es la Curva de Duración?"):
+                        st.markdown("""
+                        La **Curva de Duración de Caudales (FDC)** muestra el porcentaje de tiempo que un caudal determinado es igualado o excedido.
+                        * **Q95 (95%):** Caudal ecológico o mínimo confiable.
+                        * **Q50 (50%):** Caudal mediano.
+                        * Es fundamental para el diseño de bocatomas y concesiones de agua.
+                        """)
 
-                # --- CURVA HIPSOMÉTRICA (RESTAURADA) ---
-                hypso = calculate_hypsometric_curve(res['gdf_cuenca'])
-                if hypso:
+                # 5. Curva Hipsométrica
+                hyp = calculate_hypsometric_curve(res['gdf_c'])
+                if hyp:
                     st.markdown("---")
                     st.subheader("⛰️ Curva Hipsométrica")
-                    c_h1, c_h2 = st.columns([3, 1])
-                    with c_h1:
+                    h1, h2 = st.columns([3, 1])
+                    with h1:
                         fig_h = go.Figure()
-                        fig_h.add_trace(go.Scatter(x=hypso['area_percent'], y=hypso['elevations'], mode='lines', fill='tozeroy', name='Perfil Real', line=dict(color='green')))
+                        fig_h.add_trace(go.Scatter(x=hyp['area_percent'], y=hyp['elevations'], fill='tozeroy', line=dict(color='green'), name='Perfil'))
                         st.plotly_chart(fig_h, use_container_width=True)
-                    with c_h2:
-                        if hypso.get('equation'): st.latex(hypso['equation'].replace('x', 'A'))
-                        st.caption("Relación Altitud vs % Área Acumulada")
+                    with h2:
+                        if hyp.get('equation'): st.latex(hyp['equation'].replace('x', 'A'))
+                    
+                    with st.expander("ℹ️ Interpretación Hipsométrica"):
+                        st.markdown("""
+                        Representa la distribución del área de la cuenca en función de la altitud.
+                        * **Curva Convexa (Joven):** Fase de erosión activa.
+                        * **Curva Cóncava (Vieja):** Fase de sedimentación / estabilización.
+                        * **Curva en 'S' (Madura):** Equilibrio.
+                        """)
 
-                # --- MAPA CONTEXTO + POPUPS ENRIQUECIDOS ---
+                # 6. Mapa Contexto
                 st.markdown("---")
-                st.subheader("📍 Contexto Espacial y Estaciones")
+                st.subheader("📍 Mapa de Contexto")
                 
-                bounds = res['bounds']
-                center = [(bounds[2]+bounds[3])/2, (bounds[0]+bounds[1])/2]
-                m_ctx = folium.Map(location=center, zoom_start=10, tiles="CartoDB positron")
+                bnd = res['bounds']
+                m_ctx = folium.Map([(bnd[2]+bnd[3])/2, (bnd[0]+bnd[1])/2], zoom_start=10, tiles="CartoDB positron")
+                folium.GeoJson(res['gdf_c'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
+                folium.GeoJson(res['gdf_b'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
                 
-                # Capas
-                folium.GeoJson(res['gdf_cuenca'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
-                folium.GeoJson(res['gdf_buffer'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
-                
-                # Datos crudos para calcular estadísticas precisas por estación
-                df_raw_ctx = res['df_raw']
-                
-                for _, row in res['df_interp'].iterrows():
-                    st_name = row[Config.STATION_NAME_COL]
-                    st_data = df_raw_ctx[df_raw_ctx[Config.STATION_NAME_COL] == st_name]
+                df_raw_ctx = res['df_r']
+                for _, row in res['df_i'].iterrows():
+                    nm = row[Config.STATION_NAME_COL]
+                    st_d = df_raw_ctx[df_raw_ctx[Config.STATION_NAME_COL] == nm]
                     
-                    # Estadísticas para Popup
-                    val_anual = row[Config.PRECIPITATION_COL] # Ya viene calculado robustamente
-                    n_years = st_data[Config.YEAR_COL].nunique()
-                    
+                    val = row[Config.PRECIPITATION_COL]
+                    n_y = st_d[Config.YEAR_COL].nunique()
                     mun = row.get(Config.MUNICIPALITY_COL, 'N/A')
                     alt = row.get(Config.ALTITUDE_COL, 'N/A')
                     
-                    html = f"""
-                    <div style='font-family:sans-serif; font-size:12px; min-width:200px'>
-                        <h5 style='margin:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:4px'>{st_name}</h5>
-                        <div style='margin-top:5px'><b>Mun:</b> {mun}<br><b>Alt:</b> {alt} m</div>
-                        <div style='background-color:#f0f2f6; padding:5px; margin-top:5px; border-radius:4px'>
-                            <b>Ppt Media:</b> {val_anual:,.0f} mm<br>
-                            <b>Años Datos:</b> {n_years}
-                        </div>
-                    </div>
-                    """
-                    popup = folium.Popup(folium.IFrame(html, width=220, height=140), max_width=220)
+                    html = f"""<div style='font-family:sans-serif;font-size:12px;width:180px'>
+                    <b>{nm}</b><br>Mun: {mun}<br>Alt: {alt}m<hr>
+                    Ppt: {val:.0f} mm<br>Años: {n_y}</div>"""
                     
                     folium.CircleMarker(
                         [row['latitude'], row['longitude']], radius=5, color='darkred', fill=True, fill_color='red',
-                        fill_opacity=0.9, popup=popup, tooltip=f"{st_name}"
+                        popup=folium.Popup(folium.IFrame(html, width=200, height=120), max_width=200)
                     ).add_to(m_ctx)
-
-                folium.LayerControl().add_to(m_ctx)
+                
                 st_folium(m_ctx, height=500, width="100%")
+                
+                with st.expander("ℹ️ Nota del Mapa de Contexto"):
+                    st.write("Muestra la cuenca seleccionada (azul), el área de influencia de búsqueda (gris punteado) y las estaciones utilizadas para el análisis (puntos rojos). Haga clic en los puntos para ver detalles.")
+                    
             
 # PESTAÑA DE PRONÓSTICO CLIMÁTICO (INDICES + GENERADOR)
 # -----------------------------------------------------------------------------
@@ -2842,6 +2759,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
