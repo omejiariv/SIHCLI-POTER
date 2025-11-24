@@ -33,28 +33,24 @@ from modules.openmeteo_api import get_historical_climate_average
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
 
-def fetch_secure_image(url):
+@st.cache_data(ttl=3600)
+def get_img_as_base64(url):
     """
-    Descarga imágenes validando que sean realmente imágenes y no HTML de bloqueo.
+    Descarga una imagen y la convierte a string Base64.
+    Esto permite incrustarla directamente en el HTML, evitando bloqueos de hotlinking.
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://iri.columbia.edu/",
-        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+        "Referer": "https://google.com"
     }
     try:
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
-            # VALIDACIÓN CRÍTICA: Verificar que recibimos una imagen, no texto/html
-            content_type = r.headers.get('Content-Type', '').lower()
-            if 'image' in content_type:
-                return BytesIO(r.content)
-            else:
-                print(f"Bloqueo detectado: Recibimos {content_type} en lugar de imagen.")
-                return None
+            # Codificar a Base64
+            encoded = base64.b64encode(r.content).decode()
+            return f"data:image/png;base64,{encoded}"
     except Exception as e:
-        print(f"Error descargando imagen segura: {e}")
-        return None
+        print(f"Error Base64: {e}")
     return None
     
 def display_current_filters(stations, regions, municipios, years):
@@ -312,9 +308,8 @@ def display_welcome_tab():
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=12*3600)
 def get_iri_enso_forecast():
-    """Obtiene la tabla de probabilidades del IRI."""
     url_prob = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/?enso_tab=enso-cpc_plume"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(url_prob, headers=headers, timeout=15)
         if r.status_code == 200:
@@ -326,8 +321,7 @@ def get_iri_enso_forecast():
                 if df_melted['Probabilidad'].dtype == 'O':
                     df_melted['Probabilidad'] = df_melted['Probabilidad'].astype(str).str.replace('%', '').astype(float)
                 return df_melted
-    except Exception as e:
-        print(f"Advertencia IRI: {e}")
+    except: pass
     return pd.DataFrame()
     
 # 2. NUEVA PESTAÑA UNIFICADA: MONITOREO Y TIEMPO REAL
@@ -1478,36 +1472,33 @@ def display_climate_forecast_tab(**kwargs):
     with tab_iri:
         st.markdown("#### Pronóstico ENSO (IRI / CPC)")
         
-        with st.spinner("Consultando datos en vivo..."):
+        with st.spinner("Consultando IRI..."):
             df_iri = get_iri_enso_forecast()
         
+        # URL Oficial
         url_plume = "https://iri.columbia.edu/climate/ENSO/current/info/figure3.png"
         
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Probabilidades**")
             if not df_iri.empty:
-                fig = px.bar(
-                    df_iri, x='Trimestre', y='Probabilidad', color='Evento', 
-                    barmode='group',
-                    color_discrete_map={'La Niña': 'blue', 'Neutral': 'gray', 'El Niño': 'red'},
-                    height=400
-                )
+                fig = px.bar(df_iri, x='Trimestre', y='Probabilidad', color='Evento', barmode='group',
+                             color_discrete_map={'La Niña': 'blue', 'Neutral': 'gray', 'El Niño': 'red'}, height=400)
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning("No se pudo cargar la tabla de probabilidades.")
+                st.warning("Datos de probabilidad no disponibles.")
 
         with c2:
             st.markdown("**Pluma de Modelos**")
-            # HTML EMBEDDING DIRECTO (Bypass de bloqueo de servidor)
-            html_img = f"""
-                <div style="display: flex; justify-content: center; flex-direction: column; align-items: center;">
-                    <img src="{url_plume}" alt="Pluma de Modelos IRI" style="width: 100%; border-radius: 5px;">
-                    <p style="font-size: 0.8em; color: gray;">Imagen cargada directamente desde IRI Columbia</p>
-                </div>
-            """
-            st.markdown(html_img, unsafe_allow_html=True)
-            st.markdown(f"🔗 [Ver imagen original]({url_plume})")
+            # Implementación Base64 (Invulnerable a bloqueos de hotlink)
+            with st.spinner("Descargando imagen segura..."):
+                img_b64 = get_img_as_base64(url_plume)
+            
+            if img_b64:
+                st.markdown(f'<img src="{img_b64}" style="width:100%; border-radius:5px;">', unsafe_allow_html=True)
+            else:
+                st.error("No se pudo descargar la imagen.")
+                st.markdown(f"[Ver enlace original]({url_plume})")
 
     # --- TAB 3: PROPHET ---
     with tab_gen:
@@ -2949,6 +2940,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
