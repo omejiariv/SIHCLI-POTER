@@ -2606,7 +2606,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
     # 2. Controles de UI
     c1, c2 = st.columns([2, 1])
     with c1:
-        # Obtener rango de años disponibles
+        # Obtener rango de años disponibles EN LOS DATOS OBSERVADOS
         years = sorted(df_long[Config.YEAR_COL].unique())
         if not years:
             st.error("El dataset no contiene información de años.")
@@ -2627,10 +2627,11 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
 
     # 3. Lógica de Cálculo (Solo si se presiona el botón)
     if calc_btn:
-        # Importaciones locales para evitar errores circulares o de carga
+        # Importaciones locales
         from modules.openmeteo_api import get_historical_monthly_series
         from scipy.spatial import cKDTree
         from scipy.interpolate import griddata
+        import geopandas as gpd # Necesario para exportar GeoJSON
 
         # --- PASO 1: PROCESAR DATOS OBSERVADOS ---
         with st.spinner("1/3. Procesando datos de estaciones (Agregación Mensual)..."):
@@ -2646,12 +2647,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
 
             # Construir fecha robusta
             try:
-                # Intentamos usar columnas explícitas de Config si existen
-                cols_data = {
-                    'year': df_subset[Config.YEAR_COL],
-                    'day': 1
-                }
-                # Verificar si existe columna MES en Config, sino buscar 'MONTH' o 'MES'
+                cols_data = {'year': df_subset[Config.YEAR_COL], 'day': 1}
                 if hasattr(Config, 'MONTH_COL') and Config.MONTH_COL in df_subset.columns:
                     cols_data['month'] = df_subset[Config.MONTH_COL]
                 elif 'MONTH' in df_subset.columns:
@@ -2659,14 +2655,10 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                 elif 'MES' in df_subset.columns:
                     cols_data['month'] = df_subset['MES']
                 else:
-                    # Fallback: intentar extraer de una columna fecha completa
-                    st.warning("No se detectó columna de MES explícita, intentando inferir...")
                     pass 
 
                 df_subset['date'] = pd.to_datetime(cols_data)
-            
             except Exception:
-                # Fallback final: buscar cualquier columna tipo fecha
                 date_col = next((col for col in df_subset.columns if 'date' in col.lower() or 'fecha' in col.lower()), None)
                 if date_col:
                     df_subset['date'] = pd.to_datetime(df_subset[date_col])
@@ -2674,7 +2666,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     st.error("Error crítico: No se pudo construir la fecha. Verifique columnas Año/Mes.")
                     return
 
-            # Normalizar al primer día del mes para agrupar
+            # Normalizar fecha
             df_subset['date'] = df_subset['date'].dt.to_period('M').dt.to_timestamp()
 
             # Agrupar: Suma total por mes y estación
@@ -2682,12 +2674,10 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
 
         # --- PASO 2: DESCARGA SATELITAL ---
         with st.spinner("2/3. Descargando series satelitales (ERA5-Land)..."):
-            # Obtener lista única de coordenadas requeridas
             unique_locs = target_gdf[[Config.STATION_NAME_COL, 'latitude', 'longitude']].drop_duplicates(Config.STATION_NAME_COL)
             lats = unique_locs['latitude'].tolist()
             lons = unique_locs['longitude'].tolist()
             
-            # Llamada a la API optimizada (debe estar actualizada en openmeteo_api.py)
             df_sat = get_historical_monthly_series(
                 lats, lons, 
                 f"{start_year}-01-01", 
@@ -2695,26 +2685,20 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
             )
             
             if df_sat.empty:
-                st.error("La API satelital no retornó datos. Verifique conexión o límites de la API.")
+                st.error("La API satelital no retornó datos.")
                 return
 
-        # --- PASO 3: EMPAREJAMIENTO ESPACIAL ---
+        # --- PASO 3: EMPAREJAMIENTO ---
         with st.spinner("3/3. Cruzando información espacial..."):
-            # Arrays para cKDTree
             obs_coords = np.column_stack((unique_locs['latitude'], unique_locs['longitude']))
-            
-            # Satélite devuelve series temporales, necesitamos solo las ubicaciones únicas para el match
             sat_unique = df_sat[['latitude', 'longitude']].drop_duplicates()
             sat_coords = np.column_stack((sat_unique['latitude'], sat_unique['longitude']))
             
-            # Match del vecino más cercano
             tree = cKDTree(sat_coords)
             dists, idxs = tree.query(obs_coords)
             
-            # Construir tabla de mapeo (Estación -> Punto Satélite)
             map_data = []
             for i, station_name in enumerate(unique_locs[Config.STATION_NAME_COL]):
-                # Umbral de distancia (~0.1 grados aprox 11km)
                 if dists[i] < 0.1: 
                     map_data.append({
                         Config.STATION_NAME_COL: station_name,
@@ -2724,21 +2708,16 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     })
             
             df_map = pd.DataFrame(map_data)
-            
             if df_map.empty:
-                st.error("No se encontraron coincidencias espaciales cercanas entre estaciones y satélite.")
+                st.error("No se encontraron coincidencias espaciales.")
                 return
 
-            # MERGE FINAL
-            # 1. Unir Observado con Mapeo (para saber qué lat/lon satelital le toca)
+            # MERGE 1: Obs + Map
             df_merged = pd.merge(df_obs, df_map, on=Config.STATION_NAME_COL)
-            
-            # 1b. Agregar coordenadas REALES de la estación (Corrección solicitada)
-            # unique_locs ya contiene ['station_name', 'latitude', 'longitude'] originales
+            # MERGE 1b: Agregar coordenadas REALES
             df_merged = pd.merge(df_merged, unique_locs, on=Config.STATION_NAME_COL, how='left')
 
-            # 2. Unir con Datos Satelitales (usando Fecha + Lat/Lon Satélite)
-            # Renombramos columas del satélite para que coincidan con el mapeo
+            # MERGE 2: + Satélite
             df_final = pd.merge(
                 df_merged,
                 df_sat.rename(columns={'latitude': 'sat_lat', 'longitude': 'sat_lon'}),
@@ -2746,13 +2725,12 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                 how='inner'
             )
             
-            # Calcular diferencias
             df_final['diff_mm'] = df_final[Config.PRECIPITATION_COL] - df_final['ppt_sat']
             
             st.success("✅ Análisis completado exitosamente.")
 
-            # --- VISUALIZACIÓN (TABS) ---
-            tab_series, tab_mapa, tab_datos = st.tabs(["📈 Series Temporales", "🗺️ Mapa Promedio", "📋 Datos"])
+            # --- VISUALIZACIÓN ---
+            tab_series, tab_mapa, tab_datos = st.tabs(["📈 Series Temporales", "🗺️ Mapa Promedio", "📋 Datos & Descargas"])
             
             # TAB 1: SERIES
             with tab_series:
@@ -2761,7 +2739,6 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     estaciones_disp = sorted(df_final[Config.STATION_NAME_COL].unique())
                     sel_st = st.selectbox("Seleccionar Visualización:", ["Promedio Regional"] + estaciones_disp)
                 
-                # Preparar datos para plot
                 if sel_st == "Promedio Regional":
                     plot_df = df_final.groupby('date')[[Config.PRECIPITATION_COL, 'ppt_sat']].mean().reset_index()
                     title_plot = "Promedio Regional (Todas las Estaciones)"
@@ -2769,44 +2746,90 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     plot_df = df_final[df_final[Config.STATION_NAME_COL] == sel_st]
                     title_plot = f"Estación: {sel_st}"
                 
-                # Gráfico interactivo
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=plot_df['date'], y=plot_df[Config.PRECIPITATION_COL], 
-                    name='Observado (Real)', mode='lines+markers', line=dict(color='#1f77b4')
-                ))
-                fig.add_trace(go.Scatter(
-                    x=plot_df['date'], y=plot_df['ppt_sat'], 
-                    name='Satélite (ERA5)', mode='lines+markers', line=dict(color='#ff7f0e', dash='dash')
-                ))
-                fig.update_layout(
-                    title=title_plot,
-                    xaxis_title="Fecha",
-                    yaxis_title="Precipitación Mensual (mm)",
-                    hovermode="x unified",
-                    legend=dict(orientation="h", y=1.1)
-                )
+                fig.add_trace(go.Scatter(x=plot_df['date'], y=plot_df[Config.PRECIPITATION_COL], name='Observado (Real)', mode='lines+markers'))
+                fig.add_trace(go.Scatter(x=plot_df['date'], y=plot_df['ppt_sat'], name='Satélite (ERA5)', mode='lines+markers', line=dict(dash='dash')))
+                fig.update_layout(title=title_plot, hovermode="x unified")
                 st.plotly_chart(fig, use_container_width=True)
 
-            # TAB 2: MAPA (Promedio del periodo)
+            # TAB 2: MAPA
             with tab_mapa:
-                st.markdown("**Comparativa Espacial (Promedio del Periodo Seleccionado)**")
+                st.markdown("**Comparativa Espacial (Promedio del Periodo)**")
                 # Agregamos por ubicación REAL y SATELITAL
                 map_agg = df_final.groupby([Config.STATION_NAME_COL, 'latitude', 'longitude', 'sat_lat', 'sat_lon'])[['ppt_sat', Config.PRECIPITATION_COL]].mean().reset_index()
                 
-                # Intentar interpolar para un mapa de contorno (Background)
+                # -- GENERACIÓN DE TEXTO PARA POPUP (HOVER) --
+                map_agg['hover_text'] = map_agg.apply(
+                    lambda row: f"<b>{row[Config.STATION_NAME_COL]}</b><br>💧 Obs: {row[Config.PRECIPITATION_COL]:.1f} mm<br>🛰️ Sat: {row['ppt_sat']:.1f} mm", 
+                    axis=1
+                )
+
                 try:
-                    # Crear grid
+                    # Interpolación Satélite (Fondo)
                     grid_x, grid_y = np.mgrid[
                         map_agg['sat_lon'].min():map_agg['sat_lon'].max():100j,
                         map_agg['sat_lat'].min():map_agg['sat_lat'].max():100j
                     ]
-                    # Interpolar Satélite (Usamos coord satélite para el fondo)
                     grid_z = griddata(
                         (map_agg['sat_lon'], map_agg['sat_lat']), 
                         map_agg['ppt_sat'], 
                         (grid_x, grid_y), 
                         method='cubic'
+                    )
+                    
+                    fig_map = go.Figure()
+                    fig_map.add_trace(go.Contour(
+                        z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:], 
+                        colorscale='Blues', opacity=0.6, showscale=False, name='Satélite (Fondo)'
+                    ))
+                    # Puntos Reales con HOVER PERSONALIZADO
+                    fig_map.add_trace(go.Scatter(
+                        x=map_agg['longitude'], y=map_agg['latitude'], 
+                        mode='markers', 
+                        marker=dict(
+                            size=10, 
+                            color=map_agg[Config.PRECIPITATION_COL], 
+                            colorscale='RdBu', 
+                            showscale=True, 
+                            line=dict(width=1, color='black')
+                        ),
+                        text=map_agg['hover_text'], # Usamos la columna formateada
+                        hoverinfo='text',           # Forzamos a mostrar solo el texto
+                        name='Estaciones'
+                    ))
+                    fig_map.update_layout(title="Fondo: Satélite | Puntos: Estaciones (Posición Real)", height=500)
+                    st.plotly_chart(fig_map, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"No se pudo interpolar: {e}")
+                    st.map(map_agg)
+
+            # TAB 3: DATOS Y GEOJSON
+            with tab_datos:
+                st.markdown("### Datos Tabulares")
+                st.dataframe(df_final.head(50), use_container_width=True)
+                
+                c_csv, c_geo = st.columns(2)
+                
+                # 1. Descarga CSV
+                with c_csv:
+                    csv = df_final.to_csv(index=False).encode('utf-8')
+                    st.download_button("📥 Descargar Series (CSV)", csv, "series_mensuales.csv", "text/csv")
+                
+                # 2. Descarga GEOJSON (Promedios Espaciales)
+                with c_geo:
+                    # Convertir el DataFrame agregado (map_agg) a GeoDataFrame
+                    # map_agg ya tiene el promedio por estación
+                    gdf_export = gpd.GeoDataFrame(
+                        map_agg, 
+                        geometry=gpd.points_from_xy(map_agg.longitude, map_agg.latitude),
+                        crs="EPSG:4326"
+                    )
+                    geojson_data = gdf_export.to_json()
+                    st.download_button(
+                        "🌍 Descargar Mapa Promedio (GeoJSON)",
+                        data=geojson_data,
+                        file_name="estaciones_promedio_satelite.geojson",
+                        mime="application/geo+json"
                     )
                     
                     fig_map = go.Figure()
