@@ -977,161 +977,211 @@ def display_satellite_imagery_tab(gdf_filtered):
 
 def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
     """
-    Muestra mapas avanzados de interpolación y morfometría con Popups enriquecidos.
-    Incluye ficha técnica (Nombre, Lluvia, Altura, Municipio, Cuenca) en cada estación.
+    Muestra mapas avanzados de interpolación (con modo comparación) y morfometría.
+    FIX: Recupera GeoDataFrame para evitar error .cx y restaura comparación.
     """
     st.subheader("🗺️ Análisis Espacial Avanzado")
     
     # Selector de Modo
     mode = st.radio("Nivel de Análisis:", ["Regional (Interpolación)", "Por Cuenca (Morfometría)"], horizontal=True)
 
-    # --- 1. PREPARACIÓN DE DATOS COMUNES ---
-    # Filtrar datos por rango de años seleccionado
+    # Validar datos básicos
     years = sorted(df_long[Config.YEAR_COL].unique())
     if not years:
         st.error("No hay datos de años disponibles.")
         return
-        
     min_y, max_y = int(min(years)), int(max(years))
-    
-    c_rng, c_met = st.columns([2, 1])
-    with c_rng:
-        rango = st.slider("Periodo de Promedio Climático:", min_y, max_y, (min_y, max_y), key="adv_map_rng")
-    with c_met:
-        metodo = st.selectbox("Método de Interpolación:", ["IDW (Inverso Distancia)", "Spline Cúbico", "RBF (Thin Plate)"], key="adv_map_meth")
 
-    # Calcular promedio de precipitación por estación en el periodo seleccionado
-    mask = (df_long[Config.YEAR_COL] >= rango[0]) & (df_long[Config.YEAR_COL] <= rango[1])
-    df_period = df_long[mask]
-    
-    if df_period.empty:
-        st.warning("No hay datos de lluvia en el periodo seleccionado.")
-        return
-
-    # Agrupar y obtener promedio (Lluvia Anual Promedio)
-    df_agg = df_period.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-    
-    # --- MERGE CRÍTICO: Unir datos de lluvia con metadatos de estación (Altura, Mun, Cuenca) ---
-    # Usamos gdf_stations que tiene la info geográfica y administrativa
-    # Asegúrate de que gdf_stations tenga las columnas de metadatos
-    df_plot = pd.merge(df_agg, gdf_stations, on=Config.STATION_NAME_COL, how='inner')
-    
-    # Asegurar que tenemos coordenadas lat/lon limpias
-    if 'latitude' not in df_plot.columns:
-        df_plot['latitude'] = df_plot.geometry.y
-        df_plot['longitude'] = df_plot.geometry.x
-
-    # --- MODO 1: INTERPOLACIÓN REGIONAL ---
-    if mode == "Regional (Interpolación)":
-        st.markdown(f"#### 🌧️ Superficies de Precipitación ({rango[0]}-{rango[1]})")
+    # --- FUNCIÓN INTERNA DE INTERPOLACIÓN (Reutilizable) ---
+    def generar_superficie(df_datos, metodo_interp, bounds_geom):
+        # Grid
+        margin_x = (bounds_geom[2] - bounds_geom[0]) * 0.1
+        margin_y = (bounds_geom[3] - bounds_geom[1]) * 0.1
+        grid_x, grid_y = np.mgrid[
+            bounds_geom[0]-margin_x : bounds_geom[2]+margin_x : 100j, 
+            bounds_geom[1]-margin_y : bounds_geom[3]+margin_y : 100j
+        ]
         
-        try:
-            # 1. Crear Grid para Interpolación
-            bounds = gdf_stations.total_bounds
-            # Margen del 10% para visualización
-            margin_x = (bounds[2] - bounds[0]) * 0.1
-            margin_y = (bounds[3] - bounds[1]) * 0.1
+        points = df_datos[['longitude', 'latitude']].values
+        values = df_datos[Config.PRECIPITATION_COL].values
+        
+        if "IDW" in metodo_interp:
+            grid_z = griddata(points, values, (grid_x, grid_y), method='linear')
+        elif "Spline" in metodo_interp:
+            grid_z = griddata(points, values, (grid_x, grid_y), method='cubic')
+        else: # RBF
+            rbf = Rbf(points[:,0], points[:,1], values, function='thin_plate')
+            grid_z = rbf(grid_x, grid_y)
             
-            grid_x, grid_y = np.mgrid[
-                bounds[0]-margin_x : bounds[2]+margin_x : 100j, 
-                bounds[1]-margin_y : bounds[3]+margin_y : 100j
-            ]
-            
-            # 2. Calcular Interpolación
-            points = df_plot[['longitude', 'latitude']].values
-            values = df_plot[Config.PRECIPITATION_COL].values
-            
-            if "IDW" in metodo:
-                # Simulación rápida de IDW usando Linear (para producción real usar librería especializada o implementación manual)
-                grid_z = griddata(points, values, (grid_x, grid_y), method='linear')
-            elif "Spline" in metodo:
-                grid_z = griddata(points, values, (grid_x, grid_y), method='cubic')
-            else: # RBF
-                rbf = Rbf(points[:,0], points[:,1], values, function='thin_plate')
-                grid_z = rbf(grid_x, grid_y)
+        return grid_x, grid_y, grid_z, values
 
-            # 3. Construir Mapa Folium
-            center_lat = df_plot['latitude'].mean()
-            center_lon = df_plot['longitude'].mean()
-            m = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB positron")
+    # --- MODO 1: INTERPOLACIÓN REGIONAL (Con Comparación) ---
+    if mode == "Regional (Interpolación)":
+        
+        c_opt, c_met = st.columns([2, 1])
+        with c_opt:
+            comparar = st.checkbox("Comparar dos periodos (P1 vs P2)", value=False)
+        with c_met:
+            metodo = st.selectbox("Método:", ["IDW (Lineal)", "Spline Cúbico", "RBF (Thin Plate)"], index=0)
 
-            # Capa Raster (Imagen de Interpolación - Mapa de Calor)
-            import matplotlib.pyplot as plt
-            import matplotlib.colors as mcolors
-            
-            # Normalizar colores (Azul=Lluvia Alta, Rojo=Baja)
-            norm = mcolors.Normalize(vmin=values.min(), vmax=values.max())
-            cmap = plt.get_cmap('Spectral') 
-            rgba_img = cmap(norm(grid_z))
-            
-            # Hacer transparente donde no hay datos (NaN)
-            rgba_img[:, :, 3] = np.where(np.isnan(grid_z), 0, 0.6) 
-            
-            folium.raster_layers.ImageOverlay(
-                image=rgba_img,
-                bounds=[[bounds[1]-margin_y, bounds[0]-margin_x], [bounds[3]+margin_y, bounds[2]+margin_x]],
-                opacity=0.6,
-                name="Interpolación Ppt"
-            ).add_to(m)
+        # Configuración de Periodos
+        if comparar:
+            c1, c2 = st.columns(2)
+            with c1:
+                rango1 = st.slider("Periodo 1 (P1):", min_y, max_y, (min_y, min_y+5), key="r1")
+            with c2:
+                rango2 = st.slider("Periodo 2 (P2):", min_y, max_y, (max_y-5, max_y), key="r2")
+            rangos = [rango1, rango2]
+        else:
+            rango1 = st.slider("Periodo de Análisis:", min_y, max_y, (min_y, max_y), key="r1")
+            rangos = [rango1]
 
-            # 4. MARCADORES CON POPUP ENRIQUECIDO (TU REQUERIMIENTO)
-            from folium import IFrame
-            
-            for _, row in df_plot.iterrows():
-                # Obtener datos usando .get() para evitar errores si falta alguna columna
-                nombre = row.get(Config.STATION_NAME_COL, 'Estación Desconocida')
-                lluvia = round(row.get(Config.PRECIPITATION_COL, 0), 1)
-                altura = int(row.get(Config.ALTITUDE_COL, 0))
-                muni = row.get(Config.MUNICIPALITY_COL, 'N/A')
+        # Procesar Mapas
+        cols = st.columns(len(rangos))
+        
+        for i, (rango, col) in enumerate(zip(rangos, cols)):
+            with col:
+                st.markdown(f"**Periodo: {rango[0]} - {rango[1]}**")
                 
-                # Buscar nombre de cuenca en varias posibles columnas
-                cuenca = row.get('subcuenca', row.get('cuenca', row.get('nombre_subcuenca', 'N/A')))
+                # Filtrar datos
+                mask = (df_long[Config.YEAR_COL] >= rango[0]) & (df_long[Config.YEAR_COL] <= rango[1])
+                df_p = df_long[mask].groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                 
-                # HTML con estilo para el Popup
-                html = f"""
-                <div style="font-family: sans-serif; width: 220px; font-size: 12px;">
-                    <h4 style="margin: 0 0 8px 0; color: #1f77b4; border-bottom: 1px solid #ddd; padding-bottom: 5px;">
-                        {nombre}
-                    </h4>
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <tr><td style="font-weight: bold; color: #555;">🌧️ Lluvia:</td><td style="text-align: right;">{lluvia} mm</td></tr>
-                        <tr><td style="font-weight: bold; color: #555;">⛰️ Altura:</td><td style="text-align: right;">{altura} msnm</td></tr>
-                        <tr><td style="font-weight: bold; color: #555;">🏙️ Mun:</td><td style="text-align: right;">{muni}</td></tr>
-                        <tr><td style="font-weight: bold; color: #555;">🌊 Cuenca:</td><td style="text-align: right;">{cuenca}</td></tr>
-                    </table>
-                </div>
-                """
+                if df_p.empty:
+                    st.warning("Sin datos.")
+                    continue
                 
-                iframe = IFrame(html, width=240, height=140)
-                popup = folium.Popup(iframe, max_width=240)
+                # Merge con coordenadas
+                df_map = pd.merge(df_p, gdf_stations, on=Config.STATION_NAME_COL, how='inner')
+                if 'latitude' not in df_map.columns:
+                    df_map['latitude'] = df_map.geometry.y
+                    df_map['longitude'] = df_map.geometry.x
                 
-                # Marcador circular
-                folium.CircleMarker(
-                    location=[row['latitude'], row['longitude']],
-                    radius=5,
-                    color='#333',
-                    weight=1,
-                    fill=True,
-                    fill_color='white',
-                    fill_opacity=0.9,
-                    popup=popup,
-                    tooltip=f"{nombre}: {lluvia} mm"
-                ).add_to(m)
+                try:
+                    # Generar Interpolación
+                    gx, gy, gz, vals = generar_superficie(df_map, metodo, gdf_stations.total_bounds)
+                    
+                    # Crear Mapa
+                    center_lat = df_map['latitude'].mean()
+                    center_lon = df_map['longitude'].mean()
+                    m = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB positron")
+                    
+                    # Colorear Raster
+                    norm = mcolors.Normalize(vmin=vals.min(), vmax=vals.max())
+                    cmap = plt.get_cmap('Spectral')
+                    rgba = cmap(norm(gz))
+                    rgba[:, :, 3] = np.where(np.isnan(gz), 0, 0.6)
+                    
+                    folium.raster_layers.ImageOverlay(
+                        image=rgba,
+                        bounds=[[gy.min(), gx.min()], [gy.max(), gx.max()]],
+                        opacity=0.6
+                    ).add_to(m)
+                    
+                    # Puntos con Popup
+                    for _, row in df_map.iterrows():
+                        popup_txt = f"{row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:.1f} mm"
+                        folium.CircleMarker(
+                            [row['latitude'], row['longitude']], radius=3, color='black', fill=True, 
+                            tooltip=popup_txt
+                        ).add_to(m)
+                    
+                    st_folium(m, height=400, use_container_width=True, key=f"map_{i}")
+                    
+                except Exception as e:
+                    st.error(f"Error interpolación: {e}")
 
-            folium.LayerControl().add_to(m)
-            st_folium(m, height=600, use_container_width=True)
+    # --- MODO 2: MORFOMETRÍA POR CUENCA (CORREGIDO ERROR .cx) ---
+    elif mode == "Por Cuenca (Morfometría)":
+        st.markdown("#### ⛰️ Análisis de Cuenca y Contexto")
+        
+        # PREPARACIÓN MAESTRA DE DATOS (CRUCIAL PARA EL ARREGLO)
+        # 1. Agrupar datos de lluvia (histórico completo por defecto o podrías poner slider)
+        df_agg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+        
+        # 2. Merge con estaciones
+        df_plot = pd.merge(df_agg, gdf_stations, on=Config.STATION_NAME_COL, how='inner')
+        
+        # 3. [FIX] RE-CONVERTIR A GEODATAFRAME
+        # Al hacer merge, df_plot se vuelve un DataFrame normal. Lo convertimos a GeoDataFrame
+        # para recuperar el superpoder espacial (.cx)
+        if 'geometry' in df_plot.columns:
+            df_plot = gpd.GeoDataFrame(df_plot, geometry='geometry', crs=gdf_stations.crs)
+        else:
+            # Fallback si por alguna razón se perdió la columna geometry
+            df_plot = gpd.GeoDataFrame(
+                df_plot, 
+                geometry=gpd.points_from_xy(df_plot.longitude, df_plot.latitude),
+                crs="EPSG:4326" # Asumiendo WGS84
+            )
+
+        # Selector de Cuenca
+        if gdf_subcuencas is not None and not gdf_subcuencas.empty:
+            col_name = next((c for c in gdf_subcuencas.columns if 'nombre' in c.lower() or 'cuenca' in c.lower()), gdf_subcuencas.columns[0])
+            nombres = sorted(gdf_subcuencas[col_name].unique().astype(str))
             
-            # Leyenda de colores (Markdown simple debajo del mapa)
-            st.markdown("""
-            <div style="display: flex; justify-content: center; align-items: center; background: #f0f2f6; padding: 10px; border-radius: 5px;">
-                <span style="margin-right: 10px;"><b>Menor Lluvia</b></span>
-                <div style="background: linear-gradient(to right, #9e0142, #d53e4f, #f46d43, #fdae61, #fee08b, #e6f598, #abdda4, #66c2a5, #3288bd, #5e4fa2); width: 300px; height: 15px; border-radius: 3px;"></div>
-                <span style="margin-left: 10px;"><b>Mayor Lluvia</b></span>
-            </div>
-            """, unsafe_allow_html=True)
+            sel_cuenca = st.selectbox("Seleccionar Unidad Hidrológica:", nombres)
+            gdf_sel = gdf_subcuencas[gdf_subcuencas[col_name] == sel_cuenca]
             
-        except Exception as e:
-            st.error(f"Error generando el mapa de interpolación: {e}")
+            if not gdf_sel.empty:
+                bounds_c = gdf_sel.total_bounds
+                center_c = [(bounds_c[1]+bounds_c[3])/2, (bounds_c[0]+bounds_c[2])/2]
+                
+                m2 = folium.Map(location=center_c, zoom_start=11, tiles="CartoDB positron")
+                
+                # Capa Cuenca
+                folium.GeoJson(
+                    gdf_sel, name=sel_cuenca,
+                    style_function=lambda x: {'fillColor': '#3388ff', 'color': '#005a9c', 'weight': 2, 'fillOpacity': 0.1}
+                ).add_to(m2)
+                
+                # Filtrar estaciones (AHORA SÍ FUNCIONA .cx)
+                try:
+                    mask_geo = df_plot.cx[bounds_c[0]:bounds_c[2], bounds_c[1]:bounds_c[3]]
+                except Exception as e:
+                    st.warning(f"No se pudo filtrar espacialmente con .cx, mostrando todas. Error: {e}")
+                    mask_geo = df_plot # Fallback
+                
+                # Marcadores
+                for _, row in mask_geo.iterrows():
+                    nombre = row.get(Config.STATION_NAME_COL, 'Estación')
+                    lluvia = round(row.get(Config.PRECIPITATION_COL, 0), 1)
+                    altura = int(row.get(Config.ALTITUDE_COL, 0))
+                    muni = row.get(Config.MUNICIPALITY_COL, 'N/A')
+                    
+                    # Popup Enriquecido
+                    html = f"""
+                    <div style="font-family: sans-serif; width: 200px; font-size: 12px;">
+                        <h4 style="margin: 0 0 8px 0; color: #2ecc71; border-bottom: 1px solid #ddd;">{nombre}</h4>
+                        <b>🌧️ Lluvia:</b> {lluvia} mm<br>
+                        <b>⛰️ Altura:</b> {altura} m<br>
+                        <b>📍 Ubicación:</b> {muni}
+                    </div>
+                    """
+                    iframe = IFrame(html, width=220, height=110)
+                    popup = folium.Popup(iframe, max_width=220)
+                    
+                    # Asegurar coordenadas (GeoDataFrame usa geometry, pero mantenemos lat/lon por seguridad)
+                    lat = row.geometry.y
+                    lon = row.geometry.x
+                    
+                    folium.Marker(
+                        location=[lat, lon],
+                        popup=popup,
+                        icon=folium.Icon(color='green', icon='tint', prefix='fa')
+                    ).add_to(m2)
+                
+                st_folium(m2, height=500, use_container_width=True)
+                
+                # Datos extra
+                cols_morf = ['area_ha', 'perimetro_km', 'pend_media']
+                found = [c for c in cols_morf if c in gdf_sel.columns]
+                if found:
+                    st.dataframe(gdf_sel[found].reset_index(drop=True), use_container_width=True)
+            else:
+                st.error("Error filtrando cuenca.")
+        else:
+            st.warning("No se cargó capa de Cuencas.")
 
     # --- MODO 2: MORFOMETRÍA POR CUENCA ---
     elif mode == "Por Cuenca (Morfometría)":
@@ -2704,6 +2754,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
