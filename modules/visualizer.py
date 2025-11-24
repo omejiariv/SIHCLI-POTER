@@ -285,42 +285,37 @@ def display_welcome_tab():
 # -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN: CONEXIÓN CON IRI (COLUMBIA UNIVERSITY)
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=24*3600) # Cache de 24 horas para no saturar al IRI
+@st.cache_data(ttl=12*3600) # Cache de 12 horas
 def get_iri_enso_forecast():
     """
-    Intenta obtener los datos probabilísticos del IRI/CPC ENSO Forecast.
-    Retorna un DataFrame limpio.
+    Intenta obtener datos del IRI. Si falla el scraping, retorna DataFrame vacío.
     """
-    # URL de la tabla oficial de probabilidades (Suele ser estable)
-    # Nota: El IRI cambia sus URLs a veces. Esta es la estrategia más robusta:
-    # Intentar leer la tabla directa.
     url_prob = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/?enso_tab=enso-cpc_plume"
     
+    # Headers para simular un navegador real (evita bloqueos 403 Forbidden)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+
     try:
-        # Usamos pandas para leer tablas HTML directamente
-        # Header=0 asume que la primera fila son los títulos (Season, La Niña, Neutral, El Niño)
-        dfs = pd.read_html(url_prob, match="Season") 
-        
-        if dfs:
-            df = dfs[0] # La primera tabla suele ser la de probabilidades
-            # Limpieza básica
-            df.columns = ['Trimestre', 'La Niña', 'Neutral', 'El Niño']
-            
-            # Convertir a formato largo para Plotly
-            df_melted = df.melt(id_vars=['Trimestre'], var_name='Evento', value_name='Probabilidad')
-            
-            # Limpiar el % si viene como string "25%" -> 25
-            if df_melted['Probabilidad'].dtype == 'O':
-                df_melted['Probabilidad'] = df_melted['Probabilidad'].str.replace('%', '').astype(float)
+        response = requests.get(url_prob, headers=headers, timeout=10)
+        if response.status_code == 200:
+            dfs = pd.read_html(io.StringIO(response.text), match="Season")
+            if dfs:
+                df = dfs[0]
+                df.columns = ['Trimestre', 'La Niña', 'Neutral', 'El Niño']
+                df_melted = df.melt(id_vars=['Trimestre'], var_name='Evento', value_name='Probabilidad')
                 
-            return df_melted
-            
+                # Limpiar strings de porcentaje
+                if df_melted['Probabilidad'].dtype == 'O':
+                    df_melted['Probabilidad'] = df_melted['Probabilidad'].astype(str).str.replace('%', '').astype(float)
+                return df_melted
     except Exception as e:
-        print(f"Error scraping IRI table: {e}")
-        return pd.DataFrame() # Retorna vacío si falla
-
+        # Fallo silencioso en producción, pero logueado
+        print(f"Advertencia: No se pudo hacer scraping al IRI ({e})")
+        
     return pd.DataFrame()
-
+    
 # 2. NUEVA PESTAÑA UNIFICADA: MONITOREO Y TIEMPO REAL
 # -----------------------------------------------------------------------------
 
@@ -892,83 +887,89 @@ def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
 
 def display_satellite_imagery_tab(gdf_filtered):
     """
-    Muestra imágenes satelitales robustas (Base Esri + Nubes NASA GOES).
+    Muestra imágenes satelitales en tiempo real.
+    Mejorada: Incluye animación GIF de la NOAA para el Norte de Suramérica.
     """
-    st.subheader("🛰️ Imágenes Satelitales (Tiempo Real)")
-    st.info("Capas: Terreno (Esri) + Nubosidad Infrarroja (GOES-16 NASA).")
+    st.subheader("🛰️ Monitoreo Satelital (Tiempo Real)")
 
-    col_map, col_info = st.columns([3, 1])
+    # Pestañas internas para separar el Mapa Interactivo de la Animación
+    tab_map, tab_anim = st.tabs(["🗺️ Mapa de Nubes (Interactivo)", "▶️ Animación Visible (Últimas Horas)"])
 
-    with col_map:
+    # --- TAB 1: MAPA INTERACTIVO (Estático Actual) ---
+    with tab_map:
+        col_map, col_info = st.columns([3, 1])
+        with col_map:
+            try:
+                # Centrar mapa en Colombia/Región Andina (Promedio de estaciones o default)
+                if gdf_filtered is not None and not gdf_filtered.empty:
+                    # Garantizar lat/lon
+                    if 'latitude' not in gdf_filtered.columns:
+                        gdf_filtered['latitude'] = gdf_filtered.geometry.y
+                        gdf_filtered['longitude'] = gdf_filtered.geometry.x
+                    center_lat = gdf_filtered['latitude'].mean()
+                    center_lon = gdf_filtered['longitude'].mean()
+                else:
+                    center_lat, center_lon = 6.0, -75.0 # Centro de Antioquia approx
+
+                m = folium.Map(location=[center_lat, center_lon], zoom_start=6)
+
+                # 1. Base: Esri World Imagery (Terreno detallado)
+                folium.TileLayer(
+                    tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    attr='Esri', name='Esri Satélite', overlay=False
+                ).add_to(m)
+
+                # 2. Overlay: Nubes (GOES-16 IR) - NASA GIBS
+                # Usamos Band 13 (Infrarrojo limpio) que se ve bien de día y noche
+                folium.raster_layers.WmsTileLayer(
+                    url='https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
+                    name='Nubes (Infrarrojo)',
+                    layers='GOES-East_ABI_Band13_Clean_Infrared',
+                    fmt='image/png', transparent=True, opacity=0.6,
+                    attr='NASA GIBS'
+                ).add_to(m)
+
+                # 3. Estaciones (Puntos amarillos)
+                if gdf_filtered is not None and not gdf_filtered.empty:
+                    from folium.plugins import MarkerCluster
+                    mc = MarkerCluster(name="Estaciones").add_to(m)
+                    for _, row in gdf_filtered.iterrows():
+                        folium.CircleMarker(
+                            location=[row['latitude'], row['longitude']],
+                            radius=3, color='yellow', fill=True, fill_opacity=0.8,
+                            popup=row.get(Config.STATION_NAME_COL, 'Estación')
+                        ).add_to(mc)
+
+                folium.LayerControl().add_to(m)
+                st_folium(m, height=500, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Error cargando mapa: {e}")
+
+        with col_info:
+            st.info("""
+            **Capas:**
+            1. **Fondo:** Terreno (Esri).
+            2. **Nubes:** Infrarrojo GOES-16 (NASA).
+            
+            *Nota: La capa de nubes se actualiza cada 10-15 min.*
+            """)
+
+    # --- TAB 2: ANIMACIÓN (GIF NOAA - SECTOR ANDINO) ---
+    with tab_anim:
+        st.markdown("#### 🎬 Animación GeoColor (Sector Norte de Suramérica)")
+        st.caption("Fuente: NOAA/NESDIS/STAR GOES-16. Muestra la nubosidad y movimiento de las últimas horas.")
+        
+        # URL Directa al GIF de la NOAA (Sector 'nsa' = Northern South America)
+        # Esta URL siempre apunta a la animación más reciente y optimizada.
+        url_gif = "https://cdn.star.nesdis.noaa.gov/GOES16/ABI/SECTOR/nsa/GEOCOLOR/GOES16-NSA-GEOCOLOR-1000x1000.gif"
+        
         try:
-            # Centro del mapa (Promedio de estaciones o default Colombia)
-            if gdf_filtered is not None and not gdf_filtered.empty:
-                # Asegurar que tenemos lat/lon
-                if 'latitude' not in gdf_filtered.columns:
-                    gdf_filtered['latitude'] = gdf_filtered.geometry.y
-                    gdf_filtered['longitude'] = gdf_filtered.geometry.x
-                
-                center_lat = gdf_filtered['latitude'].mean()
-                center_lon = gdf_filtered['longitude'].mean()
-            else:
-                center_lat, center_lon = 6.0, -75.0
-
-            m = folium.Map(location=[center_lat, center_lon], zoom_start=6)
-
-            # 1. CAPA BASE: Esri World Imagery (Satélite de alta resolución, terreno)
-            folium.TileLayer(
-                tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                attr='Esri',
-                name='Esri Satélite (Terreno)',
-                overlay=False,
-                control=True
-            ).add_to(m)
-
-            # 2. CAPA OVERLAY: GOES-16 Infrarrojo (Nubes) - NASA GIBS WMS
-            # Esta URL es mucho más estable que la de Iowa State
-            folium.raster_layers.WmsTileLayer(
-                url='https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
-                name='Nubes (GOES-16 IR)',
-                layers='GOES-East_ABI_Band13_Clean_Infrared',
-                styles='',
-                fmt='image/png',
-                transparent=True,
-                attr='NASA GIBS',
-                opacity=0.6,
-                overlay=True
-            ).add_to(m)
-
-            # 3. PUNTOS DE ESTACIONES (Si existen)
-            if gdf_filtered is not None and not gdf_filtered.empty:
-                # Cluster de marcadores para no saturar
-                from folium.plugins import MarkerCluster
-                mc = MarkerCluster(name="Estaciones").add_to(m)
-                
-                for _, row in gdf_filtered.iterrows():
-                    folium.CircleMarker(
-                        location=[row['latitude'], row['longitude']],
-                        radius=4,
-                        color='yellow',
-                        fill=True,
-                        fill_color='red',
-                        fill_opacity=0.7,
-                        popup=f"Est: {row.get('nom_est', 'N/A')}"
-                    ).add_to(mc)
-
-            folium.LayerControl().add_to(m)
-            st_folium(m, height=550, width="100%")
-
+            # Mostramos el GIF centrado
+            st.image(url_gif, caption="Animación GeoColor (Día/Noche) - Tiempo Real", use_container_width=False, width=700)
         except Exception as e:
-            st.error(f"Error cargando el mapa satelital: {e}")
-            st.code(str(e)) # Muestra el error técnico para depurar
-
-    with col_info:
-        st.markdown("""
-        **Leyenda:**
-        - 🌍 **Fondo:** Imágenes satelitales de alta resolución (Esri).
-        - ☁️ **Nubes:** Capa infrarroja del satélite GOES-16 (actualizada cada 15 min por NASA).
-        - 📍 **Puntos:** Tus estaciones monitoreadas.
-        """)
+            st.error("No se pudo cargar la animación de la NOAA.")
+            st.write(f"Intente abrir este enlace directo: {url_gif}")
 
 def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
     import geopandas as gpd
@@ -1448,126 +1449,113 @@ def display_climate_forecast_tab(**kwargs):
     
     df_enso = kwargs.get('df_enso')
     
+    # Definir pestañas
     tab_hist, tab_iri, tab_gen = st.tabs(["📜 Historia Índices", "🌎 Pronóstico Oficial (IRI)", "⚙️ Generador Prophet"])
     
-    # --- TAB 1: HISTORIA ---
+    # --- 1. HISTORIA ---
     with tab_hist:
         if df_enso is not None:
-            col_sel, _ = st.columns([1,3])
-            with col_sel:
-                idx = st.selectbox("Seleccionar Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
+            c1, _ = st.columns([1,3])
+            idx = c1.selectbox("Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
             
             if idx in df_enso.columns:
                 d = df_enso.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
+                fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Evolución: {idx.upper()}")
                 
-                fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Evolución Histórica: {idx.upper()}")
-                
-                # Agregar líneas de umbral para ONI (El Niño / La Niña)
                 if idx == Config.ENSO_ONI_COL:
-                    fig.add_hline(y=0.5, line_dash="dot", line_color="red", annotation_text="El Niño (+0.5)")
-                    fig.add_hline(y=-0.5, line_dash="dot", line_color="blue", annotation_text="La Niña (-0.5)")
-                    
+                    fig.add_hline(y=0.5, line_dash="dot", line_color="red", annotation_text="El Niño")
+                    fig.add_hline(y=-0.5, line_dash="dot", line_color="blue", annotation_text="La Niña")
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning(f"El índice {idx} no se encuentra en la base de datos.")
+                st.warning("Índice no encontrado.")
 
-    # --- TAB 2: PRONÓSTICO IRI (CORREGIDO) ---
+    # --- 2. PRONÓSTICO IRI (Robustecido) ---
     with tab_iri:
-        st.markdown("#### Probabilidades ENSO (El Niño Southern Oscillation)")
-        st.markdown("Fuente: *International Research Institute for Climate and Society (IRI)*")
+        st.markdown("#### Pronóstico ENSO (El Niño Southern Oscillation)")
+        st.caption("Fuente: International Research Institute for Climate and Society (IRI) / CPC")
         
-        with st.spinner("Conectando con IRI Columbia University..."):
+        # Intentar obtener datos
+        with st.spinner("Consultando IRI..."):
             df_iri = get_iri_enso_forecast()
         
-        c1, c2 = st.columns([2, 1])
+        # URLs de imágenes oficiales (Backup robusto)
+        url_plume = "https://iri.columbia.edu/climate/ENSO/current/info/figure3.png"
+        url_bars_img = "https://iri.columbia.edu/climate/ENSO/current/info/figure1.png"
+
+        col_left, col_right = st.columns(2)
         
-        with c1:
+        # Columna Izquierda: Probabilidades (Gráfico o Imagen Backup)
+        with col_left:
+            st.markdown("**Probabilidades por Trimestre**")
             if not df_iri.empty:
-                # Gráfico interactivo de las probabilidades
+                # Si tenemos datos, mostramos el gráfico interactivo
                 fig = px.bar(
-                    df_iri, 
-                    x='Trimestre', 
-                    y='Probabilidad', 
-                    color='Evento', 
+                    df_iri, x='Trimestre', y='Probabilidad', color='Evento', 
                     barmode='group',
                     color_discrete_map={'La Niña': 'blue', 'Neutral': 'gray', 'El Niño': 'red'},
-                    title="Probabilidad Pronosticada por Trimestre"
+                    height=400
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning("No se pudo extraer la tabla de datos en vivo del IRI.")
-        
-        with c2:
-            st.markdown("**Pluma de Modelos (Imagen Oficial)**")
-            # URL directa a la imagen que suele ser más estable, o un fallback
-            try:
-                # Intentamos cargar la imagen de la pluma actual
-                st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", caption="Pluma de Modelos Dinámicos y Estadísticos", use_container_width=True)
-            except:
-                st.error("Imagen no disponible temporalmente.")
-            
-            st.info("""
-            **Interpretación:**
-            - Barras **Rojas**: Probabilidad de El Niño.
-            - Barras **Azules**: Probabilidad de La Niña.
-            - Barras **Grises**: Condiciones Neutrales.
-            """)
+                # FALLBACK: Si falla el scraping, mostramos la imagen oficial de barras
+                st.warning("⚠️ No se pudo extraer la tabla interactiva. Mostrando imagen oficial del reporte:")
+                st.image(url_bars_img, caption="Probabilidades Oficiales (Imagen Estática)", use_container_width=True)
 
-    # --- TAB 3: GENERADOR PROPHET ---
+        # Columna Derecha: Pluma de Modelos (Imagen siempre)
+        with col_right:
+            st.markdown("**Pluma de Modelos (Dinámicos y Estadísticos)**")
+            st.image(url_plume, caption="Pronóstico SST Niño 3.4", use_container_width=True)
+            
+            with st.expander("Interpretación"):
+                st.write("""
+                * **Pluma (Derecha):** Cada línea es un modelo climático global prediciendo la temperatura del océano.
+                * **Barras (Izquierda):** Probabilidad consolidada de ocurrencia de fenómeno.
+                * **> 0.5°C:** Condiciones de El Niño (Rojo).
+                * **< -0.5°C:** Condiciones de La Niña (Azul).
+                """)
+
+    # --- 3. GENERADOR PROPHET ---
     with tab_gen:
-        st.markdown("#### Entrenar Pronóstico Local (Prophet)")
-        st.caption("Genera proyecciones estadísticas basadas en tus datos históricos de índices.")
+        st.markdown("#### Pronóstico Local (Prophet)")
         
         indices = {}
         if df_enso is not None:
-            if Config.ENSO_ONI_COL in df_enso.columns: 
-                indices['ONI (Oceánico)'] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.DATE_COL:'ds', Config.ENSO_ONI_COL:'y'}).dropna()
-            if Config.SOI_COL in df_enso.columns: 
-                indices['SOI (Atmosférico)'] = df_enso[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.DATE_COL:'ds', Config.SOI_COL:'y'}).dropna()
-            if Config.IOD_COL in df_enso.columns: 
-                indices['IOD (Dipolo Índico)'] = df_enso[[Config.DATE_COL, Config.IOD_COL]].rename(columns={Config.DATE_COL:'ds', Config.IOD_COL:'y'}).dropna()
-        
-        c_sel, c_btn = st.columns([1, 1])
-        with c_sel:
-            sel_idx = st.selectbox("Seleccionar Índice para Proyectar:", list(indices.keys()))
-            hor = st.slider("Meses a pronosticar:", 6, 60, 24)
-        
-        with c_btn:
-            st.write("") # Espacio
-            st.write("")
-            run_prophet = st.button(f"🧠 Entrenar Modelo para {sel_idx}", type="primary")
-        
-        if run_prophet:
-            with st.spinner(f"Entrenando Prophet para {sel_idx}..."):
-                try:
-                    data_train = indices[sel_idx]
-                    
-                    # Configuración básica de Prophet
-                    m = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
-                    m.fit(data_train)
-                    
-                    fut = m.make_future_dataframe(periods=hor, freq='MS')
-                    fc = m.predict(fut)
-                    
-                    # Guardar en sesión para usarlo en otros módulos (Regresores)
-                    if 'forecasted_regressors' not in st.session_state: 
-                        st.session_state['forecasted_regressors'] = {}
-                    
-                    # Guardamos la serie limpia
-                    key_clean = sel_idx.split(" ")[0] # "ONI", "SOI", etc.
-                    st.session_state['forecasted_regressors'][key_clean] = fc[['ds', 'yhat']].rename(columns={'yhat': key_clean})
-                    
-                    # Gráfica
-                    fig_fc = px.line(fc, x='ds', y='yhat', title=f"Proyección {sel_idx} (Prophet)")
-                    # Añadir intervalo de confianza
-                    fig_fc.add_scatter(x=fc['ds'], y=fc['yhat_upper'], mode='lines', line=dict(width=0), showlegend=False, name='Upper')
-                    fig_fc.add_scatter(x=fc['ds'], y=fc['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(0,100,80,0.2)', showlegend=False, name='Confidence')
-                    
-                    st.success(f"Modelo entrenado exitosamente. Proyección guardada en memoria.")
-                    st.plotly_chart(fig_fc, use_container_width=True)
-                    
-                except Exception as e:
-                    st.error(f"Error en el entrenamiento: {e}")
+            # Mapeo seguro de columnas
+            cols_map = {
+                Config.ENSO_ONI_COL: 'ONI',
+                Config.SOI_COL: 'SOI',
+                Config.IOD_COL: 'IOD'
+            }
+            for col, name in cols_map.items():
+                if col in df_enso.columns:
+                    indices[name] = df_enso[[Config.DATE_COL, col]].rename(columns={Config.DATE_COL:'ds', col:'y'}).dropna()
+
+        if not indices:
+            st.error("No hay datos de índices climáticos cargados en la base de datos.")
+        else:
+            c1, c2 = st.columns([1,1])
+            sel_idx = c1.selectbox("Índice:", list(indices.keys()))
+            hor = c2.slider("Meses:", 6, 48, 12)
+            
+            if st.button("Generar Proyección"):
+                with st.spinner("Calculando..."):
+                    try:
+                        m = Prophet(yearly_seasonality=True, daily_seasonality=False, weekly_seasonality=False)
+                        m.fit(indices[sel_idx])
+                        future = m.make_future_dataframe(periods=hor, freq='MS')
+                        forecast = m.predict(future)
+                        
+                        # Guardar resultado simple
+                        st.session_state.setdefault('forecasted_regressors', {})[sel_idx] = forecast[['ds', 'yhat']]
+                        
+                        # Graficar
+                        fig = px.line(forecast, x='ds', y='yhat', title=f"Proyección {sel_idx}")
+                        fig.add_scatter(x=forecast['ds'], y=forecast['yhat_upper'], mode='lines', line=dict(width=0), showlegend=False)
+                        fig.add_scatter(x=forecast['ds'], y=forecast['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(0,100,80,0.2)', showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.success("Proyección completada.")
+                    except Exception as e:
+                        st.error(f"Error en Prophet: {e}")
 # -----------------------------------------------------------------------------
 
 def display_trends_and_forecast_tab(**kwargs):
@@ -2985,6 +2973,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
