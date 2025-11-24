@@ -2594,6 +2594,33 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
     Versión optimizada para series temporales mensuales.
     """
     st.subheader("🛰️ Validación Mensual (Estaciones vs. Satélite)")
+
+    # --- DOCUMENTACIÓN Y AYUDA (NUEVO BLOQUE) ---
+    with st.expander("ℹ️ Guía Técnica: Fuentes, Metodología e Interpretación", expanded=False):
+        st.markdown("""
+        ### 1. ¿Qué hace este módulo?
+        Este módulo permite comparar la **precipitación observada** (medida por pluviómetros en tierra) con la **precipitación estimada** por modelos satelitales/reanálisis (ERA5-Land) para evaluar la precisión de estos últimos en la región Andina.
+
+        ### 2. Fuentes de Datos
+        * **Estaciones (Observado):** Datos hidrometeorológicos reales cargados en el sistema (IDEAM/Particulares).
+        * **Satélite (Estimado):** [ERA5-Land](https://cds.climate.copernicus.eu/), un reanálisis climático global de alta resolución (~9km) producido por el ECMWF.
+            * *Ventaja:* Cobertura global continua y datos desde 1950.
+            * *Desventaja:* Tiende a subestimar lluvias extremas en topografía compleja (montañas) debido a su resolución espacial.
+
+        ### 3. Metodología de Procesamiento
+        1.  **Agregación Temporal:** Se transforman los datos diarios a **acumulados mensuales** exactos.
+        2.  **Emparejamiento Espacial (Nearest Neighbor):** * Para cada estación en tierra, el sistema busca el **píxel (celda) más cercano** del modelo satelital utilizando un algoritmo *KD-Tree*.
+            * *Radio de búsqueda:* Máximo 0.1 grados (~11 km). Si no hay datos satelitales cerca, la estación se descarta.
+        3.  **Cálculo de Diferencia:** `Dif = Obs - Sat`. 
+            * Valores positivos indican que la estación midió más lluvia que el satélite (Subestimación del modelo).
+            * Valores negativos indican lo contrario.
+
+        ### 4. Interpretación de Gráficos
+        * **📈 Series Temporales:** Permite ver si el satélite "sigue el ritmo" de la estación (captura las temporadas de lluvias y sequías) aunque los montos no sean exactos.
+        * **🗺️ Mapa:** Muestra la ubicación real de las estaciones sobre el fondo interpolado del satélite. Útil para identificar zonas donde el modelo falla sistemáticamente.
+        * **🔍 Correlación:** Un $R^2$ cercano a 1 indica que el satélite es un buen predictor. Si los puntos están muy dispersos, el uso de datos satelitales debe hacerse con precaución (Bias Correction requerido).
+        """)
+        
     st.info("Comparación de series temporales mensuales: Lluvia Observada vs. ERA5-Land.")
 
     # 1. Selección de Estaciones
@@ -2840,3 +2867,4 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
