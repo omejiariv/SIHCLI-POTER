@@ -1029,28 +1029,78 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             m2 = st.selectbox("Método P2:", ["Kriging (RBF)", "IDW (Lineal)", "Spline"], key="m2")
 
         if st.button("🚀 Generar Mapas"):
-            def plot_panel(rng, meth, col):
+            def plot_panel(rng, meth, col, key_suffix):
                 mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
-                df_avg = calcular_promedios_reales(df_long[mask])
+                df_sub = df_long[mask]
+                
+                # Calcular Promedios Reales
+                df_avg = calcular_promedios_reales(df_sub)
                 if df_avg.empty:
                     col.warning("Sin datos suficientes.")
                     return
+                
+                # Calcular conteo de años para el popup
+                years_count = df_sub.groupby(Config.STATION_NAME_COL)[Config.YEAR_COL].nunique()
+                
                 df_m = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
                 
                 if len(df_m) > 2:
+                    # Interpolar
                     bounds = [df_m.longitude.min()-0.1, df_m.longitude.max()+0.1, df_m.latitude.min()-0.1, df_m.latitude.max()+0.1]
                     gx, gy, gz = run_interp(df_m, meth, bounds)
+                    
                     if gz is not None:
+                        # 1. Mapa Plotly (Contornos)
                         fig = go.Figure(go.Contour(
                             z=gz.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis', 
                             colorbar=dict(title='mm/año', len=0.5), contours=dict(start=0, end=5000, size=200)
                         ))
-                        fig.add_trace(go.Scatter(x=df_m.longitude, y=df_m.latitude, mode='markers', marker=dict(color='black', size=3)))
+                        fig.add_trace(go.Scatter(
+                            x=df_m.longitude, y=df_m.latitude, mode='markers', 
+                            marker=dict(color='black', size=3),
+                            showlegend=False
+                        ))
                         fig.update_layout(title=f"Ppt Media ({rng[0]}-{rng[1]})", margin=dict(l=0,r=0,b=0,t=30), height=350)
                         col.plotly_chart(fig, use_container_width=True)
+                        
+                        # 2. Mapa Folium (Detalle con Popups)
+                        with col.expander(f"🔎 Ver Mapa Interactivo ({key_suffix})", expanded=False):
+                            center_lat = (bounds[2] + bounds[3]) / 2
+                            center_lon = (bounds[0] + bounds[1]) / 2
+                            m = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB positron")
+                            
+                            # Marcadores con Popup Estilizado
+                            for _, row in df_m.iterrows():
+                                nombre = row[Config.STATION_NAME_COL]
+                                lluvia = row[Config.PRECIPITATION_COL]
+                                altura = row.get(Config.ALTITUDE_COL, 'N/A')
+                                muni = row.get(Config.MUNICIPALITY_COL, 'N/A')
+                                n_years = years_count.get(nombre, 0)
+                                
+                                # Fragmento HTML para Popup Regional
+                                html = f"""
+                                <div style="font-family:sans-serif; font-size:12px; min-width:200px;">
+                                    <h5 style="margin:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:4px;">{nombre}</h5>
+                                    <div style="margin-top:5px; line-height:1.4;">
+                                        <b>Mun:</b> {muni}<br>
+                                        <b>Alt:</b> {altura} m
+                                    </div>
+                                    <div style="background-color:#f0f2f6; padding:5px; margin-top:5px; border-radius:4px;">
+                                        <b>Ppt Media:</b> {lluvia:,.0f} mm<br>
+                                        <b>Años Datos:</b> {n_years}
+                                    </div>
+                                </div>
+                                """
+                                popup = folium.Popup(folium.IFrame(html, width=220, height=150), max_width=220)
+                                folium.CircleMarker(
+                                    [row['latitude'], row['longitude']], radius=5, color='blue', fill=True, fill_color='cyan', fill_opacity=0.8,
+                                    popup=popup, tooltip=f"{nombre}"
+                                ).add_to(m)
+                            
+                            st_folium(m, height=300, use_container_width=True, key=f"map_fol_{key_suffix}")
             
-            plot_panel(r1, m1, c1)
-            plot_panel(r2, m2, c2)
+            plot_panel(r1, m1, c1, "A")
+            plot_panel(r2, m2, c2, "B")
             
             with st.expander("ℹ️ Nota Metodológica: Interpolación Espacial"):
                 st.markdown("""
@@ -1250,13 +1300,25 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     mun = row.get(Config.MUNICIPALITY_COL, 'N/A')
                     alt = row.get(Config.ALTITUDE_COL, 'N/A')
                     
-                    html = f"""<div style='font-family:sans-serif;font-size:12px;width:180px'>
-                    <b>{nm}</b><br>Mun: {mun}<br>Alt: {alt}m<hr>
-                    Ppt: {val:.0f} mm<br>Años: {n_y}</div>"""
+                    # Fragmento HTML para Popup Cuenca (IDÉNTICO AL REGIONAL)
+                    html = f"""
+                    <div style="font-family:sans-serif; font-size:12px; min-width:200px;">
+                        <h5 style="margin:0; color:#c0392b; border-bottom:1px solid #ccc; padding-bottom:4px;">{nm}</h5>
+                        <div style="margin-top:5px; line-height:1.4;">
+                            <b>Mun:</b> {mun}<br>
+                            <b>Alt:</b> {alt} m
+                        </div>
+                        <div style="background-color:#f8f9fa; padding:5px; margin-top:5px; border-radius:4px;">
+                            <b>Ppt Media:</b> {val:,.0f} mm<br>
+                            <b>Años Datos:</b> {n_y}
+                        </div>
+                    </div>
+                    """
+                    popup = folium.Popup(folium.IFrame(html, width=220, height=150), max_width=220)
                     
                     folium.CircleMarker(
                         [row['latitude'], row['longitude']], radius=5, color='darkred', fill=True, fill_color='red',
-                        popup=folium.Popup(folium.IFrame(html, width=200, height=120), max_width=200)
+                        popup=popup, tooltip=f"{nm}"
                     ).add_to(m_ctx)
                 
                 st_folium(m_ctx, height=500, width="100%")
@@ -2759,6 +2821,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
