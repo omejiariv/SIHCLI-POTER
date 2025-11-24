@@ -2589,126 +2589,173 @@ def display_land_cover_analysis_tab(**kwargs):
 # PESTAÑA: CORRECCIÓN DE SESGO (VERSIÓN BLINDADA)
 # -----------------------------------------------------------------------------
 def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
-    st.subheader("🛰️ Corrección de Sesgo (Estaciones vs. Satélite)")
-    st.info("Comparación de lluvia observada (Estaciones) vs. estimada (ERA5-Land).")
+    st.subheader("🛰️ Validación Mensual (Estaciones vs. Satélite)")
+    st.info("Comparación de series temporales mensuales: Lluvia Observada vs. ERA5-Land.")
     
-    # Usar estaciones filtradas
+    # Seleccionar estaciones
     target_gdf = gdf_filtered if gdf_filtered is not None and not gdf_filtered.empty else gdf_stations
     
     if df_long.empty or target_gdf is None or target_gdf.empty:
-        st.warning("Faltan datos.")
+        st.warning("Faltan datos para realizar el análisis.")
         return
 
-    c1, c2 = st.columns(2)
+    # --- CONTROLES ---
+    c1, c2, c3 = st.columns([1, 1, 2])
     with c1:
-        min_y, max_y = int(df_long[Config.YEAR_COL].min()), int(df_long[Config.YEAR_COL].max())
-        rng = st.slider("Período de Calibración:", min_y, max_y, (max(min_y, max_y-10), max_y), key="bias_rng")
+        years = sorted(df_long[Config.YEAR_COL].unique())
+        min_y, max_y = int(min(years)), int(max(years))
+        start_year, end_year = st.slider(
+            "Período de Análisis:", min_y, max_y, (max(min_y, max_y-5), max_y), 
+            key="bias_rng"
+        )
     with c2:
-        method = st.selectbox("Método Interpolación:", ["IDW", "Spline"], key="bias_meth")
+        st.write("") # Espacio
+        calc_btn = st.button("🚀 Calcular Series", type="primary", use_container_width=True)
 
-    if st.button("🚀 Calcular Corrección"):
-        from modules.openmeteo_api import get_historical_climate_average
+    if calc_btn:
+        from modules.openmeteo_api import get_historical_monthly_series
         from scipy.spatial import cKDTree
         
-        with st.spinner("1/3. Procesando datos observados..."):
-            # Filtrar datos por fecha y estaciones
-            mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1]) & \
+        # 1. PREPARACIÓN DE DATOS OBSERVADOS (MENSUAL)
+        with st.spinner("1/3. Procesando datos de estaciones..."):
+            # Filtrar por año y estaciones seleccionadas
+            mask = (df_long[Config.YEAR_COL] >= start_year) & \
+                   (df_long[Config.YEAR_COL] <= end_year) & \
                    (df_long[Config.STATION_NAME_COL].isin(target_gdf[Config.STATION_NAME_COL]))
             df_subset = df_long[mask].copy()
             
-            if df_subset.empty: st.error("Sin datos en el periodo."); return
+            if df_subset.empty:
+                st.error("No hay datos de estaciones en el periodo seleccionado.")
+                return
 
-            # --- CORRECCIÓN MATEMÁTICA CRÍTICA ---
-            # 1. Calcular la SUMA de lluvia para CADA AÑO (Total Anual)
-            ann_sums = df_subset.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-            
-            # 2. Filtrar años incompletos (ej. < 50mm/año es sospechoso)
-            ann_sums = ann_sums[ann_sums[Config.PRECIPITATION_COL] > 50]
-            
-            # 3. Calcular el PROMEDIO de los totales anuales (Media Anual Real)
-            ppt_stations = ann_sums.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-            
-            # Unir con geometría de las estaciones
-            gdf_calib = pd.merge(target_gdf, ppt_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
-            
-            if gdf_calib.empty: st.warning("No se pudieron calcular promedios válidos."); return
+            # Construir columna 'date' (Primer día del mes)
+            # Intentamos usar columnas existentes Year/Month si están disponibles
+            try:
+                # Asumiendo que existen Config.YEAR_COL y Config.MONTH_COL
+                # Si tu DF tiene nombres diferentes, ajusta aquí.
+                cols_date = [Config.YEAR_COL, Config.MONTH_COL]
+                df_subset['day_temp'] = 1
+                df_subset['date'] = pd.to_datetime(dict(year=df_subset[Config.YEAR_COL], month=df_subset[Config.MONTH_COL], day=df_subset['day_temp']))
+            except KeyError:
+                # Fallback si no hay columna mes explícita, buscar columna fecha
+                if 'date' in df_subset.columns:
+                     df_subset['date'] = pd.to_datetime(df_subset['date']).dt.to_period('M').dt.to_timestamp()
+                else:
+                    st.error("No se encontraron columnas de Año/Mes para construir la fecha.")
+                    return
 
-        with st.spinner("2/3. Descargando satélite y sincronizando..."):
-            # Preparar coordenadas para API
-            gdf_calib = gdf_calib.reset_index(drop=True)
-            lats_est = gdf_calib['latitude'].tolist()
-            lons_est = gdf_calib['longitude'].tolist()
+            # Agrupar por Estación y Fecha -> Suma Mensual
+            df_obs_monthly = df_subset.groupby(
+                [Config.STATION_NAME_COL, 'date']
+            )[Config.PRECIPITATION_COL].sum().reset_index()
             
-            # Llamada a Open-Meteo
-            df_sat = get_historical_climate_average(lats_est, lons_est, "precipitation_sum", f"{rng[0]}-01-01", f"{rng[1]}-12-31")
-            
-            if df_sat is not None and not df_sat.empty:
-                # El satélite devuelve promedio diario -> convertir a anual (x365.25)
-                df_sat['ppt_sat'] = df_sat['valor_promedio'] * 365.25
-                
-                # --- EMPAREJAMIENTO ROBUSTO (NEAREST NEIGHBOR) ---
-                # Esto soluciona el problema de "Enviadas X, Recibidas Y" y diferencias de coordenadas
-                
-                # Coordenadas Estaciones (Objetivo)
-                coords_est = np.column_stack((gdf_calib['latitude'], gdf_calib['longitude']))
-                # Coordenadas Satélite (Fuente)
-                coords_sat = np.column_stack((df_sat['latitude'], df_sat['longitude']))
-                
-                # Árbol KD para buscar el punto satelital más cercano a cada estación
-                tree = cKDTree(coords_sat)
-                dists, indexes = tree.query(coords_est)
-                
-                # Asignar datos del satélite a la estación correspondiente
-                # (Solo si está a menos de ~5km, aprox 0.05 grados)
-                gdf_calib['ppt_sat'] = np.nan
-                gdf_calib['lat_sat'] = np.nan
-                gdf_calib['lon_sat'] = np.nan
-                
-                # Asignamos valores usando los índices encontrados
-                valid_matches = dists < 0.05
-                if np.any(valid_matches):
-                    # Índices en df_sat
-                    idx_sat = indexes[valid_matches]
-                    # Índices en gdf_calib
-                    idx_est = np.where(valid_matches)[0]
-                    
-                    gdf_calib.loc[idx_est, 'ppt_sat'] = df_sat.iloc[idx_sat]['ppt_sat'].values
-                    gdf_calib.loc[idx_est, 'lat_sat'] = df_sat.iloc[idx_sat]['latitude'].values
-                    gdf_calib.loc[idx_est, 'lon_sat'] = df_sat.iloc[idx_sat]['longitude'].values
-                
-                # Filtrar las que lograron match
-                df_merged = gdf_calib.dropna(subset=['ppt_sat']).copy()
-                
-                if not df_merged.empty:
-                    # CÁLCULO DE FACTORES
-                    df_merged['bias_factor'] = df_merged[Config.PRECIPITATION_COL] / df_merged['ppt_sat'].replace(0, 0.01)
-                    df_merged['bias_diff'] = df_merged[Config.PRECIPITATION_COL] - df_merged['ppt_sat']
-                    
-                    # Limpieza de outliers
-                    df_merged = df_merged[df_merged['bias_factor'].between(0.1, 10)]
-                    
-                    # --- VISUALIZACIÓN ---
-                    tab_mapa, tab_datos = st.tabs(["🗺️ Mapas", "📋 Datos"])
-                    
-                    with tab_datos:
-                        cols_show = [Config.STATION_NAME_COL, Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor', 'bias_diff']
-                        show = df_merged[cols_show].rename(columns={
-                            Config.PRECIPITATION_COL: 'Ppt Real (mm)', 
-                            'ppt_sat': 'Ppt Sat (mm)', 
-                            'bias_factor': 'Factor', 
-                            'bias_diff': 'Dif (mm)'
-                        })
-                        
-                        # Formato diccionario seguro
-                        st.dataframe(show.style.format({
-                            'Ppt Real (mm)': '{:.1f}', 'Ppt Sat (mm)': '{:.1f}', 
-                            'Factor': '{:.2f}', 'Dif (mm)': '{:.1f}'
-                        }), use_container_width=True)
-                        
-                        # Descarga completa con coordenadas
-                        csv_full = df_merged[[Config.STATION_NAME_COL, 'latitude', 'longitude', 'lat_sat', 'lon_sat', Config.PRECIPITATION_COL, 'ppt_sat', 'bias_factor']].to_csv(index=False).encode('utf-8')
-                        st.download_button("📥 Descargar CSV Detallado (con coordenadas)", csv_full, "calibracion_satelite_detalle.csv", "text/csv")
+            # Filtrar meses con 0 lluvia si sospechas que son datos faltantes (Opcional)
+            # df_obs_monthly = df_obs_monthly[df_obs_monthly[Config.PRECIPITATION_COL] > 0]
 
+        # 2. DESCARGA SATELITAL (SERIE COMPLETA)
+        with st.spinner("2/3. Descargando series satelitales (ERA5)..."):
+            # Obtener coordenadas únicas de las estaciones filtradas
+            unique_stations = target_gdf[[Config.STATION_NAME_COL, 'latitude', 'longitude']].drop_duplicates(Config.STATION_NAME_COL)
+            lats = unique_stations['latitude'].tolist()
+            lons = unique_stations['longitude'].tolist()
+            names = unique_stations[Config.STATION_NAME_COL].tolist()
+            
+            # Llamada a la nueva API (Retorna mensual)
+            df_sat_monthly = get_historical_monthly_series(
+                lats, lons, 
+                f"{start_year}-01-01", 
+                f"{end_year}-12-31"
+            )
+            
+            if df_sat_monthly.empty:
+                st.error("No se recibieron datos del satélite.")
+                return
+
+        # 3. EMPAREJAMIENTO Y ANÁLISIS
+        with st.spinner("3/3. Cruzando información..."):
+            # A. Match Espacial (Nearest Neighbor)
+            # Creamos arrays de coordenadas
+            coords_est = np.column_stack((unique_stations['latitude'], unique_stations['longitude']))
+            # Satélite devuelve muchas filas (lat, lon repetidas por fecha), sacamos las únicas para el KDTree
+            sat_locs = df_sat_monthly[['latitude', 'longitude']].drop_duplicates()
+            coords_sat = np.column_stack((sat_locs['latitude'], sat_locs['longitude']))
+            
+            tree = cKDTree(coords_sat)
+            dists, indexes = tree.query(coords_est)
+            
+            # Crear mapa: Nombre Estación -> Coordenada Satélite asignada
+            station_to_sat_map = []
+            for i, name in enumerate(names):
+                # Solo aceptar si está cerca (< ~10km)
+                if dists[i] < 0.1: 
+                    sat_lat = coords_sat[indexes[i]][0]
+                    sat_lon = coords_sat[indexes[i]][1]
+                    station_to_sat_map.append({
+                        Config.STATION_NAME_COL: name,
+                        'sat_lat': sat_lat,
+                        'sat_lon': sat_lon,
+                        'dist_deg': dists[i]
+                    })
+            
+            map_df = pd.DataFrame(station_to_sat_map)
+            
+            if map_df.empty:
+                st.error("Las coordenadas del satélite no coinciden con ninguna estación cercana.")
+                return
+
+            # B. Merge de Datos
+            # 1. Unir Estaciones Obs con sus Coordenadas Satelitales asignadas
+            df_obs_mapped = pd.merge(df_obs_monthly, map_df, on=Config.STATION_NAME_COL)
+            
+            # 2. Unir con Datos Satelitales usando (Fecha + Coordenadas Sat)
+            # Renombramos lat/lon en df_sat para que coincidan con el map
+            df_final = pd.merge(
+                df_obs_mapped,
+                df_sat_monthly.rename(columns={'latitude': 'sat_lat', 'longitude': 'sat_lon'}),
+                on=['date', 'sat_lat', 'sat_lon'],
+                how='inner'
+            )
+            
+            # Cálculos de Diferencia
+            df_final['diff'] = df_final[Config.PRECIPITATION_COL] - df_final['ppt_sat']
+            
+            # --- VISUALIZACIÓN ---
+            
+            # 1. Gráfico de Series de Tiempo (Promedio Regional o Selección)
+            st.markdown("### 📈 Comparativa Temporal")
+            
+            # Opción para ver una estación específica o el promedio de todas
+            selected_station = st.selectbox("Seleccionar Estación para detalle:", ["Promedio Regional"] + sorted(df_final[Config.STATION_NAME_COL].unique()))
+            
+            if selected_station == "Promedio Regional":
+                plot_data = df_final.groupby('date')[[Config.PRECIPITATION_COL, 'ppt_sat']].mean().reset_index()
+                title_txt = "Promedio Regional: Obs vs Sat"
+            else:
+                plot_data = df_final[df_final[Config.STATION_NAME_COL] == selected_station]
+                title_txt = f"Estación {selected_station}: Obs vs Sat"
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=plot_data['date'], y=plot_data[Config.PRECIPITATION_COL], mode='lines+markers', name='Observado (Estación)'))
+            fig.add_trace(go.Scatter(x=plot_data['date'], y=plot_data['ppt_sat'], mode='lines+markers', name='Satélite (ERA5)', line=dict(dash='dash')))
+            fig.update_layout(title=title_txt, xaxis_title="Fecha", yaxis_title="Precipitación (mm/mes)", hovermode="x unified")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # 2. Scatter Plot (Correlación)
+            c_scat, c_data = st.columns(2)
+            with c_scat:
+                st.markdown("### 🔍 Correlación")
+                max_val = max(plot_data[Config.PRECIPITATION_COL].max(), plot_data['ppt_sat'].max())
+                fig_scat = px.scatter(plot_data, x=Config.PRECIPITATION_COL, y='ppt_sat', 
+                                      trendline="ols", title="Correlación Mensual")
+                fig_scat.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val, line=dict(color="Red", dash="dot"))
+                st.plotly_chart(fig_scat, use_container_width=True)
+            
+            with c_data:
+                st.markdown("### 📥 Descargar Datos")
+                st.dataframe(df_final.head(10), use_container_width=True)
+                csv = df_final.to_csv(index=False).encode('utf-8')
+                st.download_button("Descargar Serie Comparativa Completa (.csv)", csv, "validacion_mensual_satelite.csv", "text/csv")
+                
                     with tab_mapa:
                         c1, c2 = st.columns(2)
                         # Interpolación
@@ -2742,3 +2789,4 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     st.error("No hubo coincidencias espaciales entre estaciones y satélite.")
             else:
                 st.error("La API satelital no retornó datos.")
+
