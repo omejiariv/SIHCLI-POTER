@@ -1302,38 +1302,51 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         if hypso.get('equation'): st.latex(hypso['equation'].replace('x', 'A'))
                         st.caption("Relación Altitud vs % Área Acumulada")
 
-                # 6. Mapa Contexto
+                # --- MAPA CONTEXTO + POPUPS ENRIQUECIDOS ---
                 st.markdown("---")
-                st.subheader("📍 Mapa de Contexto")
+                st.subheader("📍 Contexto Espacial y Estaciones")
                 
-                bnd = res['bounds']
-                m_ctx = folium.Map([(bnd[2]+bnd[3])/2, (bnd[0]+bnd[1])/2], zoom_start=10, tiles="CartoDB positron")
-                folium.GeoJson(res['gdf_c'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
-                folium.GeoJson(res['gdf_b'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
+                bounds = res['bounds']
+                center = [(bounds[2]+bounds[3])/2, (bounds[0]+bounds[1])/2]
+                m_ctx = folium.Map(location=center, zoom_start=10, tiles="CartoDB positron")
                 
-                df_raw_ctx = res['df_r']
-                for _, row in res['df_i'].iterrows():
-                    nm = row[Config.STATION_NAME_COL]
-                    st_d = df_raw_ctx[df_raw_ctx[Config.STATION_NAME_COL] == nm]
+                # Capas
+                folium.GeoJson(res['gdf_cuenca'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
+                folium.GeoJson(res['gdf_buffer'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
+                
+                # Datos crudos para calcular estadísticas precisas por estación
+                df_raw_ctx = res['df_raw']
+                
+                for _, row in res['df_interp'].iterrows():
+                    st_name = row[Config.STATION_NAME_COL]
+                    st_data = df_raw_ctx[df_raw_ctx[Config.STATION_NAME_COL] == st_name]
                     
-                    val = row[Config.PRECIPITATION_COL]
-                    n_y = st_d[Config.YEAR_COL].nunique()
+                    # Estadísticas para Popup
+                    val_anual = row[Config.PRECIPITATION_COL] # Ya viene calculado robustamente
+                    n_years = st_data[Config.YEAR_COL].nunique()
+                    
                     mun = row.get(Config.MUNICIPALITY_COL, 'N/A')
                     alt = row.get(Config.ALTITUDE_COL, 'N/A')
                     
-                    html = f"""<div style='font-family:sans-serif;font-size:12px;width:180px'>
-                    <b>{nm}</b><br>Mun: {mun}<br>Alt: {alt}m<hr>
-                    Ppt: {val:.0f} mm<br>Años: {n_y}</div>"""
+                    html = f"""
+                    <div style='font-family:sans-serif; font-size:12px; min-width:200px'>
+                        <h5 style='margin:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:4px'>{st_name}</h5>
+                        <div style='margin-top:5px'><b>Mun:</b> {mun}<br><b>Alt:</b> {alt} m</div>
+                        <div style='background-color:#f0f2f6; padding:5px; margin-top:5px; border-radius:4px'>
+                            <b>Ppt Media:</b> {val_anual:,.0f} mm<br>
+                            <b>Años Datos:</b> {n_years}
+                        </div>
+                    </div>
+                    """
+                    popup = folium.Popup(folium.IFrame(html, width=220, height=140), max_width=220)
                     
                     folium.CircleMarker(
                         [row['latitude'], row['longitude']], radius=5, color='darkred', fill=True, fill_color='red',
-                        popup=folium.Popup(folium.IFrame(html, width=200, height=120), max_width=200)
+                        fill_opacity=0.9, popup=popup, tooltip=f"{st_name}"
                     ).add_to(m_ctx)
-                
+
+                folium.LayerControl().add_to(m_ctx)
                 st_folium(m_ctx, height=500, width="100%")
-                
-                with st.expander("ℹ️ Nota del Mapa de Contexto"):
-                    st.write("Muestra la cuenca seleccionada (azul), el área de influencia de búsqueda (gris punteado) y las estaciones utilizadas para el análisis (puntos rojos). Haga clic en los puntos para ver detalles.")
             
 # PESTAÑA DE PRONÓSTICO CLIMÁTICO (INDICES + GENERADOR)
 # -----------------------------------------------------------------------------
@@ -2829,6 +2842,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
