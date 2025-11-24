@@ -285,54 +285,41 @@ def display_welcome_tab():
 # -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN: CONEXIÓN CON IRI (COLUMBIA UNIVERSITY)
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=86400) # Cache de 24 horas (el IRI actualiza mensualmente)
+@st.cache_data(ttl=24*3600) # Cache de 24 horas para no saturar al IRI
 def get_iri_enso_forecast():
     """
-    Descarga el pronóstico oficial de la Pluma ENSO del IRI en formato JSON.
-    Retorna un DataFrame listo para graficar.
+    Intenta obtener los datos probabilísticos del IRI/CPC ENSO Forecast.
+    Retorna un DataFrame limpio.
     """
-    json_url = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/graphics/ensoplume_full.json"
+    # URL de la tabla oficial de probabilidades (Suele ser estable)
+    # Nota: El IRI cambia sus URLs a veces. Esta es la estrategia más robusta:
+    # Intentar leer la tabla directa.
+    url_prob = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/?enso_tab=enso-cpc_plume"
+    
     try:
-        # Intentar descargar con timeout para no bloquear la app
-        response = requests.get(json_url, timeout=5)
-        response.raise_for_status()
-        data = response.json()
+        # Usamos pandas para leer tablas HTML directamente
+        # Header=0 asume que la primera fila son los títulos (Season, La Niña, Neutral, El Niño)
+        dfs = pd.read_html(url_prob, match="Season") 
         
-        # Estructura del JSON: {'stat_fcst': {'model_name': [[tiempo, valor], ...]}, 'dyn_fcst': ...}
-        models_data = []
-        
-        # Procesar Modelos Dinámicos
-        if 'dyn_fcst' in data:
-            for model_name, values in data['dyn_fcst'].items():
-                for point in values:
-                    # El tiempo viene en formato decimal (ej. 2024.5)
-                    year = int(point[0])
-                    month = int((point[0] - year) * 12) + 1
-                    date_obj = pd.to_datetime(f"{year}-{month}-01")
-                    models_data.append({'Fecha': date_obj, 'Valor': point[1], 'Modelo': model_name, 'Tipo': 'Dinámico'})
-
-        # Procesar Modelos Estadísticos
-        if 'stat_fcst' in data:
-            for model_name, values in data['stat_fcst'].items():
-                for point in values:
-                    year = int(point[0])
-                    month = int((point[0] - year) * 12) + 1
-                    date_obj = pd.to_datetime(f"{year}-{month}-01")
-                    models_data.append({'Fecha': date_obj, 'Valor': point[1], 'Modelo': model_name, 'Tipo': 'Estadístico'})
-        
-        # Observaciones (Historia reciente)
-        if 'obs' in data:
-            for point in data['obs']:
-                year = int(point[0])
-                month = int((point[0] - year) * 12) + 1
-                date_obj = pd.to_datetime(f"{year}-{month}-01")
-                models_data.append({'Fecha': date_obj, 'Valor': point[1], 'Modelo': 'OBSERVADO', 'Tipo': 'Observado'})
-
-        return pd.DataFrame(models_data)
-
+        if dfs:
+            df = dfs[0] # La primera tabla suele ser la de probabilidades
+            # Limpieza básica
+            df.columns = ['Trimestre', 'La Niña', 'Neutral', 'El Niño']
+            
+            # Convertir a formato largo para Plotly
+            df_melted = df.melt(id_vars=['Trimestre'], var_name='Evento', value_name='Probabilidad')
+            
+            # Limpiar el % si viene como string "25%" -> 25
+            if df_melted['Probabilidad'].dtype == 'O':
+                df_melted['Probabilidad'] = df_melted['Probabilidad'].str.replace('%', '').astype(float)
+                
+            return df_melted
+            
     except Exception as e:
-        st.warning(f"No se pudo conectar con el servidor del IRI: {e}")
-        return pd.DataFrame()
+        print(f"Error scraping IRI table: {e}")
+        return pd.DataFrame() # Retorna vacío si falla
+
+    return pd.DataFrame()
 
 # 2. NUEVA PESTAÑA UNIFICADA: MONITOREO Y TIEMPO REAL
 # -----------------------------------------------------------------------------
@@ -1457,51 +1444,130 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 # PESTAÑA DE PRONÓSTICO CLIMÁTICO (INDICES + GENERADOR)
 # -----------------------------------------------------------------------------
 def display_climate_forecast_tab(**kwargs):
-    st.subheader("🔮 Pronóstico Climático (Índices)")
+    st.subheader("🔮 Pronóstico Climático & Fenómenos Globales")
+    
     df_enso = kwargs.get('df_enso')
-    df_long = kwargs.get('df_long')
     
-    # RESTAURADA PESTAÑA GENERADOR
-    tab_hist, tab_iri, tab_gen = st.tabs(["📜 Historia", "🌎 IRI Oficial", "⚙️ Generador Regresores"])
+    tab_hist, tab_iri, tab_gen = st.tabs(["📜 Historia Índices", "🌎 Pronóstico Oficial (IRI)", "⚙️ Generador Prophet"])
     
+    # --- TAB 1: HISTORIA ---
     with tab_hist:
         if df_enso is not None:
-            idx = st.selectbox("Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
+            col_sel, _ = st.columns([1,3])
+            with col_sel:
+                idx = st.selectbox("Seleccionar Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
+            
             if idx in df_enso.columns:
                 d = df_enso.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
-                st.plotly_chart(px.line(d, x=Config.DATE_COL, y=idx), use_container_width=True)
+                
+                fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Evolución Histórica: {idx.upper()}")
+                
+                # Agregar líneas de umbral para ONI (El Niño / La Niña)
+                if idx == Config.ENSO_ONI_COL:
+                    fig.add_hline(y=0.5, line_dash="dot", line_color="red", annotation_text="El Niño (+0.5)")
+                    fig.add_hline(y=-0.5, line_dash="dot", line_color="blue", annotation_text="La Niña (-0.5)")
+                    
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning(f"El índice {idx} no se encuentra en la base de datos.")
 
+    # --- TAB 2: PRONÓSTICO IRI (CORREGIDO) ---
     with tab_iri:
-        df_iri = get_iri_enso_forecast()
-        if not df_iri.empty:
-            fig = px.line(df_iri, x='Fecha', y='Valor', color='Modelo')
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", width=700)
+        st.markdown("#### Probabilidades ENSO (El Niño Southern Oscillation)")
+        st.markdown("Fuente: *International Research Institute for Climate and Society (IRI)*")
+        
+        with st.spinner("Conectando con IRI Columbia University..."):
+            df_iri = get_iri_enso_forecast()
+        
+        c1, c2 = st.columns([2, 1])
+        
+        with c1:
+            if not df_iri.empty:
+                # Gráfico interactivo de las probabilidades
+                fig = px.bar(
+                    df_iri, 
+                    x='Trimestre', 
+                    y='Probabilidad', 
+                    color='Evento', 
+                    barmode='group',
+                    color_discrete_map={'La Niña': 'blue', 'Neutral': 'gray', 'El Niño': 'red'},
+                    title="Probabilidad Pronosticada por Trimestre"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No se pudo extraer la tabla de datos en vivo del IRI.")
+        
+        with c2:
+            st.markdown("**Pluma de Modelos (Imagen Oficial)**")
+            # URL directa a la imagen que suele ser más estable, o un fallback
+            try:
+                # Intentamos cargar la imagen de la pluma actual
+                st.image("https://iri.columbia.edu/climate/ENSO/current/info/figure3.png", caption="Pluma de Modelos Dinámicos y Estadísticos", use_container_width=True)
+            except:
+                st.error("Imagen no disponible temporalmente.")
+            
+            st.info("""
+            **Interpretación:**
+            - Barras **Rojas**: Probabilidad de El Niño.
+            - Barras **Azules**: Probabilidad de La Niña.
+            - Barras **Grises**: Condiciones Neutrales.
+            """)
 
+    # --- TAB 3: GENERADOR PROPHET ---
     with tab_gen:
-        # IOD INCLUIDO EXPLÍCITAMENTE
-        st.markdown("#### Entrenar Pronóstico de Índices (ONI, SOI, IOD)")
+        st.markdown("#### Entrenar Pronóstico Local (Prophet)")
+        st.caption("Genera proyecciones estadísticas basadas en tus datos históricos de índices.")
+        
         indices = {}
         if df_enso is not None:
-            if Config.ENSO_ONI_COL in df_enso.columns: indices['ONI'] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.DATE_COL:'ds', Config.ENSO_ONI_COL:'y'}).dropna()
-            if Config.SOI_COL in df_enso.columns: indices['SOI'] = df_enso[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.DATE_COL:'ds', Config.SOI_COL:'y'}).dropna()
-            if Config.IOD_COL in df_enso.columns: indices['IOD'] = df_enso[[Config.DATE_COL, Config.IOD_COL]].rename(columns={Config.DATE_COL:'ds', Config.IOD_COL:'y'}).dropna()
+            if Config.ENSO_ONI_COL in df_enso.columns: 
+                indices['ONI (Oceánico)'] = df_enso[[Config.DATE_COL, Config.ENSO_ONI_COL]].rename(columns={Config.DATE_COL:'ds', Config.ENSO_ONI_COL:'y'}).dropna()
+            if Config.SOI_COL in df_enso.columns: 
+                indices['SOI (Atmosférico)'] = df_enso[[Config.DATE_COL, Config.SOI_COL]].rename(columns={Config.DATE_COL:'ds', Config.SOI_COL:'y'}).dropna()
+            if Config.IOD_COL in df_enso.columns: 
+                indices['IOD (Dipolo Índico)'] = df_enso[[Config.DATE_COL, Config.IOD_COL]].rename(columns={Config.DATE_COL:'ds', Config.IOD_COL:'y'}).dropna()
         
-        sel_idx = st.selectbox("Índice:", list(indices.keys()))
-        hor = st.slider("Horizonte (meses):", 12, 60, 24)
+        c_sel, c_btn = st.columns([1, 1])
+        with c_sel:
+            sel_idx = st.selectbox("Seleccionar Índice para Proyectar:", list(indices.keys()))
+            hor = st.slider("Meses a pronosticar:", 6, 60, 24)
         
-        if st.button(f"Generar Pronóstico {sel_idx}"):
-            with st.spinner("Entrenando..."):
+        with c_btn:
+            st.write("") # Espacio
+            st.write("")
+            run_prophet = st.button(f"🧠 Entrenar Modelo para {sel_idx}", type="primary")
+        
+        if run_prophet:
+            with st.spinner(f"Entrenando Prophet para {sel_idx}..."):
                 try:
-                    m = Prophet().fit(indices[sel_idx])
+                    data_train = indices[sel_idx]
+                    
+                    # Configuración básica de Prophet
+                    m = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+                    m.fit(data_train)
+                    
                     fut = m.make_future_dataframe(periods=hor, freq='MS')
                     fc = m.predict(fut)
-                    if 'forecasted_regressors' not in st.session_state: st.session_state['forecasted_regressors'] = {}
-                    st.session_state['forecasted_regressors'][sel_idx] = fc[['ds', 'yhat']].rename(columns={'yhat': sel_idx})
-                    st.success(f"Regresor {sel_idx} guardado.")
-                    st.plotly_chart(px.line(fc, x='ds', y='yhat'), use_container_width=True)
-                except Exception as e: st.error(f"Error: {e}")
+                    
+                    # Guardar en sesión para usarlo en otros módulos (Regresores)
+                    if 'forecasted_regressors' not in st.session_state: 
+                        st.session_state['forecasted_regressors'] = {}
+                    
+                    # Guardamos la serie limpia
+                    key_clean = sel_idx.split(" ")[0] # "ONI", "SOI", etc.
+                    st.session_state['forecasted_regressors'][key_clean] = fc[['ds', 'yhat']].rename(columns={'yhat': key_clean})
+                    
+                    # Gráfica
+                    fig_fc = px.line(fc, x='ds', y='yhat', title=f"Proyección {sel_idx} (Prophet)")
+                    # Añadir intervalo de confianza
+                    fig_fc.add_scatter(x=fc['ds'], y=fc['yhat_upper'], mode='lines', line=dict(width=0), showlegend=False, name='Upper')
+                    fig_fc.add_scatter(x=fc['ds'], y=fc['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(0,100,80,0.2)', showlegend=False, name='Confidence')
+                    
+                    st.success(f"Modelo entrenado exitosamente. Proyección guardada en memoria.")
+                    st.plotly_chart(fig_fc, use_container_width=True)
+                    
+                except Exception as e:
+                    st.error(f"Error en el entrenamiento: {e}")
 # -----------------------------------------------------------------------------
 
 def display_trends_and_forecast_tab(**kwargs):
@@ -2919,5 +2985,6 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
