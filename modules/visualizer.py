@@ -2803,22 +2803,27 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     st.warning(f"No se pudo interpolar: {e}")
                     st.map(map_agg)
 
-            # TAB 3: DATOS Y GEOJSON
+            # TAB 3: DATOS
             with tab_datos:
-                st.markdown("### Datos Tabulares")
-                st.dataframe(df_final.head(50), use_container_width=True)
+                st.dataframe(
+                    df_final[[Config.STATION_NAME_COL, 'date', Config.PRECIPITATION_COL, 'ppt_sat', 'diff_mm']]
+                    .sort_values(by=[Config.STATION_NAME_COL, 'date']),
+                    use_container_width=True
+                )
                 
                 c_csv, c_geo = st.columns(2)
                 
-                # 1. Descarga CSV
                 with c_csv:
                     csv = df_final.to_csv(index=False).encode('utf-8')
-                    st.download_button("📥 Descargar Series (CSV)", csv, "series_mensuales.csv", "text/csv")
+                    st.download_button(
+                        "📥 Descargar Series (CSV)",
+                        csv,
+                        "validacion_mensual_satelite.csv",
+                        "text/csv"
+                    )
                 
-                # 2. Descarga GEOJSON (Promedios Espaciales)
                 with c_geo:
                     # Convertir el DataFrame agregado (map_agg) a GeoDataFrame
-                    # map_agg ya tiene el promedio por estación
                     gdf_export = gpd.GeoDataFrame(
                         map_agg, 
                         geometry=gpd.points_from_xy(map_agg.longitude, map_agg.latitude),
@@ -2874,6 +2879,3 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     "validacion_mensual_satelite.csv",
                     "text/csv"
                 )
-
-
-
