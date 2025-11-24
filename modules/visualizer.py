@@ -2803,8 +2803,9 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                     st.warning(f"No se pudo interpolar: {e}")
                     st.map(map_agg)
 
-            # TAB 3: DATOS
+            # TAB 3: DATOS Y GEOJSON
             with tab_datos:
+                st.markdown("### Datos Tabulares")
                 st.dataframe(
                     df_final[[Config.STATION_NAME_COL, 'date', Config.PRECIPITATION_COL, 'ppt_sat', 'diff_mm']]
                     .sort_values(by=[Config.STATION_NAME_COL, 'date']),
@@ -2813,17 +2814,20 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                 
                 c_csv, c_geo = st.columns(2)
                 
+                # 1. Descarga CSV
                 with c_csv:
                     csv = df_final.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                        "📥 Descargar Series (CSV)",
-                        csv,
-                        "validacion_mensual_satelite.csv",
+                        "📥 Descargar Series (CSV)", 
+                        csv, 
+                        "validacion_mensual_satelite.csv", 
                         "text/csv"
                     )
                 
+                # 2. Descarga GEOJSON (Promedios Espaciales)
                 with c_geo:
                     # Convertir el DataFrame agregado (map_agg) a GeoDataFrame
+                    # map_agg ya tiene el promedio por estación calculado en el bloque anterior (Tab 2)
                     gdf_export = gpd.GeoDataFrame(
                         map_agg, 
                         geometry=gpd.points_from_xy(map_agg.longitude, map_agg.latitude),
@@ -2836,46 +2840,3 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
-                    
-                    fig_map = go.Figure()
-                    # Capa Contorno (Satélite)
-                    fig_map.add_trace(go.Contour(
-                        z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:], 
-                        colorscale='Blues', opacity=0.6, showscale=False, name='Satélite (Interpolado)'
-                    ))
-                    # Capa Puntos (Estaciones) - AHORA USANDO COORDENADAS REALES
-                    fig_map.add_trace(go.Scatter(
-                        x=map_agg['longitude'], y=map_agg['latitude'], 
-                        mode='markers', 
-                        marker=dict(
-                            size=10, 
-                            color=map_agg[Config.PRECIPITATION_COL], 
-                            colorscale='RdBu', 
-                            showscale=True,
-                            line=dict(width=1, color='black')
-                        ),
-                        text=map_agg[Config.STATION_NAME_COL],
-                        name='Estaciones (Posición Real)'
-                    ))
-                    fig_map.update_layout(title="Fondo: Satélite | Puntos: Estaciones (Posición Real)", height=500)
-                    st.plotly_chart(fig_map, use_container_width=True)
-                
-                except Exception as e:
-                    st.warning(f"No se pudo generar la interpolación del mapa: {e}")
-                    # Fallback a mapa simple con coordenadas reales
-                    st.map(map_agg[['latitude', 'longitude']])
-
-            # TAB 3: DATOS
-            with tab_datos:
-                st.dataframe(
-                    df_final[[Config.STATION_NAME_COL, 'date', Config.PRECIPITATION_COL, 'ppt_sat', 'diff_mm']]
-                    .sort_values(by=[Config.STATION_NAME_COL, 'date']),
-                    use_container_width=True
-                )
-                csv = df_final.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "📥 Descargar CSV de Series Mensuales",
-                    csv,
-                    "validacion_mensual_satelite.csv",
-                    "text/csv"
-                )
