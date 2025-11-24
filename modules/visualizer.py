@@ -33,19 +33,22 @@ from modules.openmeteo_api import get_historical_climate_average
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
 
-def fetch_secure_content(url):
+def fetch_secure_image(url):
     """
-    Descarga contenido binario (imagen/gif) saltándose protecciones anti-bot.
+    Descarga imágenes saltando protecciones de hotlinking (Anti-Bot).
+    Simula ser un navegador real para obtener la 'Pluma de Modelos'.
     """
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Referer": "https://www.google.com/"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://iri.columbia.edu/",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
     }
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return BytesIO(response.content)
-    except Exception:
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            return BytesIO(r.content)
+    except Exception as e:
+        print(f"Error descargando imagen segura: {e}")
         return None
     return None
 
@@ -3000,6 +3003,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
