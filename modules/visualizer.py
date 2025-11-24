@@ -978,7 +978,7 @@ def display_satellite_imagery_tab(gdf_filtered):
 def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
     """
     Muestra mapas avanzados de interpolación (con modo comparación) y morfometría.
-    FIX: Recupera GeoDataFrame para evitar error .cx y restaura comparación.
+    FIX: Usa folium.IFrame para evitar NameError y mantiene el arreglo de .cx
     """
     st.subheader("🗺️ Análisis Espacial Avanzado")
     
@@ -992,9 +992,8 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
         return
     min_y, max_y = int(min(years)), int(max(years))
 
-    # --- FUNCIÓN INTERNA DE INTERPOLACIÓN (Reutilizable) ---
+    # --- FUNCIÓN INTERNA DE INTERPOLACIÓN ---
     def generar_superficie(df_datos, metodo_interp, bounds_geom):
-        # Grid
         margin_x = (bounds_geom[2] - bounds_geom[0]) * 0.1
         margin_y = (bounds_geom[3] - bounds_geom[1]) * 0.1
         grid_x, grid_y = np.mgrid[
@@ -1078,9 +1077,13 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         opacity=0.6
                     ).add_to(m)
                     
-                    # Puntos con Popup
+                    # Puntos con Popup Enriquecido
                     for _, row in df_map.iterrows():
-                        popup_txt = f"{row[Config.STATION_NAME_COL]}: {row[Config.PRECIPITATION_COL]:.1f} mm"
+                        nombre = row.get(Config.STATION_NAME_COL, 'Estación')
+                        lluvia = round(row.get(Config.PRECIPITATION_COL, 0), 1)
+                        
+                        # Popup Simple para modo regional (para no saturar)
+                        popup_txt = f"{nombre}: {lluvia} mm"
                         folium.CircleMarker(
                             [row['latitude'], row['longitude']], radius=3, color='black', fill=True, 
                             tooltip=popup_txt
@@ -1091,28 +1094,22 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 except Exception as e:
                     st.error(f"Error interpolación: {e}")
 
-    # --- MODO 2: MORFOMETRÍA POR CUENCA (CORREGIDO ERROR .cx) ---
+    # --- MODO 2: MORFOMETRÍA POR CUENCA (CORREGIDO) ---
     elif mode == "Por Cuenca (Morfometría)":
         st.markdown("#### ⛰️ Análisis de Cuenca y Contexto")
         
-        # PREPARACIÓN MAESTRA DE DATOS (CRUCIAL PARA EL ARREGLO)
-        # 1. Agrupar datos de lluvia (histórico completo por defecto o podrías poner slider)
+        # 1. Preparar datos
         df_agg = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        
-        # 2. Merge con estaciones
         df_plot = pd.merge(df_agg, gdf_stations, on=Config.STATION_NAME_COL, how='inner')
         
-        # 3. [FIX] RE-CONVERTIR A GEODATAFRAME
-        # Al hacer merge, df_plot se vuelve un DataFrame normal. Lo convertimos a GeoDataFrame
-        # para recuperar el superpoder espacial (.cx)
+        # 2. RE-CONVERTIR A GEODATAFRAME (Vital para .cx)
         if 'geometry' in df_plot.columns:
             df_plot = gpd.GeoDataFrame(df_plot, geometry='geometry', crs=gdf_stations.crs)
         else:
-            # Fallback si por alguna razón se perdió la columna geometry
             df_plot = gpd.GeoDataFrame(
                 df_plot, 
                 geometry=gpd.points_from_xy(df_plot.longitude, df_plot.latitude),
-                crs="EPSG:4326" # Asumiendo WGS84
+                crs="EPSG:4326"
             )
 
         # Selector de Cuenca
@@ -1135,12 +1132,12 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     style_function=lambda x: {'fillColor': '#3388ff', 'color': '#005a9c', 'weight': 2, 'fillOpacity': 0.1}
                 ).add_to(m2)
                 
-                # Filtrar estaciones (AHORA SÍ FUNCIONA .cx)
+                # Filtrar estaciones
                 try:
                     mask_geo = df_plot.cx[bounds_c[0]:bounds_c[2], bounds_c[1]:bounds_c[3]]
                 except Exception as e:
-                    st.warning(f"No se pudo filtrar espacialmente con .cx, mostrando todas. Error: {e}")
-                    mask_geo = df_plot # Fallback
+                    st.warning(f"Filtro espacial fallback. Error: {e}")
+                    mask_geo = df_plot
                 
                 # Marcadores
                 for _, row in mask_geo.iterrows():
@@ -1149,7 +1146,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     altura = int(row.get(Config.ALTITUDE_COL, 0))
                     muni = row.get(Config.MUNICIPALITY_COL, 'N/A')
                     
-                    # Popup Enriquecido
+                    # Popup Enriquecido (Usando folium.IFrame directo)
                     html = f"""
                     <div style="font-family: sans-serif; width: 200px; font-size: 12px;">
                         <h4 style="margin: 0 0 8px 0; color: #2ecc71; border-bottom: 1px solid #ddd;">{nombre}</h4>
@@ -1158,10 +1155,11 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         <b>📍 Ubicación:</b> {muni}
                     </div>
                     """
-                    iframe = IFrame(html, width=220, height=110)
+                    # AQUÍ ESTABA EL ERROR: Usamos folium.IFrame
+                    iframe = folium.IFrame(html, width=220, height=110)
                     popup = folium.Popup(iframe, max_width=220)
                     
-                    # Asegurar coordenadas (GeoDataFrame usa geometry, pero mantenemos lat/lon por seguridad)
+                    # Coordenadas seguras
                     lat = row.geometry.y
                     lon = row.geometry.x
                     
@@ -1182,83 +1180,6 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 st.error("Error filtrando cuenca.")
         else:
             st.warning("No se cargó capa de Cuencas.")
-
-    # --- MODO 2: MORFOMETRÍA POR CUENCA ---
-    elif mode == "Por Cuenca (Morfometría)":
-        st.markdown("#### ⛰️ Análisis de Cuenca y Contexto")
-        
-        if gdf_subcuencas is not None and not gdf_subcuencas.empty:
-            # Identificar columna de nombre de cuenca
-            col_name_cuenca = next((c for c in gdf_subcuencas.columns if 'nombre' in c.lower() or 'cuenca' in c.lower()), gdf_subcuencas.columns[0])
-            nombres_cuencas = sorted(gdf_subcuencas[col_name_cuenca].unique().astype(str))
-            
-            c_sel, _ = st.columns([1, 2])
-            with c_sel:
-                sel_cuenca = st.selectbox("Seleccionar Unidad Hidrológica:", nombres_cuencas)
-            
-            # Filtrar geometría de la cuenca
-            gdf_sel = gdf_subcuencas[gdf_subcuencas[col_name_cuenca] == sel_cuenca]
-            
-            if not gdf_sel.empty:
-                # Calcular centro y zoom
-                bounds_c = gdf_sel.total_bounds
-                center_c = [(bounds_c[1]+bounds_c[3])/2, (bounds_c[0]+bounds_c[2])/2]
-                
-                m2 = folium.Map(location=center_c, zoom_start=11, tiles="CartoDB positron")
-                
-                # Capa Polígono Cuenca
-                folium.GeoJson(
-                    gdf_sel,
-                    name=f"Cuenca: {sel_cuenca}",
-                    style_function=lambda x: {'fillColor': '#3388ff', 'color': '#005a9c', 'weight': 2, 'fillOpacity': 0.2},
-                    tooltip=f"{sel_cuenca}"
-                ).add_to(m2)
-                
-                # Filtrar estaciones DENTRO o CERCANAS a la cuenca visualmente (Bounding Box)
-                # Usamos cx para intersección espacial rápida
-                mask_geo = df_plot.cx[bounds_c[0]:bounds_c[2], bounds_c[1]:bounds_c[3]]
-                
-                # Marcadores de estaciones en la zona
-                for _, row in mask_geo.iterrows():
-                    nombre = row.get(Config.STATION_NAME_COL, 'Estación')
-                    lluvia = round(row.get(Config.PRECIPITATION_COL, 0), 1)
-                    altura = int(row.get(Config.ALTITUDE_COL, 0))
-                    muni = row.get(Config.MUNICIPALITY_COL, 'N/A')
-                    
-                    # Popup igual de detallado
-                    html = f"""
-                    <div style="font-family: sans-serif; width: 200px; font-size: 12px;">
-                        <h4 style="margin: 0 0 8px 0; color: #2ecc71; border-bottom: 1px solid #ddd; padding-bottom: 5px;">
-                            {nombre}
-                        </h4>
-                        <b>🌧️ Lluvia:</b> {lluvia} mm<br>
-                        <b>⛰️ Altura:</b> {altura} m<br>
-                        <b>📍 Ubicación:</b> {muni}
-                    </div>
-                    """
-                    iframe = IFrame(html, width=220, height=110)
-                    popup = folium.Popup(iframe, max_width=220)
-                    
-                    folium.Marker(
-                        location=[row['latitude'], row['longitude']],
-                        popup=popup,
-                        tooltip=nombre,
-                        icon=folium.Icon(color='green', icon='tint', prefix='fa')
-                    ).add_to(m2)
-                
-                st_folium(m2, height=500, use_container_width=True)
-                
-                # Datos morfométricos básicos si existen columnas
-                cols_morf = ['area_ha', 'perimetro_km', 'pend_media']
-                found_cols = [c for c in cols_morf if c in gdf_sel.columns]
-                
-                if found_cols:
-                    st.caption("📋 Datos Morfométricos Disponibles:")
-                    st.dataframe(gdf_sel[found_cols].reset_index(drop=True), use_container_width=True)
-            else:
-                st.error("Error al filtrar la geometría de la cuenca.")
-        else:
-            st.warning("⚠️ No se ha cargado la capa de Subcuencas/Cuencas (gdf_subcuencas es None).")
             
 # PESTAÑA DE PRONÓSTICO CLIMÁTICO (INDICES + GENERADOR)
 # -----------------------------------------------------------------------------
@@ -2754,6 +2675,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
