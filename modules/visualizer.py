@@ -35,8 +35,7 @@ from modules.openmeteo_api import get_historical_climate_average
 
 def fetch_secure_image(url):
     """
-    Descarga imágenes saltando protecciones de hotlinking (Anti-Bot).
-    Simula ser un navegador real para obtener la 'Pluma de Modelos'.
+    Descarga imágenes validando que sean realmente imágenes y no HTML de bloqueo.
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -46,12 +45,18 @@ def fetch_secure_image(url):
     try:
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
-            return BytesIO(r.content)
+            # VALIDACIÓN CRÍTICA: Verificar que recibimos una imagen, no texto/html
+            content_type = r.headers.get('Content-Type', '').lower()
+            if 'image' in content_type:
+                return BytesIO(r.content)
+            else:
+                print(f"Bloqueo detectado: Recibimos {content_type} en lugar de imagen.")
+                return None
     except Exception as e:
         print(f"Error descargando imagen segura: {e}")
         return None
     return None
-
+    
 def display_current_filters(stations, regions, municipios, years):
     """Muestra un resumen colapsable de los filtros activos en toda la app."""
     with st.expander("ℹ️ Resumen de Filtros Activos (Sidebar)", expanded=False):
@@ -307,10 +312,7 @@ def display_welcome_tab():
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=12*3600)
 def get_iri_enso_forecast():
-    """
-    Obtiene la tabla de probabilidades del IRI mediante scraping directo.
-    Maneja cambios en el HTML para evitar errores.
-    """
+    """Obtiene la tabla de probabilidades del IRI."""
     url_prob = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/?enso_tab=enso-cpc_plume"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -319,20 +321,13 @@ def get_iri_enso_forecast():
     try:
         response = requests.get(url_prob, headers=headers, timeout=15)
         if response.status_code == 200:
-            # Busca tablas que contengan la palabra 'Season'
             dfs = pd.read_html(io.StringIO(response.text), match="Season")
             if dfs:
                 df = dfs[0]
-                # Estandarizar columnas
                 df.columns = ['Trimestre', 'La Niña', 'Neutral', 'El Niño']
-                
-                # Convertir a formato largo para Plotly
                 df_melted = df.melt(id_vars=['Trimestre'], var_name='Evento', value_name='Probabilidad')
-                
-                # Limpiar símbolos de porcentaje si existen
                 if df_melted['Probabilidad'].dtype == 'O':
                     df_melted['Probabilidad'] = df_melted['Probabilidad'].astype(str).str.replace('%', '').astype(float)
-                
                 return df_melted
     except Exception as e:
         print(f"Advertencia (IRI Scraping): {e}")
@@ -1464,12 +1459,6 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 # PESTAÑA DE PRONÓSTICO CLIMÁTICO (INDICES + GENERADOR)
 # -----------------------------------------------------------------------------
 def display_climate_forecast_tab(**kwargs):
-    """
-    Muestra el Tablero de Pronóstico Climático:
-    1. Historia de Índices (ONI, SOI).
-    2. Pronóstico Oficial IRI (Con imágenes seguras).
-    3. Generador Local con Prophet.
-    """
     st.subheader("🔮 Pronóstico Climático & Fenómenos Globales")
     
     df_enso = kwargs.get('df_enso')
@@ -1484,34 +1473,27 @@ def display_climate_forecast_tab(**kwargs):
             
             if idx in df_enso.columns:
                 d = df_enso.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
-                fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Evolución Histórica: {idx.upper()}")
-                
-                # Líneas de referencia para ONI
+                fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Evolución: {idx.upper()}")
                 if idx == Config.ENSO_ONI_COL:
-                    fig.add_hline(y=0.5, line_dash="dot", line_color="red", annotation_text="El Niño (+0.5)")
-                    fig.add_hline(y=-0.5, line_dash="dot", line_color="blue", annotation_text="La Niña (-0.5)")
-                
+                    fig.add_hline(y=0.5, line_dash="dot", line_color="red", annotation_text="El Niño")
+                    fig.add_hline(y=-0.5, line_dash="dot", line_color="blue", annotation_text="La Niña")
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning(f"El índice '{idx}' no se encontró en la base de datos.")
+                st.warning(f"Índice {idx} no encontrado.")
 
-    # --- TAB 2: PRONÓSTICO IRI (SOLUCIÓN DEFINITIVA) ---
+    # --- TAB 2: PRONÓSTICO IRI ---
     with tab_iri:
         st.markdown("#### Pronóstico ENSO (IRI / CPC)")
-        st.caption("Fuente: International Research Institute for Climate and Society (Columbia University)")
         
-        # 1. Obtener Datos
-        with st.spinner("Conectando con servidores del IRI..."):
+        with st.spinner("Consultando IRI..."):
             df_iri = get_iri_enso_forecast()
         
-        # URL Oficial de la Pluma (Suele bloquearse si no usamos fetch_secure_image)
         url_plume = "https://iri.columbia.edu/climate/ENSO/current/info/figure3.png"
         
         c1, c2 = st.columns(2)
         
-        # A. Gráfico de Barras (Probabilidades)
         with c1:
-            st.markdown("**Probabilidades Trimestrales**")
+            st.markdown("**Probabilidades**")
             if not df_iri.empty:
                 fig = px.bar(
                     df_iri, x='Trimestre', y='Probabilidad', color='Evento', 
@@ -1521,71 +1503,49 @@ def display_climate_forecast_tab(**kwargs):
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning("⚠️ No se pudo descargar la tabla de probabilidades en vivo.")
-                st.info("Esto suele ocurrir cuando el IRI está actualizando su sitio web.")
+                st.warning("No se pudo cargar la tabla.")
 
-        # B. Imagen de la Pluma (Descarga Segura)
         with c2:
-            st.markdown("**Pluma de Modelos (Dinámicos y Estadísticos)**")
+            st.markdown("**Pluma de Modelos**")
             
-            with st.spinner("Descargando imagen segura..."):
-                img_data = fetch_secure_image(url_plume)
+            # Intentar descarga segura
+            img_data = fetch_secure_image(url_plume)
             
             if img_data:
-                st.image(img_data, caption="Pronóstico SST Niño 3.4 (Imagen Oficial IRI)", use_container_width=True)
+                # BLINDAJE: Try/Except específico para st.image
+                try:
+                    st.image(img_data, caption="Pronóstico SST Niño 3.4", use_container_width=True)
+                except Exception:
+                    # Si falla PIL (UnidentifiedImageError), mostramos el fallback sin romper la app
+                    st.error("No se pudo renderizar la imagen (Formato no reconocido).")
+                    st.markdown(f"🔗 [Ver imagen oficial en IRI]({url_plume})")
             else:
-                # Fallback: Link directo si falla la descarga segura
-                st.error("No se pudo renderizar la imagen.")
-                st.markdown(f"🔗 [Haga clic aquí para ver la imagen original en el IRI]({url_plume})")
+                st.warning("Imagen bloqueada por el servidor fuente.")
+                st.markdown(f"🔗 [Haga clic aquí para ver la imagen original]({url_plume})")
 
-    # --- TAB 3: GENERADOR PROPHET ---
+    # --- TAB 3: PROPHET ---
     with tab_gen:
-        st.markdown("#### Generador de Proyecciones Locales (Prophet)")
-        st.info("Entrena un modelo de IA (Prophet) con tus datos históricos para proyectar índices a futuro.")
-        
+        st.markdown("#### Generador Prophet")
         indices = {}
         if df_enso is not None:
-            # Mapeo de columnas config a nombres amigables
-            cols_map = {Config.ENSO_ONI_COL: 'ONI (Oceánico)', Config.SOI_COL: 'SOI (Atmosférico)', Config.IOD_COL: 'IOD (Dipolo Índico)'}
+            cols_map = {Config.ENSO_ONI_COL: 'ONI', Config.SOI_COL: 'SOI', Config.IOD_COL: 'IOD'}
             for col, name in cols_map.items():
                 if col in df_enso.columns:
-                    # Preparar dataframe con formato 'ds', 'y' requerido por Prophet
                     indices[name] = df_enso[[Config.DATE_COL, col]].rename(columns={Config.DATE_COL:'ds', col:'y'}).dropna()
 
-        if not indices:
-            st.warning("No hay datos de índices climáticos cargados para entrenar.")
-        else:
-            c_sel, c_opt = st.columns([1,1])
-            with c_sel:
-                sel_idx = st.selectbox("Seleccionar Índice:", list(indices.keys()))
-            with c_opt:
-                hor = st.slider("Horizonte de Pronóstico (Meses):", 6, 60, 24)
-            
-            if st.button("🚀 Generar Proyección"):
-                with st.spinner(f"Entrenando modelo para {sel_idx}..."):
-                    try:
-                        # Entrenamiento
-                        m = Prophet(yearly_seasonality=True, daily_seasonality=False, weekly_seasonality=False)
-                        m.fit(indices[sel_idx])
-                        
-                        # Predicción
-                        future = m.make_future_dataframe(periods=hor, freq='MS')
-                        forecast = m.predict(future)
-                        
-                        # Guardar en sesión (para usar en otros módulos si es necesario)
-                        st.session_state.setdefault('forecasted_regressors', {})[sel_idx] = forecast[['ds', 'yhat']]
-                        
-                        # Visualización
-                        fig = px.line(forecast, x='ds', y='yhat', title=f"Proyección: {sel_idx}")
-                        # Intervalos de confianza
-                        fig.add_scatter(x=forecast['ds'], y=forecast['yhat_upper'], mode='lines', line=dict(width=0), showlegend=False, name='Upper')
-                        fig.add_scatter(x=forecast['ds'], y=forecast['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(0,100,80,0.2)', showlegend=False, name='Intervalo Confianza')
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        st.success("✅ Proyección completada con éxito.")
-                        
-                    except Exception as e:
-                        st.error(f"Error durante el entrenamiento de Prophet: {e}")
+        if indices:
+            sel_idx = st.selectbox("Índice:", list(indices.keys()))
+            hor = st.slider("Meses:", 6, 60, 24)
+            if st.button("Generar"):
+                try:
+                    m = Prophet()
+                    m.fit(indices[sel_idx])
+                    fut = m.make_future_dataframe(periods=hor, freq='MS')
+                    fc = m.predict(fut)
+                    fig = px.line(fc, x='ds', y='yhat', title=f"Proyección {sel_idx}")
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error: {e}")
 # -----------------------------------------------------------------------------
 
 def display_trends_and_forecast_tab(**kwargs):
@@ -3003,6 +2963,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
