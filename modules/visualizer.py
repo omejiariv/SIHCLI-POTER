@@ -2733,6 +2733,10 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
             # 1. Unir Observado con Mapeo (para saber qué lat/lon satelital le toca)
             df_merged = pd.merge(df_obs, df_map, on=Config.STATION_NAME_COL)
             
+            # 1b. Agregar coordenadas REALES de la estación (Corrección solicitada)
+            # unique_locs ya contiene ['station_name', 'latitude', 'longitude'] originales
+            df_merged = pd.merge(df_merged, unique_locs, on=Config.STATION_NAME_COL, how='left')
+
             # 2. Unir con Datos Satelitales (usando Fecha + Lat/Lon Satélite)
             # Renombramos columas del satélite para que coincidan con el mapeo
             df_final = pd.merge(
@@ -2787,8 +2791,8 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
             # TAB 2: MAPA (Promedio del periodo)
             with tab_mapa:
                 st.markdown("**Comparativa Espacial (Promedio del Periodo Seleccionado)**")
-                # Agregamos por ubicación (promedio de toda la serie)
-                map_agg = df_final.groupby([Config.STATION_NAME_COL, 'sat_lat', 'sat_lon'])[['ppt_sat', Config.PRECIPITATION_COL]].mean().reset_index()
+                # Agregamos por ubicación REAL y SATELITAL
+                map_agg = df_final.groupby([Config.STATION_NAME_COL, 'latitude', 'longitude', 'sat_lat', 'sat_lon'])[['ppt_sat', Config.PRECIPITATION_COL]].mean().reset_index()
                 
                 # Intentar interpolar para un mapa de contorno (Background)
                 try:
@@ -2797,7 +2801,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         map_agg['sat_lon'].min():map_agg['sat_lon'].max():100j,
                         map_agg['sat_lat'].min():map_agg['sat_lat'].max():100j
                     ]
-                    # Interpolar Satélite
+                    # Interpolar Satélite (Usamos coord satélite para el fondo)
                     grid_z = griddata(
                         (map_agg['sat_lon'], map_agg['sat_lat']), 
                         map_agg['ppt_sat'], 
@@ -2811,9 +2815,9 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:], 
                         colorscale='Blues', opacity=0.6, showscale=False, name='Satélite (Interpolado)'
                     ))
-                    # Capa Puntos (Estaciones)
+                    # Capa Puntos (Estaciones) - AHORA USANDO COORDENADAS REALES
                     fig_map.add_trace(go.Scatter(
-                        x=map_agg['sat_lon'], y=map_agg['sat_lat'], 
+                        x=map_agg['longitude'], y=map_agg['latitude'], 
                         mode='markers', 
                         marker=dict(
                             size=10, 
@@ -2823,15 +2827,15 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                             line=dict(width=1, color='black')
                         ),
                         text=map_agg[Config.STATION_NAME_COL],
-                        name='Estaciones (Color=Obs)'
+                        name='Estaciones (Posición Real)'
                     ))
-                    fig_map.update_layout(title="Fondo: Satélite | Puntos: Estaciones", height=500)
+                    fig_map.update_layout(title="Fondo: Satélite | Puntos: Estaciones (Posición Real)", height=500)
                     st.plotly_chart(fig_map, use_container_width=True)
                 
                 except Exception as e:
                     st.warning(f"No se pudo generar la interpolación del mapa: {e}")
-                    # Fallback a mapa simple
-                    st.map(map_agg[['sat_lat', 'sat_lon']].rename(columns={'sat_lat':'latitude', 'sat_lon':'longitude'}))
+                    # Fallback a mapa simple con coordenadas reales
+                    st.map(map_agg[['latitude', 'longitude']])
 
             # TAB 3: DATOS
             with tab_datos:
