@@ -1256,10 +1256,17 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 
                 with st.expander("ℹ️ Metodología: Balance Hídrico de Turc"):
                     st.markdown("""
-                    **Fórmula de Turc:** Estima la escorrentía anual media ($Q$) basándose en la precipitación ($P$) y la temperatura media ($T$).
-                    $$ E = \\frac{P}{\\sqrt{0.9 + \\frac{P^2}{L(T)^2}}} $$
-                    Donde $L(T)$ es una función de la temperatura. El caudal $Q = P - E$.
-                    Este método es ampliamente utilizado para balances de largo plazo en cuencas con datos limitados.
+                    * Balance Hídrico de Turc:** Método empírico para estimar la escorrentía media anual y la evapotranspiración real en función de la lluvia y la temperatura.
+                    * Fórmula de Turc:** Estima la escorrentía anual media ($Q$) basándose en la precipitación ($P$) y la temperatura media ($T$).
+                    * Cálculo:* Utiliza la relación $E = P / \sqrt{0.9 + (P/L)^2}$, $L(T)$ es función de la temperatura ($L(T) = 300 + 25T + 0.05T^3$).
+                    Donde $L(T)$ es una función de la temperatura. 
+                    El caudal $Q = P - E$.
+
+                    Importancia:* Permite evaluar la disponibilidad hídrica anual de una cuenca con datos climáticos mínimos (P y T).
+                    Interpretación:* Estima qué fracción de la lluvia se "pierde" por evaporación; el remanente es el caudal disponible teórico a largo plazo.
+                    Aplicaciones:* Ampliamente utilizado para balances de largo plazo en cuencas con datos limitados.
+                    Estudios preliminares de oferta hídrica, validación de modelos complejos y planificación de recursos hídricos a escala regional.
+                    Bibliografía Clave:** Turc, L. (1954). *Le bilan d'eau des sols: relations entre les précipitations, l'évaporation et l'écoulement*. Annales Agronomiques.
                     """)
 
                 # C. Índices Climáticos (Recuperada Caja de Interpretación)
@@ -1289,7 +1296,14 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     fig_f.update_traces(fill='tozeroy')
                     st.plotly_chart(fig_f, use_container_width=True)
                     with st.expander("ℹ️ ¿Qué es la Curva de Duración?"):
-                        st.write("Representa el porcentaje de tiempo que un caudal determinado es igualado o excedido. Fundamental para concesiones.")
+                        st.markdown("""
+                        * Curva de Duración de Caudales (FDC): Representa el porcentaje de tiempo que un caudal determinado es igualado o excedido durante un periodo histórico.
+                        * Importancia: Caracteriza la variabilidad hidrológica completa y la "memoria" de la cuenca sin considerar la secuencia cronológica.
+                        * Interpretación: Una pendiente **suave** indica un caudal base estable y alta regulación (acuíferos); una pendiente **pronunciada** señala un régimen torrencial con respuesta rápida a lluvias.
+                        * Aplicaciones: Indispensable para diseño de hidroeléctricas, concesiones de agua, estudios de dilución de contaminantes y caudal ecológico.
+                         * Cálculo: Se ordenan los caudales (diarios o mensuales) de mayor a menor magnitud y se grafican contra su frecuencia acumulada de excedencia.                       
+                        * Bibliografía Clave:** Vogel, R. M., & Fennessey, N. M. (1994). *Flow-duration curves. I: New interpretation and confidence intervals*. ASCE.
+                        """)                        
 
                 hyp = calculate_hypsometric_curve(res['gdf_cuenca'])
                 if hyp:
@@ -2832,6 +2846,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
