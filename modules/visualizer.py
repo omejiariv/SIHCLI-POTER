@@ -994,21 +994,21 @@ def display_satellite_imagery_tab(gdf_filtered):
 def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
     """
     Módulo Completo de Análisis Espacial e Hidrológico.
-    Integra: Interpolación Regional, Comparación, Balance Hídrico, Curvas FDC/Hipsométricas y Popups Ricos.
+    Incluye: Interpolación Regional, Comparación, Balance Hídrico, Curvas FDC/Hipsométricas y Popups Ricos.
     """
     st.subheader("🌍 Superficies de Interpolación y Análisis Hidrológico")
     
+    # Control de Modo
     mode = st.radio("Modo de Análisis:", ["Regional (Comparación)", "Por Cuenca (Detallado)"], horizontal=True)
 
-    # --- FUNCIONES AUXILIARES INTERNAS ---
-    
+    # --- LÓGICA DE INTERPOLACIÓN ROBUSTA ---
     def run_interp(df_puntos, metodo, bounds_box):
-        """Genera la malla de interpolación."""
+        """Genera la malla de interpolación (gx, gy, gz)."""
         try:
-            # Grid 100x100
+            # Grid denso (100x100)
             gx, gy = np.mgrid[bounds_box[0]:bounds_box[1]:100j, bounds_box[2]:bounds_box[3]:100j]
             
-            # Limpiar duplicados espaciales
+            # Limpiar coordenadas duplicadas para evitar errores de matriz singular en RBF
             df_unique = df_puntos.drop_duplicates(subset=['longitude', 'latitude'])
             pts = df_unique[['longitude', 'latitude']].values
             vals = df_unique[Config.PRECIPITATION_COL].values
@@ -1016,42 +1016,45 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             if len(pts) < 3: return None, None, None
 
             if "Kriging" in metodo or "RBF" in metodo:
-                # Rbf (Thin Plate Spline) extrapola bien y es suave (Cubre huecos)
+                # Rbf 'thin_plate' es excelente para topografía y lluvia (suave y extrapola bien para llenar huecos)
                 rbf = Rbf(pts[:,0], pts[:,1], vals, function='thin_plate')
                 gz = rbf(gx, gy)
             else:
-                # IDW / Spline (Scipy griddata)
+                # IDW / Spline (Scipy griddata) - Puede dejar huecos fuera del Convex Hull
                 method_scipy = 'cubic' if 'Spline' in metodo else 'linear'
                 gz = griddata(pts, vals, (gx, gy), method=method_scipy)
+                
             return gx, gy, gz
         except Exception as e:
-            st.error(f"Error Interpolación: {e}")
+            print(f"Error Interpolación: {e}")
             return None, None, None
 
+    # --- LÓGICA DE CÁLCULO DE LLUVIA ANUAL REAL ---
     def calcular_promedios_reales(df_datos):
-        """Calcula Ppt Anual sumando solo años completos (>10 meses de datos)."""
+        """Calcula Ppt Anual sumando solo años completos (>10 meses)."""
         if df_datos.empty: return pd.DataFrame()
         
-        # 1. Contar registros por año
+        # 1. Contar registros por año/estación
         conteo = df_datos[df_datos[Config.PRECIPITATION_COL] >= 0].groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).size()
-        # 2. Años válidos (>= 10 meses)
+        # 2. Identificar años válidos (ej. >= 10 meses de datos)
         anos_validos = conteo[conteo >= 10].index
         
-        if anos_validos.empty: return pd.DataFrame()
-
-        # 3. Filtrar y Sumar
+        # 3. Filtrar datos originales
         df_filtrado = df_datos.set_index([Config.STATION_NAME_COL, Config.YEAR_COL]).loc[anos_validos].reset_index()
-        suma_anual = df_filtrado.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
         
-        # 4. Promedio Multianual
-        return suma_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+        # 4. Suma Anual -> Promedio Multianual
+        suma_anual = df_filtrado.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
+        promedio_multianual = suma_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
+        
+        return promedio_multianual
 
     # ==========================================================================
     # MODO 1: REGIONAL (COMPARACIÓN)
     # ==========================================================================
     if mode == "Regional (Comparación)":
         st.markdown("#### 🆚 Comparación de Periodos Climáticos")
-        
+        st.info("Visualice cambios en el patrón de lluvias entre dos periodos.")
+
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("###### Periodo 1 (Referencia)")
@@ -1062,84 +1065,103 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             r2 = st.slider("Rango P2:", 1980, 2024, (2010, 2020), key="r2")
             m2 = st.selectbox("Método P2:", ["Kriging (RBF)", "IDW (Lineal)", "Spline"], key="m2")
 
+        # Botón de cálculo con PERSISTENCIA
         if st.button("🚀 Generar Comparación"):
-            st.session_state['regional_ready'] = True
-            st.session_state['reg_params'] = {'r1':r1, 'm1':m1, 'r2':r2, 'm2':m2}
+            st.session_state['regional_done'] = True
+            st.session_state['reg_params'] = {'r1': r1, 'm1': m1, 'r2': r2, 'm2': m2}
 
-        if st.session_state.get('regional_ready'):
+        if st.session_state.get('regional_done'):
             p = st.session_state['reg_params']
             
             def plot_panel(rng, meth, col, tag):
+                # Filtrar
                 mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
                 df_sub = df_long[mask]
+                
+                # Calcular Promedios Reales
                 df_avg = calcular_promedios_reales(df_sub)
                 
                 if df_avg.empty:
-                    col.warning(f"Sin datos suficientes para {rng}")
+                    col.warning(f"Sin datos válidos para {rng}")
                     return
 
-                # Merge con estaciones
+                # Unir con geometría
                 df_m = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
+                
+                # Datos para Popups (conteo años)
                 years_count = df_sub.groupby(Config.STATION_NAME_COL)[Config.YEAR_COL].nunique()
 
                 if len(df_m) > 2:
-                    bounds = [df_m.longitude.min()-0.1, df_m.longitude.max()+0.1, df_m.latitude.min()-0.1, df_m.latitude.max()+0.1]
+                    # Bounds con margen para que no quede apretado
+                    bounds = [
+                        df_m.longitude.min() - 0.1, df_m.longitude.max() + 0.1,
+                        df_m.latitude.min() - 0.1, df_m.latitude.max() + 0.1
+                    ]
+                    
+                    # Interpolar
                     gx, gy, gz = run_interp(df_m, meth, bounds)
                     
                     if gz is not None:
-                        # Plotly (Estático)
+                        # Mapa Plotly
                         fig = go.Figure(go.Contour(
-                            z=gz.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis', 
-                            colorbar=dict(title='mm/año', len=0.5), contours=dict(start=0, end=6000, size=200)
+                            z=gz.T, x=gx[:,0], y=gy[0,:], 
+                            colorscale='Viridis', 
+                            colorbar=dict(title='mm/año', len=0.5),
+                            contours=dict(start=0, end=5000, size=200) # Isoyetas fijas para comparar mejor
                         ))
+                        # Puntos más grandes y visibles
                         fig.add_trace(go.Scatter(
-                            x=df_m.longitude, y=df_m.latitude, mode='markers', 
-                            marker=dict(color='black', size=7, line=dict(width=1, color='white')), 
+                            x=df_m.longitude, y=df_m.latitude, mode='markers',
+                            marker=dict(color='black', size=7, line=dict(width=1, color='white')),
                             showlegend=False
                         ))
                         fig.update_layout(
-                            title=f"Ppt Media ({rng[0]}-{rng[1]})",
+                            title=f"Ppt Media Anual ({rng[0]}-{rng[1]})",
                             margin=dict(l=0, r=0, b=0, t=40),
                             height=400
                         )
                         col.plotly_chart(fig, use_container_width=True)
                         
-                        # Folium con Popups (Interactivo)
-                        with col.expander(f"🔎 Mapa Interactivo ({tag})", expanded=True):
-                            col.write(f"Visualización detallada del periodo {rng[0]}-{rng[1]}. Haga clic en los puntos para ver detalles.")
-                            
+                        # Mapa Interactivo (Folium) con Popups
+                        with col.expander(f"🔎 Ver Mapa Interactivo Detallado ({tag})", expanded=True):
+                            col.write(f"Mapa navegable con detalles por estación. Haga clic en los puntos.")
                             center_lat = (bounds[2] + bounds[3]) / 2
                             center_lon = (bounds[0] + bounds[1]) / 2
                             m = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB positron")
                             
                             for _, row in df_m.iterrows():
-                                nm = row[Config.STATION_NAME_COL]
-                                val = row[Config.PRECIPITATION_COL]
-                                ny = years_count.get(nm, 0)
-                                mun = row.get(Config.MUNICIPALITY_COL, 'N/A')
-                                alt = row.get(Config.ALTITUDE_COL, 'N/A')
+                                nombre = row[Config.STATION_NAME_COL]
+                                lluvia = row[Config.PRECIPITATION_COL]
+                                altura = row.get(Config.ALTITUDE_COL, 'N/A')
+                                muni = row.get(Config.MUNICIPALITY_COL, 'N/A')
+                                n_years = years_count.get(nombre, 0)
                                 
-                                html = f"""<div style='font-family:sans-serif;font-size:12px;min-width:180px'>
-                                <b>{nm}</b><br>Mun: {mun}<br>Alt: {alt}m<hr>
-                                Ppt: {val:.0f} mm<br>Años: {ny}</div>"""
-                                
-                                popup = folium.Popup(folium.IFrame(html, width=200, height=120), max_width=200)
+                                html = f"""
+                                <div style="font-family:sans-serif; font-size:13px; min-width:200px;">
+                                    <h5 style="margin:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:4px;">{nombre}</h5>
+                                    <div style="margin-top:5px;"><b>Mun:</b> {muni}<br><b>Alt:</b> {altura} m</div>
+                                    <div style="background-color:#f0f2f6; padding:5px; margin-top:5px; border-radius:4px;">
+                                        <b>Ppt Media:</b> {lluvia:,.0f} mm<br>
+                                        <b>Años Datos:</b> {n_years}
+                                    </div>
+                                </div>
+                                """
+                                popup = folium.Popup(folium.IFrame(html, width=220, height=160), max_width=220)
                                 folium.CircleMarker(
-                                    [row['latitude'], row['longitude']], radius=6, color='blue', fill=True, fill_color='cyan', fill_opacity=0.8,
-                                    popup=popup, tooltip=f"{nm}"
+                                    [row['latitude'], row['longitude']], radius=6, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9,
+                                    popup=popup, tooltip=f"{nombre}"
                                 ).add_to(m)
                             
-                            st_folium(m, height=300, use_container_width=True, key=f"map_fol_{tag}")
-
+                            st_folium(m, height=350, use_container_width=True, key=f"folium_comp_{tag}")
+            
             plot_panel(p['r1'], p['m1'], c1, "A")
             plot_panel(p['r2'], p['m2'], c2, "B")
             
-            # Nota Metodológica
             with st.expander("ℹ️ Nota Metodológica: Interpolación Espacial"):
                 st.markdown("""
-                **Métodos Utilizados:**
+                **Métodos de Interpolación:**
                 * **IDW (Distancia Inversa):** Asume influencia decreciente con la distancia. Útil para densidades altas.
-                * **Kriging/RBF (Radial Basis Function):** El método recomendado para terrenos montañosos. Genera superficies suaves y continuas (Thin Plate Spline), llenando huecos eficientemente.
+                * **Kriging/RBF (Radial Basis Function):** El método recomendado. Genera superficies suaves y continuas (Thin Plate Spline), llenando huecos eficientemente.
                 * **Spline:** Ajuste polinómico local.
                 """)
 
@@ -1167,10 +1189,10 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     sub = gdf_subcuencas[gdf_subcuencas[col_name].isin(sel_cuencas)]
                     geom_union = gpd.GeoDataFrame({'geometry': [sub.unary_union]}, crs=gdf_subcuencas.crs)
                     buf = geom_union.geometry.buffer(0.3).unary_union
-                    gdf_buffer = gpd.GeoDataFrame({'geometry': [buf]}, crs=gdf_stations.crs)
+                    gdf_buf = gpd.GeoDataFrame({'geometry': [buf]}, crs=gdf_stations.crs)
                     
                     # 2. Estaciones
-                    stns_zone = gpd.sjoin(gdf_stations, gdf_buffer, predicate='intersects')
+                    stns_zone = gpd.sjoin(gdf_stations, gdf_buf, predicate='intersects')
                     
                     if not stns_zone.empty:
                         mask = (df_long[Config.STATION_NAME_COL].isin(stns_zone[Config.STATION_NAME_COL].unique())) & \
@@ -1198,16 +1220,10 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             fdc = calculate_duration_curve(bs_ts, c_run, morph.get('area_km2', 100))
                             idx = calculate_climatic_indices(bs_ts, morph.get('alt_prom_m', 1500))
 
-                            # --- GUARDADO SEGURO EN SESIÓN ---
                             st.session_state['basin_res'] = {
-                                'ready': True,
-                                'gz': gz, 'gx': gx, 'gy': gy,
-                                'df_interp': df_interp,  
-                                'df_raw': df_raw,
-                                'gdf_cuenca': geom_union, 
-                                'gdf_buffer': gdf_buffer, 
-                                'bal': bal, 'morph': morph, 'fdc': fdc, 'idx': idx,
-                                'bounds': bounds, 'names': ", ".join(sel_cuencas)
+                                'ready': True, 'gz': gz, 'gx': gx, 'gy': gy, 'df_i': df_interp, 'df_r': df_raw,
+                                'gdf_c': geom_union, 'gdf_b': gdf_buf, 'bal': bal, 'morph': morph, 'fdc': fdc, 
+                                'idx': idx, 'bounds': bounds, 'names': ", ".join(sel_cuencas)
                             }
                         else: st.error("Insuficientes estaciones (<3) con datos válidos.")
                     else: st.error("Sin estaciones cercanas.")
@@ -1222,14 +1238,13 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:], colorscale='Blues', 
                     colorbar=dict(title='mm/año'), contours=dict(start=0, end=6000, size=250, showlabels=True)
                 ))
-                # Puntos más grandes
                 fig.add_trace(go.Scatter(
-                    x=res['df_interp'].longitude, y=res['df_interp'].latitude, 
+                    x=res['df_i'].longitude, y=res['df_i'].latitude, 
                     mode='markers+text', marker=dict(color='red', size=8, line=dict(width=1, color='white')),
-                    text=res['df_interp'][Config.STATION_NAME_COL], textposition="top center", name="Estaciones"
+                    text=res['df_i'][Config.STATION_NAME_COL], textposition="top center", name="Estaciones"
                 ))
                 try:
-                    g = res['gdf_cuenca'].geometry.iloc[0] 
+                    g = res['gdf_c'].geometry.iloc[0] 
                     if g.geom_type == 'Polygon': xs, ys = g.exterior.xy
                     else: xs, ys = g.geoms[0].exterior.xy
                     fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='black', width=3), name="Cuenca"))
@@ -1237,16 +1252,19 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 
                 fig.update_layout(height=500, margin=dict(l=0,r=0,b=0,t=30))
                 st.plotly_chart(fig, use_container_width=True)
+                
+                with st.expander("ℹ️ Nota sobre Interpolación"):
+                    st.write("Este mapa muestra la distribución espacial de la lluvia media anual interpolada a partir de las estaciones puntuales, usando un modelo matemático para estimar los valores en toda la cuenca.")
 
-                # B. Métricas (Restauradas TODAS: Pendiente, Perímetro)
+                # B. Métricas
                 st.markdown("---"); st.subheader("💧 Balance Hídrico y Morfometría")
                 b, m = res['bal'], res['morph']
                 
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Área", f"{m.get('area_km2', 0):.1f} km²")
-                c2.metric("Perímetro", f"{m.get('perimetro_km', 0):.1f} km") # Recuperado
+                c2.metric("Perímetro", f"{m.get('perimetro_km', 0):.1f} km")
                 c3.metric("Altitud Media", f"{m.get('alt_prom_m', 0):.0f} m")
-                c4.metric("Pendiente Media", f"{m.get('pendiente_prom', 0):.1f} %") # Recuperado
+                c4.metric("Pendiente Media", f"{m.get('pendiente_prom', 0):.1f} %")
                 
                 k1, k2, k3, k4 = st.columns(4)
                 k1.metric("Ppt Media (P)", f"{b.get('P',0):.0f} mm")
@@ -1256,83 +1274,79 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 
                 with st.expander("ℹ️ Metodología: Balance Hídrico de Turc"):
                     st.markdown("""
-                    * Balance Hídrico de Turc:** Método empírico para estimar la escorrentía media anual y la evapotranspiración real en función de la lluvia y la temperatura.
-                    * Fórmula de Turc:** Estima la escorrentía anual media ($Q$) basándose en la precipitación ($P$) y la temperatura media ($T$).
-                    * Cálculo:* Utiliza la relación $E = P / \sqrt{0.9 + (P/L)^2}$, $L(T)$ es función de la temperatura ($L(T) = 300 + 25T + 0.05T^3$).
-                    Donde $L(T)$ es una función de la temperatura. 
-                    El caudal $Q = P - E$.
-
-                    Importancia:* Permite evaluar la disponibilidad hídrica anual de una cuenca con datos climáticos mínimos (P y T).
-                    Interpretación:* Estima qué fracción de la lluvia se "pierde" por evaporación; el remanente es el caudal disponible teórico a largo plazo.
-                    Aplicaciones:* Ampliamente utilizado para balances de largo plazo en cuencas con datos limitados.
-                    Estudios preliminares de oferta hídrica, validación de modelos complejos y planificación de recursos hídricos a escala regional.
-                    Bibliografía Clave:** Turc, L. (1954). *Le bilan d'eau des sols: relations entre les précipitations, l'évaporation et l'écoulement*. Annales Agronomiques.
+                    **Fórmula de Turc:** Estima la escorrentía anual media ($Q$) basándose en la precipitación ($P$) y la temperatura media ($T$).
+                    $$ E = \\frac{P}{\\sqrt{0.9 + \\frac{P^2}{L(T)^2}}} $$
+                    Donde $L(T)$ es una función de la temperatura. El caudal $Q = P - E$.
+                    Este método es ampliamente utilizado para balances de largo plazo en cuencas con datos limitados.
                     """)
 
-                # C. Índices Climáticos (Recuperada Caja de Interpretación)
+                # C. Índices Climáticos
                 st.markdown("---"); st.subheader("🌡️ Índices Climáticos")
                 idx = res.get('idx', {})
                 i1, i2 = st.columns(2)
                 with i1: st.metric("Aridez (Martonne)", f"{idx.get('martonne_val',0):.1f}", delta=idx.get('martonne_class',''))
                 with i2: st.metric("Erosividad (Fournier)", f"{idx.get('fournier_val',0):.1f}", delta=idx.get('fournier_class',''))
                 
-                with st.expander("ℹ️ Interpretación de Índices Climáticos"):
+                with st.expander("ℹ️ Interpretación de Índices"):
                     st.markdown("""
-                    * **Índice de Martonne:** Clasifica el tipo de clima según su aridez.
-                        * **< 10:** Desértico (Déficit hídrico extremo).
-                        * **10 - 20:** Semiárido (Vegetación esteparia).
-                        * **20 - 30:** Subhúmedo (Transición).
-                        * **> 30:** Húmedo (Excedente hídrico).
-                    * **Índice de Fournier:** Indica la agresividad de la lluvia para causar erosión.
-                        * **< 60:** Muy Baja.
-                        * **60 - 90:** Moderada.
-                        * **> 120:** Muy Alta (Riesgo severo de erosión).
+                    * **Índice de Martonne:** Clasifica el clima según su grado de aridez. 
+                      * $<10$: Desértico | $10-20$: Semiárido | $>20$: Húmedo.
+                    * **Índice de Fournier:** Evalúa la agresividad de la lluvia y el potencial de erosión del suelo. 
+                      * Se basa en la relación entre la lluvia del mes más húmedo y la lluvia anual.
                     """)
 
-                # D. Curvas (FDC + Hipsométrica)
+                # D. Curvas FDC
                 if res.get('fdc'):
-                    st.markdown("---"); st.subheader("📉 Curva de Duración (FDC)")
-                    fig_f = px.line(res['fdc']['data'], x="Probabilidad Excedencia (%)", y="Caudal (m³/s)")
-                    fig_f.update_traces(fill='tozeroy')
-                    st.plotly_chart(fig_f, use_container_width=True)
+                    st.markdown("---"); st.subheader("📉 Curva de Duración de Caudales (FDC)")
+                    df_fdc = res['fdc']['data']
+                    f1, f2 = st.columns([3, 1])
+                    with f1:
+                        fig_f = px.line(df_fdc, x="Probabilidad Excedencia (%)", y="Caudal (m³/s)", title="Disponibilidad Hídrica")
+                        fig_f.update_traces(fill='tozeroy')
+                        st.plotly_chart(fig_f, use_container_width=True)
+                    with f2:
+                        st.markdown("**Ecuación:**")
+                        st.latex(res['fdc']['equation'].replace('P', 'P_{exc}'))
+                        st.caption(f"R²: {res['fdc']['r_squared']:.4f}")
+                    
                     with st.expander("ℹ️ ¿Qué es la Curva de Duración?"):
                         st.markdown("""
-                        * Curva de Duración de Caudales (FDC): Representa el porcentaje de tiempo que un caudal determinado es igualado o excedido durante un periodo histórico.
-                        * Importancia: Caracteriza la variabilidad hidrológica completa y la "memoria" de la cuenca sin considerar la secuencia cronológica.
-                        * Interpretación: Una pendiente **suave** indica un caudal base estable y alta regulación (acuíferos); una pendiente **pronunciada** señala un régimen torrencial con respuesta rápida a lluvias.
-                        * Aplicaciones: Indispensable para diseño de hidroeléctricas, concesiones de agua, estudios de dilución de contaminantes y caudal ecológico.
-                         * Cálculo: Se ordenan los caudales (diarios o mensuales) de mayor a menor magnitud y se grafican contra su frecuencia acumulada de excedencia.                       
-                        * Bibliografía Clave:** Vogel, R. M., & Fennessey, N. M. (1994). *Flow-duration curves. I: New interpretation and confidence intervals*. ASCE.
-                        """)                        
+                        La **Curva de Duración de Caudales (FDC)** muestra el porcentaje de tiempo que un caudal determinado es igualado o excedido.
+                        * **Q95 (95%):** Caudal ecológico o mínimo confiable.
+                        * **Q50 (50%):** Caudal mediano.
+                        * Es fundamental para el diseño de bocatomas y concesiones de agua.
+                        """)
 
-                hyp = calculate_hypsometric_curve(res['gdf_cuenca'])
+                # E. Curva Hipsométrica
+                hyp = calculate_hypsometric_curve(res['gdf_c'])
                 if hyp:
                     st.markdown("---"); st.subheader("⛰️ Curva Hipsométrica")
-                    fig_h = px.line(x=hyp['area_percent'], y=hyp['elevations'], labels={'x':'% Área', 'y':'Elevación'})
-                    fig_h.update_traces(fill='tozeroy', line_color='green')
-                    st.plotly_chart(fig_h, use_container_width=True)
+                    h1, h2 = st.columns([3, 1])
+                    with h1:
+                        fig_h = go.Figure()
+                        fig_h.add_trace(go.Scatter(x=hyp['area_percent'], y=hyp['elevations'], fill='tozeroy', line=dict(color='green'), name='Perfil'))
+                        st.plotly_chart(fig_h, use_container_width=True)
+                    with h2:
+                        if hyp.get('equation'): st.latex(hyp['equation'].replace('x', 'A'))
+                    
                     with st.expander("ℹ️ Interpretación Hipsométrica"):
                         st.markdown("""
-                        *Curva Hipsométrica:** Representa la distribución del área de una cuenca en función de su altura.
-                        Indica la etapa evolutiva de la cuenca (juventud, madurez o vejez) y su potencial erosivo.      
-                        *Bibliografía Clave:** Strahler, A. N. (1952). *Hypsometric (Area-Altitude) Analysis of Erosional Topography*. Bulletin of the Geological Society of America.
-                        La curvatura indica la "edad" geomorfológica de la cuenca y cuánto material queda por erosionar:
-                        *Curva Convexa (Juventud):** La línea se abomba hacia arriba. Indica una cuenca inestable con alto potencial erosivo y gran cantidad de material en las partes altas aún por remover. *(Integral Hipsométrica > 0.60)*.
-                        *Curva en "S" (Madurez):** La línea cruza el centro. Representa una cuenca en equilibrio, donde la erosión y el transporte de sedimentos están balanceados. *(Integral Hipsométrica 0.35 - 0.60)*.
-                        *Curva Cóncava (Vejez):** La línea se hunde hacia abajo. Indica una cuenca estabilizada, erosionada y con predominio de sedimentación (llanuras aluviales). *(Integral Hipsométrica < 0.35)*.
-                        **Nota:Las cuencas con curvas muy convexas suelen responder más rápido a las tormentas (picos de caudal agresivos) debido a sus pendientes pronunciadas.
+                        Representa la distribución del área de la cuenca en función de la altitud.
+                        * **Curva Convexa (Joven):** Fase de erosión activa.
+                        * **Curva Cóncava (Vieja):** Fase de sedimentación / estabilización.
+                        * **Curva en 'S' (Madura):** Equilibrio.
                         """)
-  
-                # E. Mapa Contexto (Popup Corregido)
+
+                # F. Mapa Contexto
                 st.markdown("---"); st.subheader("📍 Contexto Espacial")
                 bnd = res['bounds']
                 m_ctx = folium.Map([(bnd[2]+bnd[3])/2, (bnd[0]+bnd[1])/2], zoom_start=10, tiles="CartoDB positron")
                 
-                folium.GeoJson(res['gdf_cuenca'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
-                folium.GeoJson(res['gdf_buffer'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
+                folium.GeoJson(res['gdf_c'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
+                folium.GeoJson(res['gdf_b'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
                 
-                df_raw_ctx = res['df_raw']
-                for _, row in res['df_interp'].iterrows():
+                df_raw_ctx = res['df_r']
+                for _, row in res['df_i'].iterrows():
                     nm = row[Config.STATION_NAME_COL]
                     st_d = df_raw_ctx[df_raw_ctx[Config.STATION_NAME_COL] == nm]
                     val = row[Config.PRECIPITATION_COL]
@@ -2846,6 +2860,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
