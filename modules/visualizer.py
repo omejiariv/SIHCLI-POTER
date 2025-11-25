@@ -1080,7 +1080,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         # Puntos más grandes y visibles
                         fig.add_trace(go.Scatter(
                             x=df_m.longitude, y=df_m.latitude, mode='markers', 
-                            marker=dict(color='black', size=7, line=dict(width=1, color='white')), 
+                            marker=dict(color='black', size=4, line=dict(width=1, color='white')), 
                             showlegend=False
                         ))
                         fig.update_layout(title=f"Ppt Media ({rng[0]}-{rng[1]})", margin=dict(l=0,r=0,b=0,t=30), height=350)
@@ -2780,6 +2780,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
