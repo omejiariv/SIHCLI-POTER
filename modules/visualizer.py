@@ -1115,7 +1115,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                                 
                                 # Marcador más grande (radius=6)
                                 folium.CircleMarker(
-                                    [row['latitude'], row['longitude']], radius=6, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9,
+                                    [row['latitude'], row['longitude']], radius=4, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9,
                                     popup=popup, tooltip=f"{nm}"
                                 ).add_to(m)
                             
@@ -2780,6 +2780,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
