@@ -1105,7 +1105,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                                 <div style="font-family:sans-serif; font-size:13px; min-width:200px;">
                                     <h5 style="margin:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:4px;">{nm}</h5>
                                     <div style="margin-top:5px;"><b>Mun:</b> {mun}<br><b>Alt:</b> {alt} m</div>
-                                    <div style="background-color:#e8f4f8; padding:5px; margin-top:5px; border-radius:4px;">
+                                    <div style="background-color:#e8f4f8; padding:5px; margin-top:5px; border-radius:3px;">
                                         <b>Ppt Media:</b> {val:,.0f} mm<br>
                                         <b>Años Datos:</b> {ny}
                                     </div>
@@ -1115,11 +1115,11 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                                 
                                 # Marcador más grande (radius=6)
                                 folium.CircleMarker(
-                                    [row['latitude'], row['longitude']], radius=4, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9,
+                                    [row['latitude'], row['longitude']], radius=3, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9,
                                     popup=popup, tooltip=f"{nm}"
                                 ).add_to(m)
                             
-                            st_folium(m, height=350, use_container_width=True, key=f"map_fol_{tag}")
+                            st_folium(m, height=300, use_container_width=True, key=f"map_fol_{tag}")
 
             plot_panel(p['r1'], p['m1'], c1, "A")
             plot_panel(p['r2'], p['m2'], c2, "B")
@@ -2780,6 +2780,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
