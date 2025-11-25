@@ -1023,7 +1023,6 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 # IDW / Spline (Scipy griddata) - Puede dejar huecos fuera del Convex Hull
                 method_scipy = 'cubic' if 'Spline' in metodo else 'linear'
                 gz = griddata(pts, vals, (gx, gy), method=method_scipy)
-                
             return gx, gy, gz
         except Exception as e:
             print(f"Error Interpolación: {e}")
@@ -1220,10 +1219,13 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             fdc = calculate_duration_curve(bs_ts, c_run, morph.get('area_km2', 100))
                             idx = calculate_climatic_indices(bs_ts, morph.get('alt_prom_m', 1500))
 
+                            # --- GUARDADO SEGURO EN SESIÓN (CORREGIDO) ---
                             st.session_state['basin_res'] = {
-                                'ready': True, 'gz': gz, 'gx': gx, 'gy': gy, 'df_i': df_interp, 'df_r': df_raw,
-                                'gdf_c': geom_union, 'gdf_b': gdf_buf, 'bal': bal, 'morph': morph, 'fdc': fdc, 
-                                'idx': idx, 'bounds': bounds, 'names': ", ".join(sel_cuencas)
+                                'ready': True, 'gz': gz, 'gx': gx, 'gy': gy,
+                                'df_interp': df_interp, 'df_raw': df_raw,
+                                'gdf_cuenca': geom_union, 'gdf_buffer': gdf_buffer, 
+                                'bal': bal, 'morph': morph, 'fdc': fdc, 'idx': idx,
+                                'bounds': bounds, 'names': ", ".join(sel_cuencas)
                             }
                         else: st.error("Insuficientes estaciones (<3) con datos válidos.")
                     else: st.error("Sin estaciones cercanas.")
@@ -1239,12 +1241,12 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     colorbar=dict(title='mm/año'), contours=dict(start=0, end=6000, size=250, showlabels=True)
                 ))
                 fig.add_trace(go.Scatter(
-                    x=res['df_i'].longitude, y=res['df_i'].latitude, 
+                    x=res['df_interp'].longitude, y=res['df_interp'].latitude, 
                     mode='markers+text', marker=dict(color='red', size=8, line=dict(width=1, color='white')),
-                    text=res['df_i'][Config.STATION_NAME_COL], textposition="top center", name="Estaciones"
+                    text=res['df_interp'][Config.STATION_NAME_COL], textposition="top center", name="Estaciones"
                 ))
                 try:
-                    g = res['gdf_c'].geometry.iloc[0] 
+                    g = res['gdf_cuenca'].geometry.iloc[0] 
                     if g.geom_type == 'Polygon': xs, ys = g.exterior.xy
                     else: xs, ys = g.geoms[0].exterior.xy
                     fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='black', width=3), name="Cuenca"))
@@ -1318,7 +1320,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         """)
 
                 # E. Curva Hipsométrica
-                hyp = calculate_hypsometric_curve(res['gdf_c'])
+                hyp = calculate_hypsometric_curve(res['gdf_cuenca'])
                 if hyp:
                     st.markdown("---"); st.subheader("⛰️ Curva Hipsométrica")
                     h1, h2 = st.columns([3, 1])
@@ -1342,11 +1344,11 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 bnd = res['bounds']
                 m_ctx = folium.Map([(bnd[2]+bnd[3])/2, (bnd[0]+bnd[1])/2], zoom_start=10, tiles="CartoDB positron")
                 
-                folium.GeoJson(res['gdf_c'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
-                folium.GeoJson(res['gdf_b'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
+                folium.GeoJson(res['gdf_cuenca'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
+                folium.GeoJson(res['gdf_buffer'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
                 
-                df_raw_ctx = res['df_r']
-                for _, row in res['df_i'].iterrows():
+                df_raw_ctx = res['df_raw']
+                for _, row in res['df_interp'].iterrows():
                     nm = row[Config.STATION_NAME_COL]
                     st_d = df_raw_ctx[df_raw_ctx[Config.STATION_NAME_COL] == nm]
                     val = row[Config.PRECIPITATION_COL]
@@ -2860,6 +2862,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
