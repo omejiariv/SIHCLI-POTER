@@ -1298,8 +1298,17 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     fig_h.update_traces(fill='tozeroy', line_color='green')
                     st.plotly_chart(fig_h, use_container_width=True)
                     with st.expander("ℹ️ Interpretación Hipsométrica"):
-                        st.write("Curva Hipsométrica: Representa la distribución del área de una cuenca en función de su altura. Indica la etapa evolutiva de la cuenca (juventud, madurez o vejez) y su potencial erosivo, Ref: Strahler, A.N.(1952). Hypsometric Analysis of Erosional Topography. Bulletin of the Geological Society of America")
-
+                        st.markdown("""
+                        *Curva Hipsométrica:** Representa la distribución del área de una cuenca en función de su altura.
+                        Indica la etapa evolutiva de la cuenca (juventud, madurez o vejez) y su potencial erosivo.      
+                        *Bibliografía Clave:** Strahler, A. N. (1952). *Hypsometric (Area-Altitude) Analysis of Erosional Topography*. Bulletin of the Geological Society of America.
+                        La curvatura indica la "edad" geomorfológica de la cuenca y cuánto material queda por erosionar:
+                        *Curva Convexa (Juventud):** La línea se abomba hacia arriba. Indica una cuenca inestable con alto potencial erosivo y gran cantidad de material en las partes altas aún por remover. *(Integral Hipsométrica > 0.60)*.
+                        *Curva en "S" (Madurez):** La línea cruza el centro. Representa una cuenca en equilibrio, donde la erosión y el transporte de sedimentos están balanceados. *(Integral Hipsométrica 0.35 - 0.60)*.
+                        *Curva Cóncava (Vejez):** La línea se hunde hacia abajo. Indica una cuenca estabilizada, erosionada y con predominio de sedimentación (llanuras aluviales). *(Integral Hipsométrica < 0.35)*.
+                        **Nota:Las cuencas con curvas muy convexas suelen responder más rápido a las tormentas (picos de caudal agresivos) debido a sus pendientes pronunciadas.
+                        """)
+  
                 # E. Mapa Contexto (Popup Corregido)
                 st.markdown("---"); st.subheader("📍 Contexto Espacial")
                 bnd = res['bounds']
@@ -2823,6 +2832,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
