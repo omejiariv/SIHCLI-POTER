@@ -1298,11 +1298,12 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     fig_h.update_traces(fill='tozeroy', line_color='green')
                     st.plotly_chart(fig_h, use_container_width=True)
                     with st.expander("ℹ️ Interpretación Hipsométrica"):
-                        st.write("Curva Hipsométrica: Representa la distribución del área de una cuenca en función de su altura. 
-                        Para su cálculo, se grafica la altitud (H) contra el porcentaje de área acumulada (A) que queda por encima de cada altura correspondiente. 
-                        Importancia: Indica la etapa evolutiva de la cuenca (juventud, madurez o vejez) y su potencial erosivo. 
-                        Aplicaciones: Fundamental en hidrología para comparar cuencas, predecir escurrimientos y analizar la estabilidad geomorfológica. 
-                        Bibliografía Clave: Strahler, A. N. (1952). Hypsometric (Area-Altitude) Analysis of Erosional Topography. Bulletin of the Geological Society of America. ")
+                        st.write("Curva Hipsométrica: Representa la distribución del área de una cuenca en función de su altura,
+                        Para su cálculo, se grafica la altitud (H) contra el porcentaje de área acumulada (A) que queda por encima de cada altura correspondiente,
+                        Importancia: Indica la etapa evolutiva de la cuenca (juventud, madurez o vejez) y su potencial erosivo,
+                        Aplicaciones: Fundamental en hidrología para comparar cuencas, predecir escurrimientos y analizar la estabilidad geomorfológica,
+                        Bibliografía Clave: Strahler, A. N. (1952). Hypsometric (Area-Altitude) Analysis of Erosional Topography. Bulletin of the Geological Society of America
+                        ")
 
                 # E. Mapa Contexto (Popup Corregido)
                 st.markdown("---"); st.subheader("📍 Contexto Espacial")
@@ -2827,6 +2828,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
