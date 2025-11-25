@@ -1067,7 +1067,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
         # Botón de cálculo con PERSISTENCIA
         if st.button("🚀 Generar Comparación"):
             st.session_state['regional_done'] = True
-            st.session_state['reg_params'] = {'r1': r1, 'm1': m1, 'r2': r2, 'm2': m2}
+            st.session_state['reg_params'] = {'r1':r1, 'm1':m1, 'r2':r2, 'm2':m2}
 
         if st.session_state.get('regional_done'):
             p = st.session_state['reg_params']
@@ -1084,20 +1084,12 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     col.warning(f"Sin datos válidos para {rng}")
                     return
 
-                # Unir con geometría
+                # Merge con estaciones
                 df_m = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
-                
-                # Datos para Popups (conteo años)
                 years_count = df_sub.groupby(Config.STATION_NAME_COL)[Config.YEAR_COL].nunique()
 
                 if len(df_m) > 2:
-                    # Bounds con margen para que no quede apretado
-                    bounds = [
-                        df_m.longitude.min() - 0.1, df_m.longitude.max() + 0.1,
-                        df_m.latitude.min() - 0.1, df_m.latitude.max() + 0.1
-                    ]
-                    
-                    # Interpolar
+                    bounds = [df_m.longitude.min()-0.1, df_m.longitude.max()+0.1, df_m.latitude.min()-0.1, df_m.latitude.max()+0.1]
                     gx, gy, gz = run_interp(df_m, meth, bounds)
                     
                     if gz is not None:
@@ -1106,14 +1098,20 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             z=gz.T, x=gx[:,0], y=gy[0,:], 
                             colorscale='Viridis', 
                             colorbar=dict(title='mm/año', len=0.5),
-                            contours=dict(start=0, end=5000, size=200) # Isoyetas fijas para comparar mejor
+                            contours=dict(start=0, end=5000, size=200)
                         ))
-                        # Puntos más grandes y visibles
+                        
+                        # Puntos con HOVER TOOLTIP (Tu Solicitud)
                         fig.add_trace(go.Scatter(
                             x=df_m.longitude, y=df_m.latitude, mode='markers',
                             marker=dict(color='black', size=7, line=dict(width=1, color='white')),
+                            # --- AQUÍ ESTÁ EL CAMBIO PARA EL HOVER ---
+                            text=df_m.apply(lambda x: f"<b>{x[Config.STATION_NAME_COL]}</b><br>Ppt: {x[Config.PRECIPITATION_COL]:.0f} mm", axis=1),
+                            hoverinfo='text', # Solo muestra nuestro texto formateado
+                            # ------------------------------------------
                             showlegend=False
                         ))
+                        
                         fig.update_layout(
                             title=f"Ppt Media Anual ({rng[0]}-{rng[1]})",
                             margin=dict(l=0, r=0, b=0, t=40),
@@ -2862,6 +2860,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
