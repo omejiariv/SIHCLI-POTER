@@ -1186,10 +1186,10 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     sub = gdf_subcuencas[gdf_subcuencas[col_name].isin(sel_cuencas)]
                     geom_union = gpd.GeoDataFrame({'geometry': [sub.unary_union]}, crs=gdf_subcuencas.crs)
                     buf = geom_union.geometry.buffer(0.3).unary_union
-                    gdf_buf = gpd.GeoDataFrame({'geometry': [buf]}, crs=gdf_stations.crs)
+                    gdf_buffer = gpd.GeoDataFrame({'geometry': [buf]}, crs=gdf_stations.crs)
                     
                     # 2. Estaciones
-                    stns_zone = gpd.sjoin(gdf_stations, gdf_buf, predicate='intersects')
+                    stns_zone = gpd.sjoin(gdf_stations, gdf_buffer, predicate='intersects')
                     
                     if not stns_zone.empty:
                         mask = (df_long[Config.STATION_NAME_COL].isin(stns_zone[Config.STATION_NAME_COL].unique())) & \
@@ -2884,6 +2884,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
