@@ -1348,18 +1348,42 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 df_raw_ctx = res['df_raw']
                 for _, row in res['df_interp'].iterrows():
                     nm = row[Config.STATION_NAME_COL]
+                    
                     st_d = df_raw_ctx[df_raw_ctx[Config.STATION_NAME_COL] == nm]
                     val = row[Config.PRECIPITATION_COL]
                     n_y = st_d[Config.YEAR_COL].nunique()
                     mun = row.get(Config.MUNICIPALITY_COL, 'N/A')
                     alt = row.get(Config.ALTITUDE_COL, 'N/A')
                     
-                    html = f"""<div style='font-family:sans-serif;font-size:13px;min-width:180px'>
-                    <b>{nm}</b><br>Mun: {mun}<br>Alt: {alt}m<hr>
-                    Ppt: {val:.0f} mm<br>Años: {n_y}</div>"""
+                    html = f"""
+                    <div style='font-family:sans-serif;font-size:13px;min-width:180px'>
+                        <h5 style='margin:0; color:#c0392b; border-bottom:1px solid #ccc; padding-bottom:4px'>{nm}</h5>
+                        <div style="margin-top:5px;">
+                            <b>Mun:</b> {mun}<br>
+                            <b>Alt:</b> {alt} m
+                        </div>
+                        <div style='background-color:#f8f9fa; padding:5px; margin-top:5px; border-radius:4px'>
+                            <b>Ppt Media:</b> {val:,.0f} mm<br>
+                            <b>Años Datos:</b> {n_y}
+                        </div>
+                    </div>
+                    """
                     
-                    popup = folium.Popup(folium.IFrame(html, width=200, height=140), max_width=200)
-                    folium.CircleMarker([row['latitude'], row['longitude']], radius=6, color='darkred', fill=True, popup=popup).add_to(m_ctx)
+                    # Crear IFrame y Popup
+                    iframe = folium.IFrame(html, width=220, height=150)
+                    popup = folium.Popup(iframe, max_width=220)
+                    
+                    # Marcador (Rojo para diferenciar del regional)
+                    folium.CircleMarker(
+                        [row['latitude'], row['longitude']], 
+                        radius=6, 
+                        color='darkred', 
+                        fill=True, 
+                        fill_color='red', 
+                        fill_opacity=0.9, 
+                        popup=popup,
+                        tooltip=f"{nm} ({val:.0f} mm)"
+                    ).add_to(m_ctx)
                 
                 st_folium(m_ctx, height=500, width="100%")
                 
@@ -2860,6 +2884,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
