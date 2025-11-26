@@ -78,9 +78,9 @@ def create_sidebar(gdf_stations, df_long):
         available_stations = sorted(gdf_filtered_base[Config.STATION_NAME_COL].astype(str).unique())
         
         with st.expander(f"Estaciones ({len(available_stations)} disp.)", expanded=True):
-            select_all = st.checkbox("Seleccionar Todas las visibles")
+            select_all_stations = st.checkbox("Seleccionar Todas las visibles", key="sel_all_st")
             
-            if select_all:
+            if select_all_stations:
                 default_stations = available_stations
                 if len(available_stations) > 50:
                     st.caption("⚠️ Muchas estaciones seleccionadas. El rendimiento puede variar.")
@@ -105,7 +105,7 @@ def create_sidebar(gdf_stations, df_long):
             max_y = int(df_long[Config.YEAR_COL].max())
             year_range = st.slider("Años:", min_y, max_y, (max_y-10, max_y))
         except:
-            year_range = (1970, 2020)
+            year_range = (2000, 2020)
 
         # --- 4. FILTRO DE MESES (MEJORADO CON CHECKBOX) ---
         st.markdown("### 📆 Análisis Estacional")
@@ -166,4 +166,3 @@ def create_sidebar(gdf_stations, df_long):
         # RETORNO ACTUALIZADO: Incluye selected_months_nums al final
         return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
                 "Histórico", selected_regions, selected_municipios, selected_months_nums, year_range)
-
