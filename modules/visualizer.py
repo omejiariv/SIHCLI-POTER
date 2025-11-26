@@ -1207,6 +1207,13 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         
                         # 3. Promedios Reales
                         df_ppt = calcular_promedios_reales(df_raw)
+                        
+                        # --- CORRECCIÓN DE ERROR ---
+                        # Si 'nom_est' quedó como índice tras la agrupación, lo reseteamos para que sea columna accesible
+                        if Config.STATION_NAME_COL not in df_ppt.columns:
+                            df_ppt = df_ppt.reset_index()
+                        # ---------------------------
+
                         df_interp = pd.merge(df_ppt, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
                         
                         if len(df_interp) >= 3:
@@ -2893,6 +2900,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
