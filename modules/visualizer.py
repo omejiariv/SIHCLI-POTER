@@ -2136,6 +2136,31 @@ def display_enso_tab(**kwargs):
 
 def display_life_zones_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌱 Zonas de Vida (Sistema Holdridge)")
+
+# --- Zonas de Vida (Holdridge) ---
+    with st.expander("📚 Conceptos, Metodología e Importancia (Sistema Holdridge)"):
+        st.markdown("""
+        ### 🌿 ¿Qué son las Zonas de Vida de Holdridge?
+        Es un sistema global de clasificación ecológica que define los ecosistemas basándose en la matemática de tres variables climáticas:
+        1.  **Biotemperatura:** Calor efectivo para el crecimiento de las plantas (0°C - 30°C).
+        2.  **Precipitación:** Lluvia total anual.
+        3.  **Relación de Evapotranspiración Potencial (EPT):** Qué tan "sedienta" es la atmósfera comparada con la lluvia que cae.
+
+        ### 📐 Metodología en esta App
+        Utilizamos álgebra de mapas para cruzar:
+        * **DEM (Modelo de Elevación):** Para estimar la temperatura (a mayor altura, menor temperatura).
+        * **Raster de Precipitación:** Datos interpolados de lluvia anual.
+        
+        El algoritmo clasifica cada pixel en el hexágono de Holdridge. *Nota: Se han ajustado los pisos altitudinales (ej. Páramo > 3000m) para adaptarse mejor a la geografía andina colombiana.*
+
+        ### 💧 Importancia para la Seguridad Hídrica
+        * **Páramos:** Son "fábricas de agua". Su baja temperatura reduce la evaporación, permitiendo un alto rendimiento hídrico.
+        * **Bosque Seco Tropical:** Zonas con déficit de agua. Críticas para la conservación, ya que la evaporación supera a la lluvia.
+        
+        ### 🔗 Referencias Recomendadas
+        * [Bioclimatología y Geografía (Enlace Externo)](https://biogeografia.net/bioclima.html)
+        * Holdridge, L. R. (1967). *Life zone ecology*. Tropical Science Center.
+        """)    
     
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
     
@@ -2946,6 +2971,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
