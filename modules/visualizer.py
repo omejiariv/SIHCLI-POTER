@@ -2209,10 +2209,29 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                             plot_arr = lz_arr.astype(float)
                             plot_arr[plot_arr == 0] = np.nan
                             
+                            # --- INICIO DE LA MEJORA ---
+                            # 1. Crear una matriz de textos mapeando los números a nombres del diccionario legend_map
+                            # Usamos np.vectorize para aplicar el diccionario a toda la matriz rápidamente
+                            def get_label(val):
+                                if np.isnan(val): return ""
+                                return legend_map.get(int(val), f"Clase {int(val)}")
+                            
+                            hover_text = np.vectorize(get_label)(plot_arr)
+
                             fig = go.Figure(data=go.Heatmap(
-                                z=plot_arr, x=x_coords, y=y_coords,
-                                colorscale='Jet', showscale=False, hoverongaps=False
+                                z=plot_arr, 
+                                x=x_coords, 
+                                y=y_coords,
+                                # 2. Pasamos la matriz de nombres y definimos la plantilla del tooltip
+                                text=hover_text,
+                                hovertemplate="<b>%{text}</b><br>Lat: %{y:.4f}<br>Lon: %{x:.4f}<extra></extra>",
+                                
+                                colorscale='Jet', 
+                                showscale=False, 
+                                hoverongaps=False
                             ))
+                            # --- FIN DE LA MEJORA ---
+
                             fig.update_layout(title="Mapa de Zonas de Vida (Holdridge)", height=600, yaxis_scaleanchor="x")
                             st.plotly_chart(fig, use_container_width=True)
                             
@@ -2900,6 +2919,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
