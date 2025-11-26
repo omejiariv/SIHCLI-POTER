@@ -139,7 +139,9 @@ def create_sidebar(gdf_stations, df_long):
             mask_mes = df_temp[Config.MONTH_COL].isin(selected_months_nums)
             df_monthly_filtered = df_temp.loc[mask_mes].copy()
         else:
-            df_monthly_filtered = df_temp.copy()
+            # Si no hay meses seleccionados, devolver vacío o todo (decisión de diseño: devolvemos vacío para indicar que se necesita selección)
+            # O mejor, devolvemos vacío para que los gráficos se limpien y no muestren error
+            df_monthly_filtered = pd.DataFrame(columns=df_long.columns) 
 
         if exclude_nulls:
             df_monthly_filtered = df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL])
@@ -159,4 +161,3 @@ def create_sidebar(gdf_stations, df_long):
         # RETORNO ACTUALIZADO: Incluye selected_months_nums al final
         return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
                 "Histórico", selected_regions, selected_municipios, selected_months_nums, year_range)
-
