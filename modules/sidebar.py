@@ -105,19 +105,24 @@ def create_sidebar(gdf_stations, df_long):
             max_y = int(df_long[Config.YEAR_COL].max())
             year_range = st.slider("Años:", min_y, max_y, (max_y-10, max_y))
         except:
-            year_range = (2000, 2020)
+            year_range = (1970, 2020)
 
-        # --- 4. FILTRO DE MESES (NUEVO AGREGADO) ---
+        # --- 4. FILTRO DE MESES (MEJORADO CON CHECKBOX) ---
         st.markdown("### 📆 Análisis Estacional")
-        st.caption("Filtre por meses específicos (ej. solo Enero y Febrero).")
         
         meses_nombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                          'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
         
+        # Checkbox para seleccionar todos
+        if st.checkbox("Seleccionar todos los meses", value=True, key="sel_all_months"):
+            default_months = meses_nombres
+        else:
+            default_months = []
+            
         selected_months = st.multiselect(
             "Meses a incluir:", 
             options=meses_nombres, 
-            default=meses_nombres,
+            default=default_months,
             help="Seleccione los meses que desea incluir en el análisis."
         )
         
@@ -161,3 +166,4 @@ def create_sidebar(gdf_stations, df_long):
         # RETORNO ACTUALIZADO: Incluye selected_months_nums al final
         return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
                 "Histórico", selected_regions, selected_municipios, selected_months_nums, year_range)
+
