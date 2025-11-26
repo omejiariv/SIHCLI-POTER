@@ -2188,9 +2188,6 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                 with st.spinner("Procesando y reproyectando mapas..."):
                     try:
                         # Importamos desde tu archivo de lógica
-                        from modules.life_zones import generate_life_zone_raster # O generate_life_zone_map si cambiaste el nombre
-                        # Asegúrate de usar el nombre correcto de la función
-                        from modules.life_zones import generate_life_zone_map 
                         
                         lz_arr, profile, dynamic_legend = generate_life_zone_map(
                             Config.DEM_FILE_PATH, 
@@ -2950,3 +2947,4 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
