@@ -2196,44 +2196,71 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 13: "Bosque Húmedo Montano", 14: "Bosque Muy Húmedo Montano"
                             }
                             
-                            # Plotly Heatmap
                             h, w = lz_arr.shape
                             x0, y0 = transform.c, transform.f
                             dx, dy = transform.a, transform.e
-                            x_coords = np.linspace(x0, x0 + dx*w, w)
-                            y_coords = np.linspace(y0, y0 + dy*h, h)
-                            
-                            # Flip si es necesario (coordenadas norte suelen ser negativas en transform)
-                            if dy < 0: y_coords = y_coords[::-1]; lz_arr = np.flipud(lz_arr)
 
-                            plot_arr = lz_arr.astype(float)
-                            plot_arr[plot_arr == 0] = np.nan
+                            # 1. Generar coordenadas reales para cada pixel
+                            # Meshgrid genera todas las combinaciones X, Y
+                            xs = np.linspace(x0, x0 + dx * w, w)
+                            ys = np.linspace(y0, y0 + dy * h, h)
+                            xx, yy = np.meshgrid(xs, ys)
+
+                            # 2. Aplanar arrays para Plotly Mapbox (requiere listas 1D)
+                            lat_flat = yy.flatten()
+                            lon_flat = xx.flatten()
+                            z_flat = lz_arr.flatten()
                             
-                            # --- INICIO DE LA MEJORA ---
-                            # 1. Crear una matriz de textos mapeando los números a nombres del diccionario legend_map
-                            # Usamos np.vectorize para aplicar el diccionario a toda la matriz rápidamente
+                            # 3. Filtrar datos vacíos (0) para no pintar el fondo transparente
+                            mask = z_flat > 0
+                            lat_clean = lat_flat[mask]
+                            lon_clean = lon_flat[mask]
+                            z_clean = z_flat[mask]
+
+                            # 4. Crear textos para el hover
                             def get_label(val):
-                                if np.isnan(val): return ""
                                 return legend_map.get(int(val), f"Clase {int(val)}")
-                            
-                            hover_text = np.vectorize(get_label)(plot_arr)
+                            text_clean = [get_label(v) for v in z_clean]
 
-                            fig = go.Figure(data=go.Heatmap(
-                                z=plot_arr, 
-                                x=x_coords, 
-                                y=y_coords,
-                                # 2. Pasamos la matriz de nombres y definimos la plantilla del tooltip
-                                text=hover_text,
-                                hovertemplate="<b>%{text}</b><br>Lat: %{y:.4f}<br>Lon: %{x:.4f}<extra></extra>",
-                                
-                                colorscale='Jet', 
-                                showscale=False, 
-                                hoverongaps=False
+                            # 5. Configurar el tamaño del "pixel" (marcador)
+                            # Esto es un truco: ajustamos el tamaño según el zoom y la resolución
+                            marker_size = 12 if downscale > 4 else 7
+
+                            fig = go.Figure(go.Scattermapbox(
+                                lat=lat_clean,
+                                lon=lon_clean,
+                                mode='markers',
+                                marker=go.scattermapbox.Marker(
+                                    size=marker_size, 
+                                    color=z_clean,
+                                    colorscale='Jet',
+                                    symbol='square', # Cuadrado para simular raster
+                                    opacity=0.8
+                                ),
+                                text=text_clean,
+                                hovertemplate="<b>%{text}</b><br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<extra></extra>"
                             ))
-                            # --- FIN DE LA MEJORA ---
 
-                            fig.update_layout(title="Mapa de Zonas de Vida (Holdridge)", height=600, yaxis_scaleanchor="x")
+                            # 6. Configuración del Mapa (Contexto Geográfico)
+                            # Calculamos el centro para enfocar el mapa
+                            center_lat = np.mean(lat_clean)
+                            center_lon = np.mean(lon_clean)
+
+                            fig.update_layout(
+                                title="Mapa de Zonas de Vida (Holdridge) con Contexto Geográfico",
+                                mapbox_style="carto-positron", # O "open-street-map", "white-bg", "stamen-terrain"
+                                mapbox=dict(
+                                    center=dict(lat=center_lat, lon=center_lon),
+                                    zoom=9
+                                ),
+                                height=600,
+                                margin={"r":0,"t":40,"l":0,"b":0}
+                            )
+                            
                             st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Explicación de Ejes
+                            st.caption("ℹ️ **Ejes:** El eje vertical representa la **Latitud** (Norte-Sur) y el horizontal la **Longitud** (Este-Oeste). El mapa de fondo provee la ubicación geográfica real.")
                             
                             # Tabla de Áreas (Aprox)
                             unique, counts = np.unique(lz_arr[lz_arr!=0], return_counts=True)
@@ -2919,6 +2946,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
