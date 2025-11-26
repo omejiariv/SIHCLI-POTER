@@ -21,59 +21,64 @@ holdridge_zone_map_simplified = {
     "Zona Desconocida": 0
 }
 
+# Invertir diccionario para búsquedas rápidas por ID
 holdridge_int_to_name_simplified = {v: k for k, v in holdridge_zone_map_simplified.items()}
 
 def classify_life_zone_alt_ppt(altitude, ppt):
     """
-    Clasificación AJUSTADA a Holdridge para Colombia.
-    Corrección de traslape en Bosque Seco y ajuste de cota de Páramo.
+    Clasifica una celda según su altitud (m) y precipitación anual (mm).
+    Lógica corregida para incluir Zonas 1, 7, 17 y 20 explícitamente.
     """
+    # 0. Validación de datos inválidos
     if pd.isna(altitude) or pd.isna(ppt) or altitude < 0 or ppt <= 0:
         return 0
         
-    # Nival
-    if altitude > 4500: # Ajustado levemente hacia arriba para picos nevados reales
-        return 1
+    # --- 1. PISO NIVAL (Zona 1) ---
+    # Altura extrema, temperatura < 1.5°C. 
+    # Se ajusta a 4500m+ para Andes Colombianos (Nevados).
+    if altitude >= 4500:
+        return 1  # Nival
         
-    # Piso Alpino (Páramo Alto / Superpáramo) - Cota ajustada
+    # --- 2. PISO ALPINO (Tundra / Superpáramo) ---
+    # Altitud: 3800 a 4500 aprox.
     if altitude >= 3800:
-        if ppt >= 1000: return 2   # Tundra pluvial (mas común en trópico)
+        if ppt >= 1000: return 2   # Tundra pluvial
         elif ppt >= 500: return 3  # Tundra húmeda
         else: return 4             # Tundra seca
         
-    # Piso Subalpino (PÁRAMO) - Bajamos cota a 3000m para capturar páramos reales
-    if altitude >= 3000: 
-        if ppt >= 2000: return 5   # Páramo pluvial (Común en zonas de niebla)
-        elif ppt >= 1000: return 6 # Páramo muy húmedo (El más común)
-        elif ppt >= 500: return 7  # Páramo húmedo/seco
-        else: return 7
+    # --- 3. PISO SUBALPINO (Páramo) ---
+    # Altitud: 3000 a 3800 (Bajamos límite a 3000 para capturar páramos reales)
+    if altitude >= 3000:
+        if ppt >= 2000: return 5   # Páramo pluvial (pp-SA)
+        elif ppt >= 1000: return 6 # Páramo muy húmedo (pmh-SA) - El más común
+        else: return 7             # Páramo seco (ps-SA) -> CUBRE LA ZONA 7 (<1000mm)
         
-    # Piso Montano (2000 - 3000m)
+    # --- 4. PISO MONTANO ---
+    # Altitud: 2000 a 3000
     if altitude >= 2000:
         if ppt >= 4000: return 8   # Pluvial
         elif ppt >= 2000: return 9 # Muy húmedo
-        elif ppt >= 1000: return 10 # Húmedo
-        elif ppt >= 500: return 11  # Seco
-        else: return 12             # Espinoso
+        elif ppt >= 1000: return 10 # Húmedo (bh-M)
+        elif ppt >= 500: return 11  # Seco (bs-M)
+        else: return 12             # Espinoso (me-M)
         
-    # Piso Premontano (1000 - 2000m)
+    # --- 5. PISO PREMONTANO ---
+    # Altitud: 1000 a 2000 (Zona Cafetera típica)
     if altitude >= 1000:
         if ppt >= 4000: return 13   # Pluvial
         elif ppt >= 2000: return 14 # Muy húmedo
-        elif ppt >= 1000: return 15 # Húmedo
-        elif ppt >= 500: return 16  # SECO (Aquí debería aparecer si hay sombras de lluvia)
-        else: return 17
+        elif ppt >= 1000: return 15 # Húmedo (bh-PM)
+        elif ppt >= 500: return 16  # Seco (bs-PM)
+        else: return 17             # Espinoso (me-PM) -> CUBRE LA ZONA 17 (<500mm)
         
-    # Piso Tropical / Basal (< 1000m)
-    # CORRECCIÓN CRÍTICA AQUÍ PARA BOSQUE SECO
+    # --- 6. PISO TROPICAL (Basal) ---
+    # Altitud: < 1000 msnm
+    # Aquí solucionamos la aparición del Bosque Seco y Húmedo
     if ppt >= 8000: return 18       # Pluvial (Chocó extremo)
-    if ppt >= 4000: return 18       # Pluvial / Muy Húmedo transición
-    if ppt >= 2000: return 19       # Bosque MUY Húmedo (bmh-T) -> Urabá/Magdalena Medio húmedo
-    if ppt >= 1000: return 21       # BOSQUE SECO (bs-T) -> (Cauca medio, Caribe). CORREGIDO: Antes era bh-T
-    if ppt >= 500: return 22        # Monte Espinoso (me-T) -> (Guajira, Cañón Chicamocha)
-    
-    # Si cae aquí (lluvia < 500 en trópico), es desierto o matorral muy seco
-    return 22
+    elif ppt >= 4000: return 19     # Muy Húmedo (bmh-T) -> (Urabá, Amazonía piedemonte)
+    elif ppt >= 2000: return 20     # Húmedo (bh-T) -> CUBRE LA ZONA 20 (Magdalena Medio húmedo)
+    elif ppt >= 1000: return 21     # Seco (bs-T) -> CUBRE LA ZONA 21 (Caribe, Valles interandinos)
+    else: return 22                 # Espinoso (me-T) -> (Guajira, Desierto Tatacoa)
 
 def _resample_raster_to_shape(src_dataset, dst_shape, dst_transform, dst_crs=None, resampling=Resampling.average):
     dest = np.empty(dst_shape, dtype=np.float32)
