@@ -2197,28 +2197,25 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         with col2:
             use_mask = st.checkbox("Recortar por Cuenca Seleccionada", value=True)
             
-        # Recuperar geometría de cuenca de la sesión
         basin_geom = None
         if use_mask:
             res_basin = st.session_state.get('basin_res') 
-            
             if res_basin and res_basin.get('ready'):
                 basin_geom = res_basin.get('gdf_cuenca', res_basin.get('gdf_union'))
                 if basin_geom is not None:
                     st.success(f"Máscara activa: {res_basin.get('names', 'Cuenca')}")
             else:
-                st.warning("⚠️ No hay cuenca en memoria. Ve a 'Mapas Avanzados' y procesa una cuenca primero.")
+                st.warning("⚠️ No hay cuenca en memoria. Ve a 'Mapas Avanzados'.")
 
         if st.button("Generar Mapa de Zonas de Vida"):
             if not os.path.exists(Config.DEM_FILE_PATH) or not os.path.exists(Config.PRECIP_RASTER_PATH):
-                st.error("Faltan archivos raster (DEM o PPT) en 'data/'.")
+                st.error("Faltan archivos raster en 'data/'.")
             else:
-                with st.spinner("Procesando, Generando mapa clasificado y reproyectando mapas..."):
-                     try:
+                with st.spinner("Generando mapa clasificado..."):
+                    try:
                         from modules.life_zones import generate_life_zone_map
                         
-                        # --- CORRECCIÓN AQUÍ: AHORA RECIBIMOS 4 VALORES ---
-                        # Agregamos 'color_map' al final
+                        # Llamada a la función recibiendo 4 valores (incluyendo colores)
                         lz_arr, profile, dynamic_legend, color_map = generate_life_zone_map(
                             Config.DEM_FILE_PATH, 
                             Config.PRECIP_RASTER_PATH, 
@@ -2249,7 +2246,6 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 lon_clean = lon_flat[mask]
                                 z_clean = z_flat[mask]
                                 
-                                # --- APLICACIÓN DE COLORES OFICIALES ---
                                 # Convertimos cada ID numérico a su color HEX oficial
                                 colors_hex = [color_map.get(v, "#808080") for v in z_clean]
                                 hover_text = [dynamic_legend.get(v, f"ID: {v}") for v in z_clean]
@@ -2260,7 +2256,7 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                     mode='markers',
                                     marker=go.scattermapbox.Marker(
                                         size=8 if downscale > 4 else 5,
-                                        color=colors_hex, # ¡Aquí está la magia de los colores!
+                                        color=colors_hex,
                                         opacity=0.75
                                     ),
                                     text=hover_text,
@@ -2279,24 +2275,28 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                     showlegend=False
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
-                                                                
+                                
                                 # Tabla de Áreas
                                 unique, counts = np.unique(z_clean, return_counts=True)
                                 data_table = []
                                 total_px = counts.sum()
                                 for v, c in zip(unique, counts):
-                                    name = dynamic_legend.get(v, f"Clase Desconocida {v}")
-                                    data_table.append({"ID": v, "Zona de Vida": name, "Píxeles": c, "%": (c/total_px)*100})
+                                    name = dynamic_legend.get(v, f"Clase {v}")
+                                    data_table.append({
+                                        "Zona de Vida": name, 
+                                        "Píxeles": c, 
+                                        "%": (c/total_px)*100
+                                    })
                                 
                                 df_areas = pd.DataFrame(data_table).sort_values("%", ascending=False)
                                 st.dataframe(df_areas.style.format({"%": "{:.1f}%"}), use_container_width=True)
 
-                        except ImportError as ie:
-                            st.error(f"Error de Importación: {ie}.")
-                        except Exception as e:
-                            st.error(f"Error visualizando: {e}")
-                            import traceback
-                            st.code(traceback.format_exc())
+                    except ImportError as ie:
+                        st.error(f"Error de Importación: {ie}.")
+                    except Exception as e:
+                        st.error(f"Error visualizando: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
 
     # --- PESTAÑA 2: PUNTOS ---
     with tab_puntos:
@@ -2987,6 +2987,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
