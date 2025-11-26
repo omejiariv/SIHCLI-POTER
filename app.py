@@ -39,11 +39,11 @@ def main():
         st.error("⚠️ Error Fatal: No se pudieron cargar los datos. Verifica la conexión a BD.")
         st.stop()
 
-    # 2. Sidebar
+    # 2. Sidebar (AHORA RECIBE 9 VALORES DE RETORNO)
     (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_filtered, analysis_mode, 
-     sel_regions, sel_munis, sel_alts, year_range) = create_sidebar(gdf_stations, df_long)
+     sel_regions, sel_munis, selected_months, year_range) = create_sidebar(gdf_stations, df_long)
 
-    # Lógica de interpolación
+    # Lógica de interpolación (Aplica sobre el filtrado mensual)
     if st.session_state.get('apply_interpolation', False):
         with st.spinner("Procesando interpolación..."):
             df_monthly_filtered = complete_series(df_monthly_filtered)
@@ -56,9 +56,21 @@ def main():
     except:
         start_date, end_date = None, None
 
-    # 3. Argumentos Unificados (display_args)
+    # 3. PREPARAR DATAFRAME COMPLETO (CONTINUO) PARA PRONÓSTICOS
+    # Este DF se filtra por Años y Estaciones, pero MANTIENE todos los meses.
+    # Es vital para que Prophet/SARIMA entiendan la estacionalidad anual sin huecos.
+    mask_base = (
+        (df_long[Config.YEAR_COL] >= year_range[0]) & 
+        (df_long[Config.YEAR_COL] <= year_range[1]) &
+        (df_long[Config.STATION_NAME_COL].isin(stations_for_analysis))
+    )
+    df_complete_filtered = df_long.loc[mask_base].copy()
+
+    # 4. Argumentos Unificados (display_args)
+    # Agregamos 'df_complete' y 'selected_months' al diccionario
     display_args = {
-        "df_long": df_long, 
+        "df_long": df_monthly_filtered,        # Por defecto: Filtrado (Mapas, Estadísticas)
+        "df_complete": df_complete_filtered,   # Para Pronósticos (Serie continua)
         "gdf_stations": gdf_stations, 
         "gdf_filtered": gdf_filtered,
         "gdf_municipios": gdf_municipios, 
@@ -71,16 +83,16 @@ def main():
         "analysis_mode": analysis_mode,
         "selected_regions": sel_regions,
         "selected_municipios": sel_munis,
-        "selected_altitudes": sel_alts,
+        "selected_months": selected_months,    # Nueva variable: Meses seleccionados (lista de int)
         "year_range": year_range,
         "start_date": start_date,
         "end_date": end_date
     }
 
-    # --- NUEVO: CAJA DE INFORMACIÓN GLOBAL ---
-    display_current_filters(stations_for_analysis, sel_regions, sel_munis, year_range)    
+    # --- CAJA DE INFORMACIÓN GLOBAL ---
+    display_current_filters(stations_for_analysis, sel_regions, sel_munis, year_range)     
 
-    # 4. Pestañas
+    # 5. Pestañas
     tab_titles = [
         "🏠 Inicio", 
         "🚨 Monitoreo (Tiempo Real)", 
@@ -103,12 +115,13 @@ def main():
     
     tabs = st.tabs(tab_titles)
 
-    # 5. Renderizado (Usando siempre display_args)
+    # 6. Renderizado (Usando siempre display_args)
     with tabs[0]: 
         display_welcome_tab()
     
     with tabs[1]: 
-        display_realtime_dashboard(df_long, gdf_stations, gdf_filtered)
+        # Dashboard usa el último dato real disponible (usamos df_complete para asegurar continuidad reciente)
+        display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
 
     with tabs[2]: 
         display_spatial_distribution_tab(**display_args)
@@ -121,11 +134,11 @@ def main():
         st.markdown("---")
         display_station_table_tab(**display_args)
 
-    with tabs[5]: # AHORA ES PRONÓSTICO CLIMÁTICO
+    with tabs[5]: # PRONÓSTICO CLIMÁTICO
         from modules.visualizer import display_climate_forecast_tab
         display_climate_forecast_tab(**display_args)
 
-    with tabs[6]: # AHORA ES TENDENCIAS
+    with tabs[6]: # TENDENCIAS (Usa df_complete internamente si está bien configurado en forecasting.py)
         display_trends_and_forecast_tab(**display_args)
 
     with tabs[7]: 
@@ -143,7 +156,7 @@ def main():
     with tabs[11]: 
         display_advanced_maps_tab(**display_args)
 
-    with tabs[12]: # Ajusta el índice según corresponda
+    with tabs[12]: 
         from modules.visualizer import display_bias_correction_tab
         display_bias_correction_tab(**display_args)
 
@@ -161,6 +174,7 @@ def main():
         if st.button("Generar Reporte Ejecutivo", type="primary"):
             with st.spinner("Generando..."):
                 res = {"n_estaciones": len(stations_for_analysis), "rango": f"{year_range}"}
+                # Reporte usa los datos filtrados por mes si el usuario así lo eligió
                 pdf = generate_pdf_report(df_monthly_filtered, gdf_filtered, res)
                 if pdf: 
                     st.download_button("📥 Descargar PDF", pdf, "reporte.pdf", "application/pdf")
@@ -178,6 +192,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
