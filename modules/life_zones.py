@@ -100,42 +100,71 @@ def _resample_raster_to_shape(src_dataset, dst_shape, dst_transform, dst_crs=Non
 
 def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, downscale_factor=4):
     """
-    Genera mapa raster clasificado usando Altitud (DEM) y PPT.
+    Genera mapa raster clasificado de Zonas de Vida.
+    
+    MEJORA CRÍTICA: Fuerza la reproyección a WGS84 (EPSG:4326) para que el mapa
+    pueda visualizarse correctamente sobre mapas base web (OpenStreetMap/Carto).
     """
     try:
+        # Validación básica de factor de escala
         if downscale_factor is None or downscale_factor <= 0:
             downscale_factor = 1
-            
-        # Abrir DEM
+
+        # Sistema de coordenadas objetivo: WGS84 (Latitud/Longitud)
+        dst_crs = 'EPSG:4326'
+
+        # --- 1. PROCESAR DEM (Base Maestra) ---
         with rasterio.open(dem_path) as dem_src:
-            src_width = dem_src.width
-            src_height = dem_src.height
-            src_transform = dem_src.transform
-            dem_crs = dem_src.crs
+            # Calcular nuevas dimensiones reducidas
+            dst_width = max(1, dem_src.width // downscale_factor)
+            dst_height = max(1, dem_src.height // downscale_factor)
             
-            dst_width = max(1, src_width // downscale_factor)
-            dst_height = max(1, src_height // downscale_factor)
-            
-            scale_x = src_width / dst_width
-            scale_y = src_height / dst_height
-            dst_transform = src_transform * Affine.scale(scale_x, scale_y)
-            
-            dem_resampled = _resample_raster_to_shape(
-                dem_src, (dst_height, dst_width), 
-                dst_transform, dst_crs=dem_crs, resampling=Resampling.bilinear
+            # Calcular la transformación afín para pasar de Metros (origen) a Grados (destino)
+            # manteniendo el encuadre correcto.
+            dst_transform, dst_width, dst_height = calculate_default_transform(
+                dem_src.crs, 
+                dst_crs, 
+                dem_src.width, 
+                dem_src.height, 
+                *dem_src.bounds,
+                dst_width=dst_width,
+                dst_height=dst_height
             )
 
-        # Abrir Precipitación
+            # Crear array destino para DEM
+            dem_resampled = np.empty((dst_height, dst_width), dtype=np.float32)
+            
+            # Reproyectar DEM
+            reproject(
+                source=rasterio.band(dem_src, 1),
+                destination=dem_resampled,
+                src_transform=dem_src.transform,
+                src_crs=dem_src.crs,
+                dst_transform=dst_transform,
+                dst_crs=dst_crs,
+                resampling=Resampling.bilinear
+            )
+
+        # --- 2. PROCESAR PRECIPITACIÓN (Esclavo) ---
+        # Usamos exactamente el mismo transform y shape del DEM para asegurar alineación pixel a pixel
         with rasterio.open(precip_raster_path) as ppt_src:
-            ppt_resampled = _resample_raster_to_shape(
-                ppt_src, (dst_height, dst_width), 
-                dst_transform, dst_crs=dem_crs, resampling=Resampling.average
+            ppt_resampled = np.empty((dst_height, dst_width), dtype=np.float32)
+            
+            reproject(
+                source=rasterio.band(ppt_src, 1),
+                destination=ppt_resampled,
+                src_transform=ppt_src.transform,
+                src_crs=ppt_src.crs,
+                dst_transform=dst_transform,
+                dst_crs=dst_crs,
+                resampling=Resampling.average # Promedio es mejor para lluvia
             )
 
-        # Máscara válida
+        # --- 3. CÁLCULO DE ZONAS DE VIDA ---
+        # Crear máscaras para ignorar datos inválidos (NaN o valores absurdos)
         dem_mask = np.isnan(dem_resampled)
         ppt_mask = np.isnan(ppt_resampled)
-        valid_mask = (~dem_mask) & (~ppt_mask) & np.isfinite(ppt_resampled)
+        valid_mask = (~dem_mask) & (~ppt_mask) & (dem_resampled > -500) & (ppt_resampled >= 0)
         
         classified_raster = np.zeros((dst_height, dst_width), dtype=np.int16)
         
@@ -143,19 +172,23 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
             alt_values = dem_resampled[valid_mask]
             ppt_values = ppt_resampled[valid_mask]
             
+            # Aplicar clasificación vectorizada (Rápida)
+            # Asegúrate que 'classify_life_zone_alt_ppt' esté definida arriba o importada
             vectorized_classify = np.vectorize(classify_life_zone_alt_ppt)
             zone_ints = vectorized_classify(alt_values, ppt_values)
             classified_raster[valid_mask] = zone_ints.astype(np.int16)
 
-        # Aplicar máscara de geometría (si existe)
+        # --- 4. APLICAR MÁSCARA DE GEOMETRÍA (Corte por Cuenca) ---
         if mask_geometry is not None and not mask_geometry.empty:
             try:
-                if hasattr(mask_geometry, "crs") and mask_geometry.crs and dem_crs and mask_geometry.crs != dem_crs:
-                    mask_reproj = mask_geometry.to_crs(dem_crs)
-                else:
-                    mask_reproj = mask_geometry
-                    
+                # Asegurar que la geometría de corte también esté en Lat/Lon
+                mask_reproj = mask_geometry
+                if mask_geometry.crs and mask_geometry.crs.to_string() != dst_crs:
+                    mask_reproj = mask_geometry.to_crs(dst_crs)
+
                 shapes = [(geom, 1) for geom in mask_reproj.geometry]
+                
+                # Rasterizar la geometría sobre la grilla existente
                 mask_raster = rasterize(
                     shapes,
                     out_shape=(dst_height, dst_width),
@@ -163,10 +196,14 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
                     fill=0,
                     dtype=np.uint8
                 )
+                
+                # Dejar en 0 todo lo que esté fuera de la máscara
                 classified_raster = np.where(mask_raster == 1, classified_raster, 0)
+                
             except Exception as e_mask:
-                st.warning(f"No se pudo aplicar la máscara de geometría: {e_mask}")
+                st.warning(f"Advertencia recortando máscara: {e_mask}")
 
+        # --- 5. PREPARAR RESULTADOS ---
         output_profile = {
             'driver': 'GTiff',
             'dtype': rasterio.int16,
@@ -174,7 +211,7 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
             'width': dst_width,
             'height': dst_height,
             'count': 1,
-            'crs': dem_crs,
+            'crs': dst_crs,
             'transform': dst_transform
         }
         
