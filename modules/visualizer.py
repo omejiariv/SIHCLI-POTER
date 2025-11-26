@@ -2213,14 +2213,13 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
             if not os.path.exists(Config.DEM_FILE_PATH) or not os.path.exists(Config.PRECIP_RASTER_PATH):
                 st.error("Faltan archivos raster (DEM o PPT) en 'data/'.")
             else:
-                with st.spinner("Procesando y reproyectando mapas..."):
-                    try:
-                        # --- CORRECCIÓN FINAL DE IMPORTACIÓN ---
-                        # Movemos la importación aquí, antes de cualquier lógica
+                with st.spinner("Procesando, Generando mapa clasificado y reproyectando mapas..."):
+                     try:
                         from modules.life_zones import generate_life_zone_map
                         
-                        # Ahora llamamos a la función
-                        lz_arr, profile, dynamic_legend = generate_life_zone_map(
+                        # --- CORRECCIÓN AQUÍ: AHORA RECIBIMOS 4 VALORES ---
+                        # Agregamos 'color_map' al final
+                        lz_arr, profile, dynamic_legend, color_map = generate_life_zone_map(
                             Config.DEM_FILE_PATH, 
                             Config.PRECIP_RASTER_PATH, 
                             mask_geometry=basin_geom, 
@@ -2228,11 +2227,8 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                         )
                         
                         if lz_arr is not None:
-                            # Preparar coordenadas Lat/Lon para Plotly Mapbox
                             h, w = lz_arr.shape
                             transform = profile['transform']
-                            
-                            # Generar grilla de coordenadas
                             x0, y0 = transform.c, transform.f
                             dx, dy = transform.a, transform.e
                             
@@ -2244,29 +2240,28 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                             lon_flat = xx.flatten()
                             z_flat = lz_arr.flatten()
                             
-                            # Filtro de ceros (fondo)
                             mask = z_flat > 0
                             
                             if not np.any(mask):
-                                st.warning("El mapa se generó pero todos los píxeles son 0 (Zona Desconocida).")
+                                st.warning("El mapa se generó pero todos los píxeles son 0.")
                             else:
                                 lat_clean = lat_flat[mask]
                                 lon_clean = lon_flat[mask]
                                 z_clean = z_flat[mask]
                                 
-                                # Texto hover
+                                # --- APLICACIÓN DE COLORES OFICIALES ---
+                                # Convertimos cada ID numérico a su color HEX oficial
+                                colors_hex = [color_map.get(v, "#808080") for v in z_clean]
                                 hover_text = [dynamic_legend.get(v, f"ID: {v}") for v in z_clean]
                                 
-                                # Plot Scattermapbox
                                 fig = go.Figure(go.Scattermapbox(
                                     lat=lat_clean,
                                     lon=lon_clean,
                                     mode='markers',
                                     marker=go.scattermapbox.Marker(
                                         size=8 if downscale > 4 else 5,
-                                        color=z_clean,
-                                        colorscale='Jet',
-                                        opacity=0.7
+                                        color=colors_hex, # ¡Aquí está la magia de los colores!
+                                        opacity=0.75
                                     ),
                                     text=hover_text,
                                     hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
@@ -2276,14 +2271,15 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 center_lon = np.mean(lon_clean)
                                 
                                 fig.update_layout(
-                                    title="Zonas de Vida (WGS84)",
+                                    title="Zonas de Vida (Clasificación Holdridge)",
                                     mapbox_style="carto-positron",
                                     mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=9),
                                     height=600,
-                                    margin={"r":0,"t":30,"l":0,"b":0}
+                                    margin={"r":0,"t":30,"l":0,"b":0},
+                                    showlegend=False
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
-                                
+                                                                
                                 # Tabla de Áreas
                                 unique, counts = np.unique(z_clean, return_counts=True)
                                 data_table = []
@@ -2991,6 +2987,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
