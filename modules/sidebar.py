@@ -18,7 +18,7 @@ def create_sidebar(gdf_stations, df_long):
             exclude_zeros = st.checkbox("Excluir valores cero (0)", value=False)
             
             st.markdown("---")
-            # NUEVO: FILTRO POR % DE DATOS
+            # FILTRO POR % DE DATOS (MANTENIDO)
             min_pct = st.slider("Mínimo % de Datos Disponibles:", 0, 100, 0, 
                                 help="Filtra estaciones que tengan al menos este porcentaje de datos en el histórico.")
 
@@ -31,7 +31,7 @@ def create_sidebar(gdf_stations, df_long):
         # --- 2. Filtros de Ubicación ---
         st.markdown("### 📍 Filtros de Ubicación")
         
-        # Lógica de Filtrado Inicial
+        # Lógica de Filtrado Inicial (MANTENIDA)
         valid_stations_by_pct = gdf_stations[Config.STATION_NAME_COL].unique()
         
         if min_pct > 0 and df_long is not None:
@@ -41,7 +41,7 @@ def create_sidebar(gdf_stations, df_long):
             pcts = (counts / total_months) * 100
             valid_stations_by_pct = pcts[pcts >= min_pct].index.tolist()
 
-        # A. Filtro por Altitud
+        # A. Filtro por Altitud (MANTENIDO)
         altitude_options = ["Todos", "0-500", "500-1000", "1000-1500", "1500-2000", "2000-3000", ">3000"]
         selected_alt_range = st.selectbox("Filtrar por Altitud (m):", altitude_options)
         
@@ -59,7 +59,7 @@ def create_sidebar(gdf_stations, df_long):
                     (gdf_filtered_base[Config.ALTITUDE_COL] < max_alt)
                 ]
 
-        # B. Región
+        # B. Región (MANTENIDO)
         if Config.REGION_COL in gdf_filtered_base.columns:
             all_regions = sorted(gdf_filtered_base[Config.REGION_COL].astype(str).unique())
             selected_regions = st.multiselect("Región:", all_regions)
@@ -68,13 +68,13 @@ def create_sidebar(gdf_stations, df_long):
         else:
             selected_regions = []
 
-        # C. Municipio
+        # C. Municipio (MANTENIDO)
         all_munis = sorted(gdf_filtered_base[Config.MUNICIPALITY_COL].astype(str).unique())
         selected_municipios = st.multiselect("Municipio:", all_munis)
         if selected_municipios:
             gdf_filtered_base = gdf_filtered_base[gdf_filtered_base[Config.MUNICIPALITY_COL].isin(selected_municipios)]
 
-        # D. Selección de Estaciones
+        # D. Selección de Estaciones (MANTENIDO)
         available_stations = sorted(gdf_filtered_base[Config.STATION_NAME_COL].astype(str).unique())
         
         with st.expander(f"Estaciones ({len(available_stations)} disp.)", expanded=True):
@@ -98,22 +98,48 @@ def create_sidebar(gdf_stations, df_long):
 
         st.divider()
 
-        # --- 3. Filtro de Tiempo ---
-        st.markdown("### 📅 Periodo")
+        # --- 3. Filtro de Tiempo (MANTENIDO Y MEJORADO) ---
+        st.markdown("### 📅 Periodo Temporal")
         try:
             min_y = int(df_long[Config.YEAR_COL].min())
             max_y = int(df_long[Config.YEAR_COL].max())
             year_range = st.slider("Años:", min_y, max_y, (max_y-10, max_y))
         except:
-            year_range = (2000, 2024)
+            year_range = (2000, 2020)
+
+        # --- 4. FILTRO DE MESES (NUEVO AGREGADO) ---
+        st.markdown("### 📆 Análisis Estacional")
+        st.caption("Filtre por meses específicos (ej. solo Enero y Febrero).")
+        
+        meses_nombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                         'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+        
+        selected_months = st.multiselect(
+            "Meses a incluir:", 
+            options=meses_nombres, 
+            default=meses_nombres,
+            help="Seleccione los meses que desea incluir en el análisis."
+        )
+        
+        # Mapear nombres a números (1-12)
+        mapa_meses = {m: i+1 for i, m in enumerate(meses_nombres)}
+        selected_months_nums = [mapa_meses[m] for m in selected_months]
 
         # FILTRADO MAESTRO
+        # 1. Filtro de Años y Estaciones
         mask = (
             (df_long[Config.YEAR_COL] >= year_range[0]) & 
             (df_long[Config.YEAR_COL] <= year_range[1]) &
             (df_long[Config.STATION_NAME_COL].isin(stations_for_analysis))
         )
-        df_monthly_filtered = df_long.loc[mask].copy()
+        df_temp = df_long.loc[mask].copy()
+
+        # 2. Filtro de Meses (NUEVO)
+        if selected_months_nums:
+            mask_mes = df_temp[Config.MONTH_COL].isin(selected_months_nums)
+            df_monthly_filtered = df_temp.loc[mask_mes].copy()
+        else:
+            df_monthly_filtered = df_temp.copy()
 
         if exclude_nulls:
             df_monthly_filtered = df_monthly_filtered.dropna(subset=[Config.PRECIPITATION_COL])
@@ -124,11 +150,13 @@ def create_sidebar(gdf_stations, df_long):
             [Config.STATION_NAME_COL, Config.YEAR_COL]
         )[Config.PRECIPITATION_COL].sum().reset_index()
 
-        # --- BOTÓN LIMPIAR CACHÉ (MOVÍDO AQUÍ, ANTES DEL RETURN) ---
+        # --- BOTÓN LIMPIAR CACHÉ (MANTENIDO) ---
         st.divider()
         if st.button("🧹 Limpiar Caché y Recargar"):
             st.cache_data.clear()
             st.rerun()
 
+        # RETORNO ACTUALIZADO: Incluye selected_months_nums al final
         return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
-                "Histórico", selected_regions, selected_municipios, [], year_range)
+                "Histórico", selected_regions, selected_municipios, selected_months_nums, year_range)
+
