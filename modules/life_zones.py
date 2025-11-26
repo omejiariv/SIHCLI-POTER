@@ -24,42 +24,55 @@ holdridge_zone_map_simplified = {
 holdridge_int_to_name_simplified = {v: k for k, v in holdridge_zone_map_simplified.items()}
 
 def classify_life_zone_alt_ppt(altitude, ppt):
-    """Clasifica una celda según su altitud (m) y precipitación anual (mm)."""
+    """
+    Clasificación AJUSTADA a Holdridge para Colombia.
+    Corrección de traslape en Bosque Seco y ajuste de cota de Páramo.
+    """
     if pd.isna(altitude) or pd.isna(ppt) or altitude < 0 or ppt <= 0:
         return 0
         
-    if altitude > 4200:
+    # Nival
+    if altitude > 4500: # Ajustado levemente hacia arriba para picos nevados reales
         return 1
         
-    if altitude >= 3700:
-        if ppt >= 1500: return 2
-        elif ppt >= 750: return 3
-        else: return 4
+    # Piso Alpino (Páramo Alto / Superpáramo) - Cota ajustada
+    if altitude >= 3800:
+        if ppt >= 1000: return 2   # Tundra pluvial (mas común en trópico)
+        elif ppt >= 500: return 3  # Tundra húmeda
+        else: return 4             # Tundra seca
         
-    if altitude >= 3200:
-        if ppt >= 2000: return 5
-        elif ppt >= 1000: return 6
+    # Piso Subalpino (PÁRAMO) - Bajamos cota a 3000m para capturar páramos reales
+    if altitude >= 3000: 
+        if ppt >= 2000: return 5   # Páramo pluvial (Común en zonas de niebla)
+        elif ppt >= 1000: return 6 # Páramo muy húmedo (El más común)
+        elif ppt >= 500: return 7  # Páramo húmedo/seco
         else: return 7
         
+    # Piso Montano (2000 - 3000m)
     if altitude >= 2000:
-        if ppt >= 4000: return 8
-        elif ppt >= 2000: return 9
-        elif ppt >= 1000: return 10
-        elif ppt >= 500: return 11
-        else: return 12
+        if ppt >= 4000: return 8   # Pluvial
+        elif ppt >= 2000: return 9 # Muy húmedo
+        elif ppt >= 1000: return 10 # Húmedo
+        elif ppt >= 500: return 11  # Seco
+        else: return 12             # Espinoso
         
+    # Piso Premontano (1000 - 2000m)
     if altitude >= 1000:
-        if ppt >= 4000: return 13
-        elif ppt >= 2000: return 14
-        elif ppt >= 1000: return 15
-        elif ppt >= 500: return 16
+        if ppt >= 4000: return 13   # Pluvial
+        elif ppt >= 2000: return 14 # Muy húmedo
+        elif ppt >= 1000: return 15 # Húmedo
+        elif ppt >= 500: return 16  # SECO (Aquí debería aparecer si hay sombras de lluvia)
         else: return 17
         
-    # altitude < 1000
-    if ppt >= 4000: return 18
-    if ppt >= 2000: return 19
-    if ppt >= 1000: return 20
-    if ppt >= 500: return 21
+    # Piso Tropical / Basal (< 1000m)
+    # CORRECCIÓN CRÍTICA AQUÍ PARA BOSQUE SECO
+    if ppt >= 8000: return 18       # Pluvial (Chocó extremo)
+    if ppt >= 4000: return 18       # Pluvial / Muy Húmedo transición
+    if ppt >= 2000: return 19       # Bosque MUY Húmedo (bmh-T) -> Urabá/Magdalena Medio húmedo
+    if ppt >= 1000: return 21       # BOSQUE SECO (bs-T) -> (Cauca medio, Caribe). CORREGIDO: Antes era bh-T
+    if ppt >= 500: return 22        # Monte Espinoso (me-T) -> (Guajira, Cañón Chicamocha)
+    
+    # Si cae aquí (lluvia < 500 en trópico), es desierto o matorral muy seco
     return 22
 
 def _resample_raster_to_shape(src_dataset, dst_shape, dst_transform, dst_crs=None, resampling=Resampling.average):
