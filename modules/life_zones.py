@@ -21,7 +21,25 @@ holdridge_zone_map_simplified = {
     "Zona Desconocida": 0
 }
 
-# Invertir diccionario para búsquedas rápidas por ID
+# --- PALETA DE COLORES OFICIAL (HEX) ---
+holdridge_colors = {
+    1: "#FFFFFF",  # Nival (Blanco)
+    # Alpino (Azules hielo/Grises)
+    2: "#B0E0E6", 3: "#87CEEB", 4: "#708090",
+    # Páramo (Violetas/Morados - Típico en mapas IGAC)
+    5: "#8A2BE2", 6: "#9370DB", 7: "#D8BFD8",
+    # Montano (Verdes oscuros a amarillos)
+    8: "#00008B", 9: "#006400", 10: "#228B22", 11: "#9ACD32", 12: "#F0E68C",
+    # Premontano (Verdes medios)
+    13: "#0000CD", 14: "#008000", 15: "#32CD32", 16: "#FFFF00", 17: "#DAA520",
+    # Tropical (Verdes selva a Naranjas secos)
+    18: "#191970", 19: "#2E8B57", 20: "#7CFC00", 
+    21: "#FFA500", # BS-T (Naranja Clásico)
+    22: "#FF4500", # Espinoso (Rojo/Naranja fuerte)
+    0:  "#000000"  # Desconocido
+}
+
+# Invertir para buscar por ID
 holdridge_int_to_name_simplified = {v: k for k, v in holdridge_zone_map_simplified.items()}
 
 def classify_life_zone_alt_ppt(altitude, ppt):
@@ -215,7 +233,7 @@ def generate_life_zone_map(dem_path, precip_raster_path, mask_geometry=None, dow
             'transform': dst_transform
         }
         
-        return classified_raster, output_profile, holdridge_int_to_name_simplified
+        return classified_raster, output_profile, holdridge_int_to_name_simplified, holdridge_colors
 
     except Exception as e:
         st.error(f"Error generando mapa de zonas de vida: {e}")
