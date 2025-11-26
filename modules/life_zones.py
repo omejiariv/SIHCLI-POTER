@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import rasterio
-from rasterio.warp import reproject, Resampling
+from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.features import rasterize
 from rasterio.transform import Affine
 import streamlit as st
