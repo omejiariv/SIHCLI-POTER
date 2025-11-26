@@ -1005,7 +1005,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
         meses_str = ", ".join([nombres_meses[m-1] for m in selected_months])
         titulo_meses = f" ({meses_str})"
     
-   st.subheader(f"🌍 Superficies de Interpolación{titulo_meses} y Análisis Hidrológico")
+    st.subheader(f"🌍 Superficies de Interpolación{titulo_meses} y Análisis Hidrológico")
     
     # Control de Modo
     mode = st.radio("Modo de Análisis:", ["Regional (Comparación)", "Por Cuenca (Detallado)"], horizontal=True)
@@ -2893,6 +2893,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
