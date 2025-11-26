@@ -2150,40 +2150,30 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
     # --- SECCIÓN EDUCATIVA ---
     with st.expander("📚 Conceptos, Metodología e Importancia (Sistema Holdridge)"):
         st.markdown("""
-        **Metodología:** Cruce algebraico de Temperatura (estimada por Altura) y Precipitación.
-        **Interpretación:** * **Páramos (Pisos Andinos/Subalpinos):** Clave para regulación hídrica.
-        * **Bosque Seco Tropical (bs-T):** Evaporación > Precipitación. Déficit hídrico.
-        Zonas (Clases)
-            # --- 1. PISO NIVAL (Zona 1) ---
-            Altura extrema (>= 4500), temperatura < 1.5°C. 
-            Para los Andes Colombianos (Nevados).
-            altitud >= 4500: (1). Nival
-        
-            # --- 2. PISO ALPINO (Tundra / Superpáramo) ---
-            Altitud: 3800 a 4500 aprox.
-            ppt >= 1000: Tundra pluvial, ppt >= 500: (2). Tundra húmeda; (3). Tundra seca (4)
-        
-            # PISO SUBALPINO (Páramo) ---
-            # Altitud: 3000 a 3800
-            Si ppt >= 2000: Páramo pluvial (pp-SA) (5); ppt >= 1000: Páramo muy húmedo (pmh-SA) (6)- El más común
-            en los otros casos,(<1000mm): Páramo seco (ps-SA) -> (Z) 
-        
-            # PISO MONTANO ---
-            Altitud: 2000 a 3000
-            Si ppt >= 4000: Pluvial (8); ppt >= 2000: Muy húmedo (9); ppt >= 1000: Húmedo (bh-M) (10)
-            ppt >= 500: (11) Seco (bs-M); en los otros casos: Espinoso (me-M) (12)
-        
-            # PISO PREMONTANO ---
-            Altitud: 1000 a 2000 (Zona Cafetera típica)
-            Si ppt >= 4000: (13) Pluvial; ppt >= 2000: (14) Muy húmedo (14); ppt >= 1000: (15) Húmedo (bh-PM)
-            ppt >= 500: (16) Seco (bs-PM); en los otros casos (<500mm): (17) Espinoso (me-PM)
-        
-            # PISO TROPICAL (Basal) ---
-            Altitud: < 1000 msnm
-            Si ppt >= 8000: (18) Pluvial (Chocó extremo); ppt >= 4000: (19) Muy Húmedo (bmh-T) -> (Urabá, Amazonía piedemonte)
-            ppt >= 2000: (20) Húmedo (bh-T) -> (Magdalena Medio húmedo); ppt >= 1000: (21) Seco (bs-T) -> (Caribe, Valles interandinos)
-            en los otros casos: (22) Espinoso (me-T) -> (Guajira, Tatacoa, Huila)
-        """)
+
+        <div style="font-size: 13px; line-height: 1.4;">
+            <p><strong>Metodología:</strong> Clasificación ecológica basada en el cruce de Temperatura (estimada por Altura) y Precipitación anual.</p>
+            
+            <p><strong>1. PISO NIVAL (> 4500 msnm):</strong> Zona 1. Nieves perpetuas y roca desnuda.</p>
+            
+            <p><strong>2. PISO ALPINO / SUPERPÁRAMO (3800 - 4500 msnm):</strong> 
+            Tundra pluvial o húmeda. Vegetación escasa, transición a nieve.</p>
+            
+            <p><strong>3. PISO SUBALPINO / PÁRAMO (3000 - 3800 msnm):</strong> <span style="color: #8A2BE2;">⬤</span> 
+            Ecosistema estratégico. Su baja temperatura reduce la evaporación, generando grandes excedentes de agua (oferta hídrica).</p>
+            
+            <p><strong>4. PISO MONTANO (2000 - 3000 msnm):</strong> Bosques de niebla y alto andinos.</p>
+            
+            <p><strong>5. PISO PREMONTANO (1000 - 2000 msnm):</strong> Zona cafetera típica.</p>
+            
+            <p><strong>6. PISO TROPICAL (< 1000 msnm):</strong></p>
+            <ul>
+                <li><span style="color: #FFA500;">⬤</span> <strong>Bosque Seco (bs-T):</strong> La evaporación supera a la precipitación. Déficit hídrico.</li>
+                <li><span style="color: #008000;">⬤</span> <strong>Bosque Húmedo (bh-T):</strong> Equilibrio o superávit hídrico.</li>
+                <li><span style="color: #00008B;">⬤</span> <strong>Pluvial:</strong> Exceso extremo de lluvia (Chocó).</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
     
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
     
@@ -2987,6 +2977,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
