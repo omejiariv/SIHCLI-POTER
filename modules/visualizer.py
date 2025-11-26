@@ -2153,6 +2153,36 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         **Metodología:** Cruce algebraico de Temperatura (estimada por Altura) y Precipitación.
         **Interpretación:** * **Páramos (Pisos Andinos/Subalpinos):** Clave para regulación hídrica.
         * **Bosque Seco Tropical (bs-T):** Evaporación > Precipitación. Déficit hídrico.
+        Zonas (Clases)
+            # --- 1. PISO NIVAL (Zona 1) ---
+            Altura extrema (>= 4500), temperatura < 1.5°C. 
+            Para los Andes Colombianos (Nevados).
+            altitud >= 4500: (1). Nival
+        
+            # --- 2. PISO ALPINO (Tundra / Superpáramo) ---
+            Altitud: 3800 a 4500 aprox.
+            ppt >= 1000: Tundra pluvial, ppt >= 500: (2). Tundra húmeda; (3). Tundra seca (4)
+        
+            # PISO SUBALPINO (Páramo) ---
+            # Altitud: 3000 a 3800
+            Si ppt >= 2000: Páramo pluvial (pp-SA) (5); ppt >= 1000: Páramo muy húmedo (pmh-SA) (6)- El más común
+            en los otros casos,(<1000mm): Páramo seco (ps-SA) -> (Z) 
+        
+            # PISO MONTANO ---
+            Altitud: 2000 a 3000
+            Si ppt >= 4000: Pluvial (8); ppt >= 2000: Muy húmedo (9); ppt >= 1000: Húmedo (bh-M) (10)
+            ppt >= 500: (11) Seco (bs-M); en los otros casos: Espinoso (me-M) (12)
+        
+            # PISO PREMONTANO ---
+            Altitud: 1000 a 2000 (Zona Cafetera típica)
+            Si ppt >= 4000: (13) Pluvial; ppt >= 2000: (14) Muy húmedo (14); ppt >= 1000: (15) Húmedo (bh-PM)
+            ppt >= 500: (16) Seco (bs-PM); en los otros casos (<500mm): (17) Espinoso (me-PM)
+        
+            # PISO TROPICAL (Basal) ---
+            Altitud: < 1000 msnm
+            Si ppt >= 8000: (18) Pluvial (Chocó extremo); ppt >= 4000: (19) Muy Húmedo (bmh-T) -> (Urabá, Amazonía piedemonte)
+            ppt >= 2000: (20) Húmedo (bh-T) -> (Magdalena Medio húmedo); ppt >= 1000: (21) Seco (bs-T) -> (Caribe, Valles interandinos)
+            en los otros casos: (22) Espinoso (me-T) -> (Guajira, Tatacoa, Huila)
         """)
     
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
@@ -2961,5 +2991,6 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
