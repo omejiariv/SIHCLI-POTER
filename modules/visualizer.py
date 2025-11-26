@@ -2292,7 +2292,7 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 st.dataframe(df_areas.style.format({"%": "{:.1f}%"}), use_container_width=True)
 
                     except ImportError as ie:
-                         st.error(f"Error de Importación: {ie}. Verifica que 'modules/life_zones.py' exista y tenga la función 'generate_life_zone_map'.")
+                        st.error(f"Error de Importación: {ie}. Verifica que 'modules/life_zones.py' exista y tenga la función 'generate_life_zone_map'.")
                     except Exception as e:
                         st.error(f"Error visualizando: {e}")
                         import traceback
@@ -2987,6 +2987,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
