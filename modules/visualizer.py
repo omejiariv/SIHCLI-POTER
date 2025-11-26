@@ -1207,12 +1207,22 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         
                         # 3. Promedios Reales
                         df_ppt = calcular_promedios_reales(df_raw)
-                        
-                        # --- CORRECCIÓN DE ERROR ---
-                        # Si 'nom_est' quedó como índice tras la agrupación, lo reseteamos para que sea columna accesible
+
+                        # --- CORRECCIÓN ROBUSTA DE INDICE (A PRUEBA DE FALLOS) ---
+                        # 1. Asegurar que es DataFrame
+                        if isinstance(df_ppt, pd.Series):
+                            df_ppt = df_ppt.to_frame()
+
+                        # 2. Si 'nom_est' no es una columna, reseteamos el índice
                         if Config.STATION_NAME_COL not in df_ppt.columns:
                             df_ppt = df_ppt.reset_index()
-                        # ---------------------------
+                        
+                        # 3. SALVAVIDAS: Si al resetear la columna se llamó 'index' en vez de 'nom_est', la renombramos
+                        if Config.STATION_NAME_COL not in df_ppt.columns:
+                            # Asumimos que la columna que contiene los nombres es la primera (columna 0)
+                            first_col = df_ppt.columns[0]
+                            df_ppt = df_ppt.rename(columns={first_col: Config.STATION_NAME_COL})
+                        # ---------------------------------------------------------
 
                         df_interp = pd.merge(df_ppt, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
                         
@@ -2971,6 +2981,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
