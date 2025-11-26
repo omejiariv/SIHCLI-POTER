@@ -10,7 +10,7 @@ import os
 # --- Constantes y Diccionarios ---
 holdridge_zone_map_simplified = {
     "Nival": 1,
-    "Tundra pluvial alpino (tp-A)": 2, "Tundra húmeda alpino (th-A)": 3, "Tundra seca alpino (ts-A)": 4,
+    "Tundra pluvial (tp-A)": 2, "Tundra húmeda (th-A)": 3, "Tundra seca (ts-A)": 4,
     "Páramo pluvial subalpino (pp-SA)": 5, "Páramo muy húmedo subalpino (pmh-SA)": 6, "Páramo seco subalpino (ps-SA)": 7,
     "Bosque pluvial Montano (bp-M)": 8, "Bosque muy húmedo Montano (bmh-M)": 9, "Bosque húmedo Montano (bh-M)": 10,
     "Bosque seco Montano (bs-M)": 11, "Monte espinoso Montano (me-M)": 12,
