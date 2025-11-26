@@ -2147,37 +2147,18 @@ def display_enso_tab(**kwargs):
 def display_life_zones_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌱 Zonas de Vida (Sistema Holdridge)")
 
-# --- Zonas de Vida (Holdridge) ---
+    # --- SECCIÓN EDUCATIVA ---
     with st.expander("📚 Conceptos, Metodología e Importancia (Sistema Holdridge)"):
         st.markdown("""
-        ### 🌿 ¿Qué son las Zonas de Vida de Holdridge?
-        Es un sistema global de clasificación ecológica que define los ecosistemas basándose en la matemática de tres variables climáticas:
-        1.  **Biotemperatura:** Calor efectivo para el crecimiento de las plantas (0°C - 30°C).
-        2.  **Precipitación:** Lluvia total anual.
-        3.  **Relación de Evapotranspiración Potencial (EPT):** Qué tan "sedienta" es la atmósfera comparada con la lluvia que cae.
-
-        ### 📐 Metodología en esta App
-        Utilizamos álgebra de mapas para cruzar:
-        * **DEM (Modelo de Elevación):** Para estimar la temperatura (a mayor altura, menor temperatura).
-        * **Raster de Precipitación:** Datos interpolados de lluvia anual.
-        
-        El algoritmo clasifica cada pixel en el hexágono de Holdridge. *Nota: Se han ajustado los pisos altitudinales (ej. Páramo > 3000m) para adaptarse mejor a la geografía andina colombiana.*
-
-        ### 💧 Importancia para la Seguridad Hídrica
-        * **Páramos:** Son "fábricas de agua". Su baja temperatura reduce la evaporación, permitiendo un alto rendimiento hídrico.
-        * **Bosque Seco Tropical:** Zonas con déficit de agua. Críticas para la conservación, ya que la evaporación supera a la lluvia.
-        
-        ### 🔗 Referencias Recomendadas
-        * [Bioclimatología y Geografía (Enlace Externo)](https://biogeografia.net/bioclima.html)
-        * Holdridge, L. R. (1967). *Life zone ecology*. Tropical Science Center.
-        """)    
+        **Metodología:** Cruce algebraico de Temperatura (estimada por Altura) y Precipitación.
+        **Interpretación:** * **Páramos (Pisos Andinos/Subalpinos):** Clave para regulación hídrica.
+        * **Bosque Seco Tropical (bs-T):** Evaporación > Precipitación. Déficit hídrico.
+        """)
     
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
     
     # --- PESTAÑA 1: MAPA RASTER ---
     with tab_raster:
-        st.info("Genera una superficie continua de zonas de vida cruzando los mapas de Elevación y Precipitación.")
-        
         col1, col2 = st.columns(2)
         with col1:
             res_option = st.select_slider("Resolución:", options=["Baja (Rápido)", "Media", "Alta (Lento)"], value="Baja (Rápido)")
@@ -2186,128 +2167,116 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         with col2:
             use_mask = st.checkbox("Recortar por Cuenca Seleccionada", value=True)
             
-        # Verificar si hay cuenca en memoria (CORRECCIÓN KEYERROR)
+        # --- CORRECCIÓN ERROR 3: Nombre de variable de sesión ---
         basin_geom = None
         if use_mask:
-            res_basin = st.session_state.get('basin_results')
+            # ANTES: st.session_state.get('basin_results') -> ERROR
+            # AHORA: st.session_state.get('basin_res') -> CORRECTO (Coincide con Advanced Maps)
+            res_basin = st.session_state.get('basin_res') 
+            
             if res_basin and res_basin.get('ready'):
-                # Intentar obtener la geometría con ambas claves posibles
-                basin_geom = res_basin.get('gdf_union', res_basin.get('geom'))
-                
+                basin_geom = res_basin.get('gdf_cuenca', res_basin.get('gdf_union')) # Claves robustas
                 if basin_geom is not None:
                     st.success(f"Máscara activa: {res_basin.get('names', 'Cuenca')}")
-                else:
-                    st.warning("Error: Geometría de cuenca no encontrada en memoria.")
             else:
-                st.caption("⚠️ No hay cuenca seleccionada (Ver 'Mapas Avanzados'). Se mostrará toda la región.")
+                st.warning("⚠️ No hay cuenca en memoria. Ve a 'Mapas Avanzados' y procesa una cuenca primero.")
 
         if st.button("Generar Mapa de Zonas de Vida"):
             if not os.path.exists(Config.DEM_FILE_PATH) or not os.path.exists(Config.PRECIP_RASTER_PATH):
-                st.error("Faltan los archivos raster base (DEM o PPT) en la carpeta 'data'.")
+                st.error("Faltan archivos raster (DEM o PPT) en 'data/'.")
             else:
-                with st.spinner("Procesando rasters..."):
-                    # Importar función generadora (asegúrate de tenerla en analysis.py)
-                    # Si no está, avísame y te paso analysis.py completo
+                with st.spinner("Procesando y reproyectando mapas..."):
                     try:
-                        from modules.analysis import generate_life_zone_raster
-                        lz_arr, transform, crs = generate_life_zone_raster(
+                        # Importamos desde tu archivo de lógica
+                        from modules.life_zones import generate_life_zone_raster # O generate_life_zone_map si cambiaste el nombre
+                        # Asegúrate de usar el nombre correcto de la función
+                        from modules.life_zones import generate_life_zone_map 
+                        
+                        lz_arr, profile, dynamic_legend = generate_life_zone_map(
                             Config.DEM_FILE_PATH, 
                             Config.PRECIP_RASTER_PATH, 
-                            mask_geom=basin_geom, 
+                            mask_geometry=basin_geom, 
                             downscale_factor=downscale
                         )
                         
-                        if isinstance(crs, str): # Error
-                            st.error(f"Error: {crs}")
-                        elif lz_arr is not None:
-                            # Leyenda Holdridge
-                            legend_map = {
-                                1: "Bosque Seco Tropical", 2: "Bosque Húmedo Tropical", 
-                                3: "Bosque Muy Húmedo Tropical", 4: "Bosque Pluvial Tropical",
-                                5: "Bosque Seco Premontano", 6: "Bosque Húmedo Premontano", 
-                                7: "Bosque Muy Húmedo Premontano", 8: "Bosque Pluvial Premontano",
-                                9: "Bosque Seco Montano Bajo", 10: "Bosque Húmedo Montano Bajo", 
-                                11: "Bosque Muy Húmedo Montano Bajo", 12: "Bosque Pluvial Montano Bajo",
-                                13: "Bosque Húmedo Montano", 14: "Bosque Muy Húmedo Montano"
-                            }
+                        if lz_arr is not None:
+                            # --- CORRECCIÓN ERROR 2: Usar diccionario dinámico ---
+                            # Ya no usamos un diccionario hardcodeado que estaba mal.
+                            # Usamos 'dynamic_legend' que viene de la lógica oficial.
                             
+                            # Preparar coordenadas Lat/Lon para Plotly Mapbox
                             h, w = lz_arr.shape
+                            transform = profile['transform']
+                            
+                            # Generar grilla de coordenadas
                             x0, y0 = transform.c, transform.f
                             dx, dy = transform.a, transform.e
-
-                            # 1. Generar coordenadas reales para cada pixel
-                            # Meshgrid genera todas las combinaciones X, Y
+                            
+                            # Meshgrid vectorizado
                             xs = np.linspace(x0, x0 + dx * w, w)
                             ys = np.linspace(y0, y0 + dy * h, h)
                             xx, yy = np.meshgrid(xs, ys)
-
-                            # 2. Aplanar arrays para Plotly Mapbox (requiere listas 1D)
+                            
+                            # Aplanar
                             lat_flat = yy.flatten()
                             lon_flat = xx.flatten()
                             z_flat = lz_arr.flatten()
                             
-                            # 3. Filtrar datos vacíos (0) para no pintar el fondo transparente
+                            # Filtro de ceros (fondo)
                             mask = z_flat > 0
-                            lat_clean = lat_flat[mask]
-                            lon_clean = lon_flat[mask]
-                            z_clean = z_flat[mask]
-
-                            # 4. Crear textos para el hover
-                            def get_label(val):
-                                return legend_map.get(int(val), f"Clase {int(val)}")
-                            text_clean = [get_label(v) for v in z_clean]
-
-                            # 5. Configurar el tamaño del "pixel" (marcador)
-                            # Esto es un truco: ajustamos el tamaño según el zoom y la resolución
-                            marker_size = 12 if downscale > 4 else 7
-
-                            fig = go.Figure(go.Scattermapbox(
-                                lat=lat_clean,
-                                lon=lon_clean,
-                                mode='markers',
-                                marker=go.scattermapbox.Marker(
-                                    size=marker_size, 
-                                    color=z_clean,
-                                    colorscale='Jet',
-                                    symbol='square', # Cuadrado para simular raster
-                                    opacity=0.8
-                                ),
-                                text=text_clean,
-                                hovertemplate="<b>%{text}</b><br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<extra></extra>"
-                            ))
-
-                            # 6. Configuración del Mapa (Contexto Geográfico)
-                            # Calculamos el centro para enfocar el mapa
-                            center_lat = np.mean(lat_clean)
-                            center_lon = np.mean(lon_clean)
-
-                            fig.update_layout(
-                                title="Mapa de Zonas de Vida (Holdridge) con Contexto Geográfico",
-                                mapbox_style="carto-positron", # O "open-street-map", "white-bg", "stamen-terrain"
-                                mapbox=dict(
-                                    center=dict(lat=center_lat, lon=center_lon),
-                                    zoom=9
-                                ),
-                                height=600,
-                                margin={"r":0,"t":40,"l":0,"b":0}
-                            )
                             
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Explicación de Ejes
-                            st.caption("ℹ️ **Ejes:** El eje vertical representa la **Latitud** (Norte-Sur) y el horizontal la **Longitud** (Este-Oeste). El mapa de fondo provee la ubicación geográfica real.")
-                            
-                            # Tabla de Áreas (Aprox)
-                            unique, counts = np.unique(lz_arr[lz_arr!=0], return_counts=True)
-                            data = []
-                            for v, c in zip(unique, counts):
-                                data.append({"Zona de Vida": legend_map.get(v, f"Clase {v}"), "Píxeles": c, "%": c/counts.sum()*100})
-                            st.dataframe(pd.DataFrame(data).sort_values("%", ascending=False).style.format({"%": "{:.1f}%"}), use_container_width=True)
-                    
-                    except ImportError:
-                        st.error("Función 'generate_life_zone_raster' no encontrada en analysis.py")
+                            if not np.any(mask):
+                                st.warning("El mapa se generó pero todos los píxeles son 0 (Zona Desconocida). Revisa los rangos de altitud/ppt.")
+                            else:
+                                lat_clean = lat_flat[mask]
+                                lon_clean = lon_flat[mask]
+                                z_clean = z_flat[mask]
+                                
+                                # Texto hover usando el diccionario correcto
+                                hover_text = [dynamic_legend.get(v, f"ID: {v}") for v in z_clean]
+                                
+                                # Plot
+                                fig = go.Figure(go.Scattermapbox(
+                                    lat=lat_clean,
+                                    lon=lon_clean,
+                                    mode='markers',
+                                    marker=go.scattermapbox.Marker(
+                                        size=8 if downscale > 4 else 5,
+                                        color=z_clean,
+                                        colorscale='Jet',
+                                        opacity=0.7
+                                    ),
+                                    text=hover_text,
+                                    hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
+                                ))
+                                
+                                center_lat = np.mean(lat_clean)
+                                center_lon = np.mean(lon_clean)
+                                
+                                fig.update_layout(
+                                    title="Zonas de Vida (WGS84)",
+                                    mapbox_style="carto-positron",
+                                    mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=9),
+                                    height=600,
+                                    margin={"r":0,"t":30,"l":0,"b":0}
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # --- TABLA DE ÁREAS (Usando diccionario correcto) ---
+                                unique, counts = np.unique(z_clean, return_counts=True)
+                                data_table = []
+                                total_px = counts.sum()
+                                for v, c in zip(unique, counts):
+                                    name = dynamic_legend.get(v, f"Clase Desconocida {v}")
+                                    data_table.append({"ID": v, "Zona de Vida": name, "Píxeles": c, "%": (c/total_px)*100})
+                                
+                                df_areas = pd.DataFrame(data_table).sort_values("%", ascending=False)
+                                st.dataframe(df_areas.style.format({"%": "{:.1f}%"}), use_container_width=True)
+
                     except Exception as e:
-                        st.error(f"Error inesperado: {e}")
+                        st.error(f"Error visualizando: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
 
     # --- PESTAÑA 2: PUNTOS (EXISTENTE) ---
     with tab_puntos:
@@ -2981,6 +2950,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
