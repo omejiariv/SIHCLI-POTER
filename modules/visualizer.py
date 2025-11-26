@@ -2154,24 +2154,24 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         <div style="font-size: 13px; line-height: 1.4;">
             <p><strong>Metodología:</strong> Clasificación ecológica basada en el cruce de Temperatura (estimada por Altura) y Precipitación anual.</p>
             
-            <p><strong>1. PISO NIVAL (> 4500 msnm):</strong> Zona 1. Nieves perpetuas y roca desnuda.</p>
+            1. PISO NIVAL (> 4500 msnm): 1. Nieves perpetuas y roca desnuda.
             
-            <p><strong>2. PISO ALPINO / SUPERPÁRAMO (3800 - 4500 msnm):</strong> 
-            Tundra pluvial o húmeda. Vegetación escasa, transición a nieve.</p>
+            2. PISO ALPINO / SUPERPÁRAMO (3800 - 4500 msnm):
+                Tundra pluvial o húmeda. Vegetación escasa, transición a nieve.
             
-            <p><strong>3. PISO SUBALPINO / PÁRAMO (3000 - 3800 msnm):</strong> <span style="color: #8A2BE2;">⬤</span> 
-            Ecosistema estratégico. Su baja temperatura reduce la evaporación, generando grandes excedentes de agua (oferta hídrica).</p>
+            3. PISO SUBALPINO / PÁRAMO (3000 - 3800 msnm):
+                Ecosistema estratégico. Su baja temperatura reduce la evaporación, generando grandes excedentes de agua (oferta hídrica).
             
-            <p><strong>4. PISO MONTANO (2000 - 3000 msnm):</strong> Bosques de niebla y alto andinos.</p>
+            4. PISO MONTANO (2000 - 3000 msnm): Bosques de niebla y alto andinos.
             
-            <p><strong>5. PISO PREMONTANO (1000 - 2000 msnm):</strong> Zona cafetera típica.</p>
+            5. PISO PREMONTANO (1000 - 2000 msnm): Zona cafetera típica.
             
-            <p><strong>6. PISO TROPICAL (< 1000 msnm):</strong></p>
-            <ul>
-                <li><span style="color: #FFA500;">⬤</span> <strong>Bosque Seco (bs-T):</strong> La evaporación supera a la precipitación. Déficit hídrico.</li>
-                <li><span style="color: #008000;">⬤</span> <strong>Bosque Húmedo (bh-T):</strong> Equilibrio o superávit hídrico.</li>
-                <li><span style="color: #00008B;">⬤</span> <strong>Pluvial:</strong> Exceso extremo de lluvia (Chocó).</li>
-            </ul>
+            6. PISO TROPICAL (< 1000 msnm):
+            
+                Bosque Seco (bs-T): La evaporación supera a la precipitación. Déficit hídrico.
+                Bosque Húmedo (bh-T): Equilibrio o superávit hídrico.
+                Pluvial:</strong> Exceso extremo de lluvia (Chocó).
+            
         </div>
         """, unsafe_allow_html=True)
     
@@ -2977,6 +2977,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
