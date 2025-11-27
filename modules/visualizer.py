@@ -14,6 +14,7 @@ from shapely.geometry import Point, LineString
 from shapely.ops import unary_union
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from math import cos, radians
 import requests
 from io import BytesIO
 import os
@@ -3167,6 +3168,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
