@@ -2767,43 +2767,68 @@ def display_station_table_tab(**kwargs):
     else:
         st.warning("No hay datos para mostrar.")
 
-def display_land_cover_analysis_tab(**kwargs):
+def display_coverages_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌿 Análisis de Cobertura del Suelo y Escenarios")
     
-    # Verificar Cuenca
-    res_basin = st.session_state.get('basin_results')
-    if not res_basin or not res_basin.get('ready') or 'gdf_union' not in res_basin:
-        st.info("ℹ️ Primero analice una cuenca en la pestaña **'Mapas Avanzados'**.")
+    # 1. Recuperar la cuenca de la sesión (Usando la llave estandarizada 'basin_res')
+    res_basin = st.session_state.get('basin_res')
+    
+    # Validación robusta de la cuenca
+    if not res_basin or not res_basin.get('ready'):
+        st.info("ℹ️ Para ver el análisis de coberturas, primero debes delimitar y procesar una cuenca en la pestaña **'Mapas Avanzados'**.")
         return
 
-    gdf_basin = res_basin['gdf_union']
+    # Recuperación segura de la geometría (gdf_union o gdf_cuenca)
+    gdf_basin = res_basin.get('gdf_cuenca', res_basin.get('gdf_union'))
     basin_name = res_basin.get('names', 'Cuenca')
     
-    # Recuperación segura de variables
+    if gdf_basin is None:
+        st.error("Error: Geometría de cuenca no encontrada en memoria.")
+        return
+
+    # 2. Recuperación segura de variables hidrológicas
     bal = res_basin.get('bal', {})
     ppt_anual = bal.get('P', 0)
-    q_actual = bal.get('Q', 0) 
+    q_actual = bal.get('Q', 0)
     if q_actual == 0 and 'Q_mm' in bal: q_actual = bal['Q_mm']
     vol_actual = bal.get('Vol', 0)
 
-    # Recuperar Área de la cuenca de forma segura para usarla globalmente en la función
-    area_total_km2 = res_basin['morph']['area_km2']
+    # Recuperar Área de la cuenca
+    morph = res_basin.get('morph', {})
+    area_total_km2 = morph.get('area_km2', 100) # Default 100 para evitar división por cero
 
     st.markdown(f"Cuenca: **{basin_name}** (Ppt ref: {ppt_anual:.0f} mm/año)")
 
+    # 3. LÓGICA DE RASTER Y SIMULADOR
     try:
-        if not os.path.exists(Config.LAND_COVER_RASTER_PATH):
-            st.error(f"⚠️ Raster no encontrado: {Config.LAND_COVER_RASTER_PATH}")
+        # Verificar existencia del raster
+        if not hasattr(Config, 'LAND_COVER_RASTER_PATH') or not os.path.exists(Config.LAND_COVER_RASTER_PATH):
+            st.warning(f"⚠️ Archivo raster de coberturas no configurado o no encontrado.")
+            st.caption("Verifica 'Config.LAND_COVER_RASTER_PATH' en config.py y que el archivo exista en 'data/'.")
+            # Fallback: Mapa visual simple
+            m = folium.Map(location=[gdf_basin.centroid.y.mean(), gdf_basin.centroid.x.mean()], zoom_start=11)
+            folium.GeoJson(
+                gdf_basin, 
+                style_function=lambda x: {'fillColor': '#228B22', 'color': '#006400', 'weight': 2, 'fillOpacity': 0.3},
+                tooltip=basin_name
+            ).add_to(m)
+            st_folium(m, height=350, use_container_width=True)
             return
 
         import rasterio
         from rasterio.mask import mask
 
         with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
-            if gdf_basin.crs != src.crs: gdf_basin = gdf_basin.to_crs(src.crs)
-            out_image, _ = mask(src, gdf_basin.geometry, crop=True)
+            # Asegurar CRS coincidente
+            if gdf_basin.crs != src.crs: 
+                gdf_basin_proj = gdf_basin.to_crs(src.crs)
+            else:
+                gdf_basin_proj = gdf_basin
+            
+            out_image, _ = mask(src, gdf_basin_proj.geometry, crop=True)
             data = out_image[0]
 
+        # Leyenda Estándar (CORINE / ESA)
         legend = {
             1: "Zonas Urbanas", 2: "Cultivos Transitorios", 3: "Pastos", 4: "Áreas Agrícolas",
             5: "Bosques", 6: "Vegetación Herbácea", 7: "Áreas Abiertas", 8: "Aguas",
@@ -2812,7 +2837,7 @@ def display_land_cover_analysis_tab(**kwargs):
         
         valid_pixels = data[data != src.nodata]
         if valid_pixels.size == 0:
-            st.warning("Cuenca fuera del raster.")
+            st.warning("La cuenca seleccionada está fuera del área del raster de coberturas.")
             return
 
         unique, counts = np.unique(valid_pixels, return_counts=True)
@@ -2837,7 +2862,7 @@ def display_land_cover_analysis_tab(**kwargs):
 
         st.markdown("---")
 
-        # --- SIMULADOR ---
+        # --- SIMULADOR DE ESCENARIOS (SCS-CN) ---
         st.subheader("🎛️ Simulador de Escorrentía (SCS-CN)")
         
         with st.expander("Configuración de Números de Curva (CN)", expanded=False):
@@ -2862,11 +2887,19 @@ def display_land_cover_analysis_tab(**kwargs):
             st.warning(f"⚠️ Suma: {total_p}%. Debe ser 100%.")
         else:
             if st.button("Estimar Escorrentía del Escenario"):
+                # Cálculo de CN Ponderado
                 cn_comp = ((p_bosque*cn_bosque) + (p_pasto*cn_pasto) + (p_cultivo*cn_cultivo) + (p_urbano*cn_urbano) + (p_suelo*cn_suelo)) / 100
-                S = (25400 / cn_comp) - 254
-                Q_escenario = ((ppt_anual - 0.2 * S)**2) / (ppt_anual + 0.8 * S) if ppt_anual > 0.2 * S else 0
                 
-                # CORRECCIÓN AQUÍ: Usamos area_total_km2 definida arriba
+                # Método SCS-CN
+                # S = Retención potencial máxima (mm)
+                S = (25400 / cn_comp) - 254
+                
+                # Q = (P - 0.2S)^2 / (P + 0.8S)
+                if ppt_anual > 0.2 * S:
+                    Q_escenario = ((ppt_anual - 0.2 * S)**2) / (ppt_anual + 0.8 * S)
+                else:
+                    Q_escenario = 0
+                
                 vol_escenario = (Q_escenario * area_total_km2) / 1000
                 
                 delta_q = Q_escenario - q_actual
@@ -3168,6 +3201,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
