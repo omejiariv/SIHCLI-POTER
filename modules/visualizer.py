@@ -1380,14 +1380,50 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             ppt_med = np.nanmean(gz) if gz is not None else df_interp[Config.PRECIPITATION_COL].mean()
                             if np.isnan(ppt_med) or ppt_med <= 0: ppt_med = df_interp[Config.PRECIPITATION_COL].mean()
 
+                            # =================================================================
+                            # BLOQUE QUIRÚRGICO: CÁLCULOS HIDROLÓGICOS ROBUSTOS (TURC)
+                            # =================================================================
+                            
+                            # 1. Morfometría Base
                             morph = calculate_morphometry(geom_union)
-                            bal = calculate_hydrological_balance(ppt_med, morph.get('alt_prom_m', 1500), geom_union)
-                            bs_ts = df_raw.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
-                            c_run = bal.get('Q_mm', 0) / bal.get('P', 1) if bal.get('P', 1) > 0 else 0.4
-                            fdc = calculate_duration_curve(bs_ts, c_run, morph.get('area_km2', 100))
-                            idx = calculate_climatic_indices(bs_ts, morph.get('alt_prom_m', 1500))
+                            area_km2 = morph.get('area_km2', 100)
+                            alt_media = morph.get('alt_prom_m', 1500)
 
-                            # --- GUARDADO SEGURO EN SESIÓN (CORREGIDO) ---
+                            # 2. Temperatura Media (Estimada por gradiente)
+                            # T = 28 - 0.006 * h (Gradiente húmedo tropical)
+                            temp_media = 28 - (0.006 * alt_media)
+                            if temp_media < 0: temp_media = 0
+
+                            # 3. Balance Hídrico (Turc) usando tu función de analysis.py
+                            from modules.analysis import calculate_water_balance_turc
+                            etr_mm, q_mm = calculate_water_balance_turc(ppt_med, temp_media)
+
+                            # 4. Conversión a Caudal (m³/s) y Volumen (Mm³)
+                            seconds_per_year = 31536000
+                            vol_m3 = (q_mm / 1000) * (area_km2 * 1_000_000)
+                            q_m3s = vol_m3 / seconds_per_year
+                            vol_hm3 = vol_m3 / 1_000_000 
+
+                            # 5. Diccionario de Balance (Estandarizado)
+                            bal = {
+                                'P': ppt_med, 
+                                'ET': etr_mm, 
+                                'Q': q_mm,      # Q en mm para consistencia
+                                'Q_mm': q_mm,   # Explícito
+                                'Q_m3s': q_m3s, # Caudal medio
+                                'Vol': vol_hm3, # Volumen Millones m3
+                                'T_avg': temp_media
+                            }
+
+                            # 6. Cálculos adicionales (Series de Tiempo e Índices)
+                            bs_ts = df_raw.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
+                            # Coeficiente de escorrentía real calculado
+                            c_run = q_mm / ppt_med if ppt_med > 0 else 0.4
+                            
+                            fdc = calculate_duration_curve(bs_ts, c_run, area_km2)
+                            idx = calculate_climatic_indices(bs_ts, alt_media)
+
+                            # 7. GUARDADO EN SESIÓN (CON NUEVO BALANCE)
                             st.session_state['basin_res'] = {
                                 'ready': True, 'gz': gz, 'gx': gx, 'gy': gy,
                                 'df_interp': df_interp, 'df_raw': df_raw,
@@ -1395,6 +1431,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                                 'bal': bal, 'morph': morph, 'fdc': fdc, 'idx': idx,
                                 'bounds': bounds, 'names': ", ".join(sel_cuencas)
                             }
+                            # =================================================================
                         else: st.error("Insuficientes estaciones (<3) con datos válidos.")
                     else: st.error("Sin estaciones cercanas.")
 
@@ -3203,6 +3240,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
