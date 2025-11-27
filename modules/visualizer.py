@@ -2153,25 +2153,28 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
 
         <div style="font-size: 13px; line-height: 1.4;">
             <p><strong>Metodología:</strong> Clasificación ecológica basada en el cruce de Temperatura (estimada por Altura) y Precipitación anual.</p>
-            
+
+            Pisos Altitudinales:
             1. PISO NIVAL (> 4500 msnm): 1. Nieves perpetuas y roca desnuda.
-            
-            2. PISO ALPINO / SUPERPÁRAMO (3800 - 4500 msnm):
-                Tundra pluvial o húmeda. Vegetación escasa, transición a nieve.
-            
-            3. PISO SUBALPINO / PÁRAMO (3000 - 3800 msnm):
-                Ecosistema estratégico. Su baja temperatura reduce la evaporación, generando grandes excedentes de agua (oferta hídrica).
-            
+            2. PISO ALPINO / SUPERPÁRAMO (3800 - 4500 msnm): Tundra pluvial o húmeda. Vegetación escasa, transición a nieve.
+            3. PISO SUBALPINO / PÁRAMO (3000 - 3800 msnm): Ecosistema estratégico. Su baja temperatura reduce la evaporación, genera excedentes de agua
             4. PISO MONTANO (2000 - 3000 msnm): Bosques de niebla y alto andinos.
+            5. PISO PREMONTANO (1000 - 2000 msnm): Zona cafetera típica
+            6. PISO TROPICAL (< 1000 msnm)
+
+            Provincias de Humedad: 
+            A. SECO: (ET>ppt), Deficit hidrico, stress hidrico
+            B. HUMEDO: (ppt > 1,2 ET), equilibrio o excedente hidrico
+            c. MUY HUMEDO: (ppt > 2 ET), exceso hidrico
+            C. Pluvial: Exceso extremo de lluvia (Chocó).
             
-            5. PISO PREMONTANO (1000 - 2000 msnm): Zona cafetera típica.
-            
-            6. PISO TROPICAL (< 1000 msnm):
-            
-                Bosque Seco (bs-T): La evaporación supera a la precipitación. Déficit hídrico.
-                Bosque Húmedo (bh-T): Equilibrio o superávit hídrico.
-                Pluvial:</strong> Exceso extremo de lluvia (Chocó).
-            
+            Clases: 
+            Nival: 1; Tundra pluvial (tp-A): 2; Tundra húmeda (th-A): 3; Tundra seca (ts-A): 4; Páramo pluvial subalpino (pp-SA): 5; Páramo muy húmedo subalpino (pmh-SA): 6; 
+            Páramo seco subalpino (ps-SA): 7; Bosque pluvial Montano (bp-M): 8; Bosque muy húmedo Montano (bmh-M): 9; Bosque húmedo Montano (bh-M): 10; Bosque seco Montano (bs-M): 11; 
+            Monte espinoso Montano (me-M): 12; Bosque pluvial Premontano (bp-PM): 13, Bosque muy húmedo Premontano (bmh-PM): 14; Bosque húmedo Premontano (bh-PM): 15
+            Bosque seco Premontano (bs-PM): 16; Monte espinoso Premontano (me-PM): 17; Bosque pluvial Tropical (bp-T): 18; Bosque muy húmedo Tropical (bmh-T): 19;
+            Bosque húmedo Tropical (bh-T): 20; Bosque seco Tropical (bs-T): 21; Monte espinoso Tropical (me-T): 22; Zona Desconocida: 0
+                
         </div>
         """, unsafe_allow_html=True)
     
@@ -2977,6 +2980,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
