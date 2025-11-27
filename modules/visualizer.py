@@ -366,29 +366,33 @@ def display_iri_forecast_tab():
     
     # GRÁFICO 1: PLUMA DE MODELOS (Plume Plot)
     with tab_plume:
-        st.markdown(f"**Emisión del Pronóstico:** Mes {plume_data['month_idx']+1} / {plume_data['year']}")
+        # Título descriptivo con fecha
+        forecast_date_str = f"{plume_data['month_idx']+1}/{plume_data['year']}"
+        st.markdown(f"**Emisión del Pronóstico:** {forecast_date_str}")
         
         fig = go.Figure()
         seasons = plume_data['seasons']
         
         # Umbrales
-        fig.add_shape(type="line", x0=seasons[0], x1=seasons[-1], y0=0.5, y1=0.5, line=dict(color="red", width=1, dash="dash"))
-        fig.add_shape(type="line", x0=seasons[0], x1=seasons[-1], y0=-0.5, y1=-0.5, line=dict(color="blue", width=1, dash="dash"))
+        fig.add_shape(type="line", x0=seasons[0], x1=seasons[-1], y0=0.5, y1=0.5, line=dict(color="red", width=1, dash="dash"), name="Umbral Niño")
+        fig.add_shape(type="line", x0=seasons[0], x1=seasons[-1], y0=-0.5, y1=-0.5, line=dict(color="blue", width=1, dash="dash"), name="Umbral Niña")
         
         all_values = []
         for model in plume_data['models']:
-            color = "rgba(100, 200, 100, 0.4)" if model['type'] == 'Statistical' else "rgba(150, 150, 150, 0.4)"
+            color = "rgba(100, 200, 100, 0.6)" if model['type'] == 'Statistical' else "rgba(150, 150, 150, 0.6)"
             
             # Recortar valores
             y_vals = model['values'][:len(seasons)]
             
             fig.add_trace(go.Scatter(
                 x=seasons, y=y_vals, mode='lines', name=model['name'],
-                line=dict(color=color, width=1), showlegend=False, hoverinfo='name+y'
+                line=dict(color=color, width=1), 
+                showlegend=True, # <--- CAMBIO: Leyenda visible para cada modelo
+                hoverinfo='name+y'
             ))
             all_values.append(y_vals)
             
-        # --- CORRECCIÓN MATEMÁTICA AQUÍ ---
+        # --- CORRECCIÓN MATEMÁTICA Y PROMEDIO ---
         try:
             # 1. Encontrar longitud máxima
             max_len = max(len(v) for v in all_values) if all_values else 0
@@ -411,22 +415,34 @@ def display_iri_forecast_tab():
             fig.add_trace(go.Scatter(
                 x=seasons, y=avg_vals,
                 mode='lines+markers', name='PROMEDIO MULTIMODELO',
-                line=dict(color="black", width=4), marker=dict(size=8)
+                line=dict(color="black", width=4), marker=dict(size=8),
+                showlegend=True
             ))
         except Exception as e:
             st.warning(f"No se pudo calcular la línea de promedio: {e}")
 
         fig.update_layout(
-            title="Predicción de Anomalía SST (Región Niño 3.4)",
+            title=f"Predicción Anomalía SST - Niño 3.4 (Emisión: {forecast_date_str})", # <--- CAMBIO: Fecha en título
             yaxis_title="Anomalía de Temperatura (°C)", xaxis_title="Trimestre",
-            height=550, hovermode="x unified"
+            height=600, 
+            hovermode="x unified",
+            showlegend=True,
+            legend=dict( # <--- CAMBIO: Configuración de leyenda a la derecha
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                font=dict(size=10),
+                traceorder="normal"
+            ),
+            margin=dict(r=150) # Margen derecho para que quepa la leyenda
         )
         st.plotly_chart(fig, use_container_width=True)
         st.caption("🔴 Umbral El Niño (+0.5°C) | 🔵 Umbral La Niña (-0.5°C). Líneas grises: Modelos Dinámicos. Líneas verdes: Estadísticos.")
 
     # GRÁFICO 2: PROBABILIDADES
     with tab_prob:
-        st.markdown("##### Probabilidad Oficial de ocurrencia por trimestre")
+        st.markdown(f"##### Probabilidad Oficial (Emisión: {plume_data['month_idx']+1}/{plume_data['year']})")
         colors = {'La Niña': '#00008B', 'Neutral': '#808080', 'El Niño': '#DC143C'}
         
         fig_bar = go.Figure()
@@ -438,7 +454,7 @@ def display_iri_forecast_tab():
             ))
             
         fig_bar.update_layout(
-            barmode='stack', title="Consenso Probabilístico CPC/IRI (Objetivo)",
+            barmode='stack', title=f"Consenso Probabilístico CPC/IRI ({plume_data['year']})",
             yaxis_title="Probabilidad (%)", height=500, yaxis=dict(range=[0, 100]),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
@@ -3128,6 +3144,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
