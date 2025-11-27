@@ -2154,13 +2154,14 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         <div style="font-size: 13px; line-height: 1.4;">
             <p><strong>Metodología:</strong> Clasificación ecológica basada en el cruce de Temperatura (estimada por Altura) y Precipitación anual.</p>
 
-            Pisos Altitudinales:
-            1. PISO NIVAL (> 4500 msnm): 1. Nieves perpetuas y roca desnuda.
-            2. PISO ALPINO / SUPERPÁRAMO (3800 - 4500 msnm): Tundra pluvial o húmeda. Vegetación escasa, transición a nieve.
-            3. PISO SUBALPINO / PÁRAMO (3000 - 3800 msnm): Ecosistema estratégico. Su baja temperatura reduce la evaporación, genera excedentes de agua
-            4. PISO MONTANO (2000 - 3000 msnm): Bosques de niebla y alto andinos.
-            5. PISO PREMONTANO (1000 - 2000 msnm): Zona cafetera típica
-            6. PISO TROPICAL (< 1000 msnm)
+            Pisos Altitudinales: (Altuta vs Temperatura)
+            1. PISO NIVAL (> 4500 msnm , <-1.5C): 1. Nieves perpetuas y roca desnuda.
+            2. PISO ALPINO / SUPERPÁRAMO (3800 - 4500 msnm , >-1.5C): Tundra pluvial o húmeda. Vegetación escasa, transición a nieve.
+            3. PISO SUBALPINO / PÁRAMO (3000 - 3800 msnm , 1.5-3C): Ecosistema estratégico. baja temperatura, ET reducida, excedentes de agua.
+            4. PISO MONTANO (2000 - 3000 msnm , 3-6C): Bosques de niebla y alto andinos. [13, 14, 15]
+            5. PISO MONTANO BAJO (1000 - 2000 msnm , 6-12C): Alta biodiversidad, temperaturas moderadas y precipitaciones significativas.
+            5. PISO PREMONTANO (1000 - 2000 msnm , 12-24C): Zona cafetera típica.
+            6. PISO TROPICAL (BASAL) (h < 1000 msnm , T > 24C).
 
             Provincias de Humedad: 
             A. SECO: (ET>ppt), Deficit hidrico, stress hidrico
@@ -2980,6 +2981,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
