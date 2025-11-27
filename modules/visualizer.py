@@ -334,10 +334,33 @@ except ImportError:
 def display_iri_forecast_tab():
     st.subheader("🌎 Pronóstico Oficial ENSO (IRI - Columbia University)")
     
-    st.info("""
-    Este módulo se conecta directamente a los servidores del **International Research Institute for Climate and Society (IRI)**.
-    Los datos se actualizan mensualmente (aprox. el día 19) y representan el estándar global para la predicción de El Niño/La Niña.
-    """)
+    # --- SECCIÓN EDUCATIVA (NUEVA CAJA DESPLEGABLE) ---
+    with st.expander("📚 Conceptos, Metodología e Importancia (Pronóstico ENSO - IRI)", expanded=False):
+        st.markdown("""
+        Este módulo se conecta directamente a los servidores del **International Research Institute for Climate and Society (IRI)**.
+        Los datos se actualizan mensualmente (aprox. el día 19) y representan el estándar global para la predicción de El Niño/La Niña.
+        1. Definición
+        El **Pronóstico ENSO del IRI** (International Research Institute for Climate and Society) es el estándar global para monitorear el fenómeno El Niño-Oscilación del Sur. Recopila y armoniza las predicciones de más de 20 instituciones científicas de todo el mundo (NASA, NOAA, JMA, ECMWF, etc.).
+
+        2. Metodología
+        El pronóstico se basa en la región **Niño 3.4** (Pacífico Ecuatorial Central) y combina dos tipos de modelos:
+        * **🤖 Modelos Dinámicos:** Usan supercomputadoras para simular las leyes físicas del océano y la atmósfera (ej. NCEP CFSv2, ECMWF). Son mejores para predicciones a largo plazo.
+        * **📈 Modelos Estadísticos:** Usan patrones históricos y matemáticas para proyectar el futuro. Son eficientes para el corto plazo.
+        
+        3. Interpretación de los Gráficos
+        * **📉 La "Pluma" (Spaghetti Plot):** Muestra la incertidumbre. Cada línea es una opinión científica distinta.
+            * **Línea Negra Gruesa:** Es el promedio de todos los modelos (Consenso). Suele ser el predictor más confiable.
+            * **Umbrales:** Si el promedio supera **+0.5°C**, se prevé **El Niño**. Si baja de **-0.5°C**, se prevé **La Niña**.
+        * **📊 Probabilidades:** Muestra el porcentaje de certeza de que ocurra cada evento (Niño, Niña o Neutral) en cada trimestre venidero.
+
+        4. Utilidad en Colombia
+        El ENSO es el principal modulador del clima en Colombia:
+        * 🔥 **El Niño:** Generalmente asociado a disminución de lluvias, sequías y altas temperaturas.
+        * 💧 **La Niña:** Generalmente asociada a aumento de lluvias, inundaciones y deslizamientos.
+        
+        5. Fuente Oficial
+        Datos provistos directamente vía FTP seguro por el [IRI / Columbia University Climate School](https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/).
+        """)
     
     # 1. Verificar credenciales y módulo
     if fetch_iri_data is None:
@@ -3144,6 +3167,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
