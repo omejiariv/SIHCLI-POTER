@@ -1541,11 +1541,13 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático & Fenómenos Globales")
     
+    # Recuperamos los datos pasados desde app.py
     df_enso = kwargs.get('df_enso')
     
+    # Definimos las 3 pestañas originales
     tab_hist, tab_iri, tab_gen = st.tabs(["📜 Historia Índices", "🌎 Pronóstico Oficial (IRI)", "⚙️ Generador Prophet"])
     
-    # --- TAB 1: HISTORIA ---
+    # --- TAB 1: HISTORIA (MANTENIDO ORIGINAL) ---
     with tab_hist:
         if df_enso is not None:
             c1, _ = st.columns([1,3])
@@ -1553,44 +1555,24 @@ def display_climate_forecast_tab(**kwargs):
             if idx in df_enso.columns:
                 d = df_enso.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
                 fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Evolución: {idx.upper()}")
+                
+                # Líneas de referencia para ONI (Niño/Niña)
                 if idx == Config.ENSO_ONI_COL:
                     fig.add_hline(y=0.5, line_dash="dot", line_color="red", annotation_text="El Niño")
                     fig.add_hline(y=-0.5, line_dash="dot", line_color="blue", annotation_text="La Niña")
+                
                 st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No hay datos históricos cargados (df_enso).")
 
-    # --- TAB 2: PRONÓSTICO IRI ---
+    # --- TAB 2: PRONÓSTICO IRI (ACTUALIZADO) ---
     with tab_iri:
-        st.markdown("#### Pronóstico ENSO (IRI / CPC)")
-        
-        with st.spinner("Consultando IRI..."):
-            df_iri = get_iri_enso_forecast()
-        
-        # URL Oficial
-        url_plume = "https://iri.columbia.edu/climate/ENSO/current/info/figure3.png"
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Probabilidades**")
-            if not df_iri.empty:
-                fig = px.bar(df_iri, x='Trimestre', y='Probabilidad', color='Evento', barmode='group',
-                             color_discrete_map={'La Niña': 'blue', 'Neutral': 'gray', 'El Niño': 'red'}, height=400)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Datos de probabilidad no disponibles.")
+        # Aquí es donde ocurre la magia nueva. 
+        # En lugar de usar el código viejo de scraping, llamamos a la función 
+        # robusta que definimos anteriormente en este mismo archivo.
+        display_iri_forecast_tab()
 
-        with c2:
-            st.markdown("**Pluma de Modelos**")
-            # Implementación Base64 (Invulnerable a bloqueos de hotlink)
-            with st.spinner("Descargando imagen segura..."):
-                img_b64 = get_img_as_base64(url_plume)
-            
-            if img_b64:
-                st.markdown(f'<img src="{img_b64}" style="width:100%; border-radius:5px;">', unsafe_allow_html=True)
-            else:
-                st.error("No se pudo descargar la imagen.")
-                st.markdown(f"[Ver enlace original]({url_plume})")
-
-    # --- TAB 3: PROPHET ---
+    # --- TAB 3: PROPHET (MANTENIDO ORIGINAL) ---
     with tab_gen:
         st.markdown("#### Generador Prophet")
         indices = {}
@@ -1598,21 +1580,39 @@ def display_climate_forecast_tab(**kwargs):
             cols_map = {Config.ENSO_ONI_COL: 'ONI', Config.SOI_COL: 'SOI', Config.IOD_COL: 'IOD'}
             for col, name in cols_map.items():
                 if col in df_enso.columns:
+                    # Preparamos el dataframe para Prophet (ds, y)
                     indices[name] = df_enso[[Config.DATE_COL, col]].rename(columns={Config.DATE_COL:'ds', col:'y'}).dropna()
         
         if indices:
-            sel_idx = st.selectbox("Índice:", list(indices.keys()))
-            hor = st.slider("Meses:", 6, 60, 24)
-            if st.button("Generar"):
+            sel_idx = st.selectbox("Índice a proyectar:", list(indices.keys()))
+            hor = st.slider("Meses a futuro:", 6, 60, 24)
+            
+            if st.button("Generar Proyección"):
                 try:
-                    m = Prophet()
-                    m.fit(indices[sel_idx])
-                    fut = m.make_future_dataframe(periods=hor, freq='MS')
-                    fc = m.predict(fut)
-                    fig = px.line(fc, x='ds', y='yhat', title=f"Proyección {sel_idx}")
-                    st.plotly_chart(fig, use_container_width=True)
+                    with st.spinner(f"Entrenando modelo Prophet para {sel_idx}..."):
+                        m = Prophet()
+                        m.fit(indices[sel_idx])
+                        fut = m.make_future_dataframe(periods=hor, freq='MS')
+                        fc = m.predict(fut)
+                        
+                        # Graficar
+                        fig = px.line(fc, x='ds', y='yhat', title=f"Proyección {sel_idx} (Prophet)")
+                        # Intervalo de confianza (opcional, visualmente ayuda)
+                        fig.add_trace(go.Scatter(
+                            x=fc['ds'], y=fc['yhat_upper'], mode='lines', 
+                            line=dict(width=0), showlegend=False, hoverinfo='skip'
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=fc['ds'], y=fc['yhat_lower'], mode='lines', 
+                            line=dict(width=0), fill='tonexty', fillcolor='rgba(68, 68, 68, 0.1)', 
+                            showlegend=False, hoverinfo='skip'
+                        ))
+                        
+                        st.plotly_chart(fig, use_container_width=True)
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Error en Prophet: {e}")
+        else:
+            st.warning("No hay datos suficientes para generar proyecciones.")
 # -----------------------------------------------------------------------------
 
 def display_trends_and_forecast_tab(**kwargs):
@@ -3144,6 +3144,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
