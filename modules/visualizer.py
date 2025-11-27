@@ -2767,7 +2767,9 @@ def display_station_table_tab(**kwargs):
     else:
         st.warning("No hay datos para mostrar.")
 
-def display_coverages_tab(df_long, gdf_stations, **kwargs):
+# PESTAÑA DE COBERTURAS (LAND COVER)
+
+def display_land_cover_analysis_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌿 Análisis de Cobertura del Suelo y Escenarios")
     
     # 1. Recuperar la cuenca de la sesión (Usando la llave estandarizada 'basin_res')
@@ -3201,6 +3203,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
