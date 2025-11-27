@@ -322,23 +322,143 @@ def display_welcome_tab():
 # -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN: CONEXIÓN CON IRI (COLUMBIA UNIVERSITY)
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=12*3600)
-def get_iri_enso_forecast():
-    url_prob = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/?enso_tab=enso-cpc_plume"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        r = requests.get(url_prob, headers=headers, timeout=15)
-        if r.status_code == 200:
-            dfs = pd.read_html(io.StringIO(r.text), match="Season")
-            if dfs:
-                df = dfs[0]
-                df.columns = ['Trimestre', 'La Niña', 'Neutral', 'El Niño']
-                df_melted = df.melt(id_vars=['Trimestre'], var_name='Evento', value_name='Probabilidad')
-                if df_melted['Probabilidad'].dtype == 'O':
-                    df_melted['Probabilidad'] = df_melted['Probabilidad'].astype(str).str.replace('%', '').astype(float)
-                return df_melted
-    except: pass
-    return pd.DataFrame()
+try:
+    from modules.iri_api import fetch_iri_data, process_iri_plume, process_iri_probabilities
+except ImportError:
+    # Evita que la app se rompa si el archivo iri_api.py aún no se ha creado o cargado
+    fetch_iri_data = None
+
+# NUEVA FUNCIÓN: VISUALIZACIÓN DEL PRONÓSTICO OFICIAL IRI/CPC
+# Columbia University
+# -----------------------------------------------------------------------------
+def display_iri_forecast_tab():
+    st.subheader("🌎 Pronóstico Oficial ENSO (IRI - Columbia University)")
+    
+    st.info("""
+    Este módulo se conecta directamente a los servidores del **International Research Institute for Climate and Society (IRI)**.
+    Los datos se actualizan mensualmente (aprox. el día 19) y representan el estándar global para la predicción de El Niño/La Niña.
+    """)
+    
+    # 1. Verificar credenciales y módulo
+    if fetch_iri_data is None:
+        st.error("⚠️ Falta el módulo 'modules/iri_api.py' o hubo un error al importarlo.")
+        return
+
+    # 2. Cargar Datos (Pluma y Probabilidades)
+    with st.spinner("Conectando con FTP seguro de IRI (Columbia University)..."):
+        # Descargamos los dos archivos clave usando las credenciales de secrets.toml
+        json_plume = fetch_iri_data("enso_plumes.json")
+        json_probs = fetch_iri_data("enso_cpc_prob.json") # Usamos el Consenso CPC/IRI (Oficial)
+    
+    if not json_plume or not json_probs:
+        st.warning("No se pudieron cargar los datos. Verifica tu conexión a internet o las credenciales en '.streamlit/secrets.toml'.")
+        return
+
+    # 3. Procesar Datos
+    plume_data = process_iri_plume(json_plume)
+    df_probs = process_iri_probabilities(json_probs)
+    
+    if not plume_data or df_probs.empty:
+        st.error("Datos recibidos pero con formato inesperado o vacíos.")
+        return
+
+    # --- VISUALIZACIÓN ---
+    
+    tab_plume, tab_prob = st.tabs(["📉 Pluma de Modelos (SST)", "📊 Probabilidades (%)"])
+    
+    # GRÁFICO 1: PLUMA DE MODELOS (Plume Plot)
+    with tab_plume:
+        st.markdown(f"**Emisión del Pronóstico:** Mes {plume_data['month_idx']+1} / {plume_data['year']}")
+        
+        fig = go.Figure()
+        
+        # Umbrales de El Niño / La Niña (+0.5 y -0.5)
+        seasons = plume_data['seasons']
+        fig.add_shape(type="line", x0=seasons[0], x1=seasons[-1], y0=0.5, y1=0.5, line=dict(color="red", width=1, dash="dash"))
+        fig.add_shape(type="line", x0=seasons[0], x1=seasons[-1], y0=-0.5, y1=-0.5, line=dict(color="blue", width=1, dash="dash"))
+        
+        # Dibujar líneas de cada modelo
+        all_values = []
+        for model in plume_data['models']:
+            # Color según tipo de modelo (Dinámico vs Estadístico)
+            color = "rgba(150, 150, 150, 0.4)" # Dinámicos (Gris suave)
+            if model['type'] == 'Statistical':
+                color = "rgba(100, 200, 100, 0.4)" # Estadísticos (Verde suave)
+            
+            # Recortar valores para que coincidan con la longitud de seasons
+            y_vals = model['values'][:len(seasons)]
+            
+            fig.add_trace(go.Scatter(
+                x=seasons, y=y_vals,
+                mode='lines',
+                name=model['name'],
+                line=dict(color=color, width=1),
+                showlegend=False,
+                hoverinfo='name+y'
+            ))
+            # Guardar para calcular promedio
+            all_values.append(y_vals)
+            
+        # Calcular y dibujar el PROMEDIO MULTIMODELO (Línea negra gruesa)
+        try:
+            # Crear matriz rellenando con NaN para longitudes desiguales
+            max_len = max(len(v) for v in all_values)
+            padded_values = [v + [np.nan]*(max_len-len(v)) for v in all_values]
+            arr = np.array(padded_values)
+            
+            # Promedio ignorando NaNs
+            avg_vals = np.nanmean(arr, axis=0)[:len(seasons)]
+            
+            fig.add_trace(go.Scatter(
+                x=seasons, y=avg_vals,
+                mode='lines+markers',
+                name='PROMEDIO MULTIMODELO',
+                line=dict(color="black", width=4),
+                marker=dict(size=8)
+            ))
+        except Exception as e:
+            st.warning(f"No se pudo calcular la línea de promedio: {e}")
+
+        fig.update_layout(
+            title="Predicción de Anomalía SST (Región Niño 3.4)",
+            yaxis_title="Anomalía de Temperatura (°C)",
+            xaxis_title="Trimestre Pronosticado",
+            height=550,
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("🔴 Umbral El Niño (+0.5°C) | 🔵 Umbral La Niña (-0.5°C). Líneas grises: Modelos Dinámicos. Líneas verdes: Estadísticos.")
+
+    # GRÁFICO 2: PROBABILIDADES (Bar Chart)
+    with tab_prob:
+        st.markdown("##### Probabilidad Oficial de ocurrencia por trimestre")
+        
+        # Colores oficiales estándar para ENSO
+        colors = {'La Niña': '#00008B', 'Neutral': '#808080', 'El Niño': '#DC143C'}
+        
+        fig_bar = go.Figure()
+        for evento in ['La Niña', 'Neutral', 'El Niño']:
+            fig_bar.add_trace(go.Bar(
+                x=df_probs['Trimestre'],
+                y=df_probs[evento],
+                name=evento,
+                marker_color=colors[evento],
+                text=df_probs[evento].apply(lambda x: f"{x}%"),
+                textposition='auto'
+            ))
+            
+        fig_bar.update_layout(
+            barmode='stack', # Barras apiladas para ver el 100%
+            title="Consenso Probabilístico CPC/IRI (Objetivo)",
+            yaxis_title="Probabilidad (%)",
+            height=500,
+            yaxis=dict(range=[0, 100]),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+        
+        # Tabla de datos detallada
+        st.dataframe(df_probs.set_index('Trimestre'), use_container_width=True)
     
 # 2. NUEVA PESTAÑA UNIFICADA: MONITOREO Y TIEMPO REAL
 # -----------------------------------------------------------------------------
@@ -3024,6 +3144,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
