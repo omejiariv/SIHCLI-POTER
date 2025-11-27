@@ -346,9 +346,8 @@ def display_iri_forecast_tab():
 
     # 2. Cargar Datos (Pluma y Probabilidades)
     with st.spinner("Conectando con FTP seguro de IRI (Columbia University)..."):
-        # Descargamos los dos archivos clave usando las credenciales de secrets.toml
         json_plume = fetch_iri_data("enso_plumes.json")
-        json_probs = fetch_iri_data("enso_cpc_prob.json") # Usamos el Consenso CPC/IRI (Oficial)
+        json_probs = fetch_iri_data("enso_cpc_prob.json")
     
     if not json_plume or not json_probs:
         st.warning("No se pudieron cargar los datos. Verifica tu conexión a internet o las credenciales en '.streamlit/secrets.toml'.")
@@ -363,7 +362,6 @@ def display_iri_forecast_tab():
         return
 
     # --- VISUALIZACIÓN ---
-    
     tab_plume, tab_prob = st.tabs(["📉 Pluma de Modelos (SST)", "📊 Probabilidades (%)"])
     
     # GRÁFICO 1: PLUMA DE MODELOS (Plume Plot)
@@ -371,97 +369,83 @@ def display_iri_forecast_tab():
         st.markdown(f"**Emisión del Pronóstico:** Mes {plume_data['month_idx']+1} / {plume_data['year']}")
         
         fig = go.Figure()
-        
-        # Umbrales de El Niño / La Niña (+0.5 y -0.5)
         seasons = plume_data['seasons']
+        
+        # Umbrales
         fig.add_shape(type="line", x0=seasons[0], x1=seasons[-1], y0=0.5, y1=0.5, line=dict(color="red", width=1, dash="dash"))
         fig.add_shape(type="line", x0=seasons[0], x1=seasons[-1], y0=-0.5, y1=-0.5, line=dict(color="blue", width=1, dash="dash"))
         
-        # Dibujar líneas de cada modelo
         all_values = []
         for model in plume_data['models']:
-            # Color según tipo de modelo (Dinámico vs Estadístico)
-            color = "rgba(150, 150, 150, 0.4)" # Dinámicos (Gris suave)
-            if model['type'] == 'Statistical':
-                color = "rgba(100, 200, 100, 0.4)" # Estadísticos (Verde suave)
+            color = "rgba(100, 200, 100, 0.4)" if model['type'] == 'Statistical' else "rgba(150, 150, 150, 0.4)"
             
-            # Recortar valores para que coincidan con la longitud de seasons
+            # Recortar valores
             y_vals = model['values'][:len(seasons)]
             
             fig.add_trace(go.Scatter(
-                x=seasons, y=y_vals,
-                mode='lines',
-                name=model['name'],
-                line=dict(color=color, width=1),
-                showlegend=False,
-                hoverinfo='name+y'
+                x=seasons, y=y_vals, mode='lines', name=model['name'],
+                line=dict(color=color, width=1), showlegend=False, hoverinfo='name+y'
             ))
-            # Guardar para calcular promedio
             all_values.append(y_vals)
             
-        # Calcular y dibujar el PROMEDIO MULTIMODELO (Línea negra gruesa)
+        # --- CORRECCIÓN MATEMÁTICA AQUÍ ---
         try:
-            # Crear matriz rellenando con NaN para longitudes desiguales
-            max_len = max(len(v) for v in all_values)
-            padded_values = [v + [np.nan]*(max_len-len(v)) for v in all_values]
-            arr = np.array(padded_values)
+            # 1. Encontrar longitud máxima
+            max_len = max(len(v) for v in all_values) if all_values else 0
             
-            # Promedio ignorando NaNs
+            # 2. Limpiar matriz: Convertir 'None' a 'np.nan' y rellenar huecos
+            clean_matrix = []
+            for v in all_values:
+                # Convertimos None -> np.nan (float)
+                row_clean = [val if val is not None else np.nan for val in v]
+                # Rellenamos si falta longitud
+                padding = [np.nan] * (max_len - len(row_clean))
+                clean_matrix.append(row_clean + padding)
+            
+            # 3. Crear array float explícito (evita el error de tipos mixtos)
+            arr = np.array(clean_matrix, dtype=float)
+            
+            # 4. Calcular promedio ignorando NaNs
             avg_vals = np.nanmean(arr, axis=0)[:len(seasons)]
             
             fig.add_trace(go.Scatter(
                 x=seasons, y=avg_vals,
-                mode='lines+markers',
-                name='PROMEDIO MULTIMODELO',
-                line=dict(color="black", width=4),
-                marker=dict(size=8)
+                mode='lines+markers', name='PROMEDIO MULTIMODELO',
+                line=dict(color="black", width=4), marker=dict(size=8)
             ))
         except Exception as e:
             st.warning(f"No se pudo calcular la línea de promedio: {e}")
 
         fig.update_layout(
             title="Predicción de Anomalía SST (Región Niño 3.4)",
-            yaxis_title="Anomalía de Temperatura (°C)",
-            xaxis_title="Trimestre Pronosticado",
-            height=550,
-            hovermode="x unified"
+            yaxis_title="Anomalía de Temperatura (°C)", xaxis_title="Trimestre",
+            height=550, hovermode="x unified"
         )
         st.plotly_chart(fig, use_container_width=True)
         st.caption("🔴 Umbral El Niño (+0.5°C) | 🔵 Umbral La Niña (-0.5°C). Líneas grises: Modelos Dinámicos. Líneas verdes: Estadísticos.")
 
-    # GRÁFICO 2: PROBABILIDADES (Bar Chart)
+    # GRÁFICO 2: PROBABILIDADES
     with tab_prob:
         st.markdown("##### Probabilidad Oficial de ocurrencia por trimestre")
-        
-        # Colores oficiales estándar para ENSO
         colors = {'La Niña': '#00008B', 'Neutral': '#808080', 'El Niño': '#DC143C'}
         
         fig_bar = go.Figure()
         for evento in ['La Niña', 'Neutral', 'El Niño']:
             fig_bar.add_trace(go.Bar(
-                x=df_probs['Trimestre'],
-                y=df_probs[evento],
-                name=evento,
-                marker_color=colors[evento],
-                text=df_probs[evento].apply(lambda x: f"{x}%"),
+                x=df_probs['Trimestre'], y=df_probs[evento], name=evento,
+                marker_color=colors[evento], text=df_probs[evento].apply(lambda x: f"{x}%"),
                 textposition='auto'
             ))
             
         fig_bar.update_layout(
-            barmode='stack', # Barras apiladas para ver el 100%
-            title="Consenso Probabilístico CPC/IRI (Objetivo)",
-            yaxis_title="Probabilidad (%)",
-            height=500,
-            yaxis=dict(range=[0, 100]),
+            barmode='stack', title="Consenso Probabilístico CPC/IRI (Objetivo)",
+            yaxis_title="Probabilidad (%)", height=500, yaxis=dict(range=[0, 100]),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         st.plotly_chart(fig_bar, use_container_width=True)
-        
-        # Tabla de datos detallada
         st.dataframe(df_probs.set_index('Trimestre'), use_container_width=True)
     
 # 2. NUEVA PESTAÑA UNIFICADA: MONITOREO Y TIEMPO REAL
-# -----------------------------------------------------------------------------
 
 def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
     st.header("🚨 Centro de Monitoreo y Tiempo Real")
@@ -3144,6 +3128,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
