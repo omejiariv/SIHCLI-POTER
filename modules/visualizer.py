@@ -2259,6 +2259,36 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 
                                 center_lat = np.mean(lat_clean)
                                 center_lon = np.mean(lon_clean)
+
+                                # --- CÁLCULO DE HECTÁREAS ---
+                                # 1 grado latitud ≈ 111,132 metros
+                                # 1 grado longitud ≈ 111,132 * cos(lat) metros
+                                meters_per_deg_lat = 111132.0
+                                meters_per_deg_lon = 111132.0 * cos(radians(center_lat))
+                                
+                                # Área de un píxel en metros cuadrados
+                                pixel_width_m = abs(dx) * meters_per_deg_lon
+                                pixel_height_m = abs(dy) * meters_per_deg_lat
+                                pixel_area_ha = (pixel_width_m * pixel_height_m) / 10000.0
+                                
+                                # --- VISUALIZACIÓN ---
+                                colors_hex = [color_map.get(v, "#808080") for v in z_clean]
+                                
+                                # AHORA EL HOVER INCLUYE EL ID
+                                hover_text = [f"[ID: {v}] {dynamic_legend.get(v, 'Desconocido')}" for v in z_clean]
+                                
+                                fig = go.Figure(go.Scattermapbox(
+                                    lat=lat_clean,
+                                    lon=lon_clean,
+                                    mode='markers',
+                                    marker=go.scattermapbox.Marker(
+                                        size=8 if downscale > 4 else 5,
+                                        color=colors_hex,
+                                        opacity=0.75
+                                    ),
+                                    text=hover_text,
+                                    hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
+                                ))
                                 
                                 fig.update_layout(
                                     title="Zonas de Vida (Clasificación Holdridge)",
@@ -2270,28 +2300,41 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
                                 
-                                # Tabla de Áreas
+                                # --- TABLA DE ÁREAS CON HECTÁREAS ---
                                 unique, counts = np.unique(z_clean, return_counts=True)
                                 data_table = []
                                 total_px = counts.sum()
+                                
                                 for v, c in zip(unique, counts):
                                     name = dynamic_legend.get(v, f"Clase {v}")
+                                    area_ha = c * pixel_area_ha
+                                    
                                     data_table.append({
+                                        "ID": v,
                                         "Zona de Vida": name, 
-                                        "Píxeles": c, 
+                                        "Píxeles": c,
+                                        "Área (ha)": area_ha, # Nueva columna
                                         "%": (c/total_px)*100
                                     })
                                 
                                 df_areas = pd.DataFrame(data_table).sort_values("%", ascending=False)
-                                st.dataframe(df_areas.style.format({"%": "{:.1f}%"}), use_container_width=True)
+                                
+                                # Formato numérico
+                                st.dataframe(
+                                    df_areas.style.format({
+                                        "%": "{:.1f}%",
+                                        "Área (ha)": "{:,.2f}"
+                                    }), 
+                                    use_container_width=True
+                                )
 
                     except ImportError as ie:
                         st.error(f"Error de Importación: {ie}.")
                     except Exception as e:
                         st.error(f"Error visualizando: {e}")
                         import traceback
-                        st.code(traceback.format_exc())
-
+                        st.code(traceback.format_exc())                                
+                                
     # --- PESTAÑA 2: PUNTOS ---
     with tab_puntos:
         df_anual = kwargs.get('df_anual_melted')
@@ -2981,6 +3024,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
