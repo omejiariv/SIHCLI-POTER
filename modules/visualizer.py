@@ -485,53 +485,100 @@ def display_iri_forecast_tab():
         st.plotly_chart(fig_bar, use_container_width=True)
         st.dataframe(df_probs.set_index('Trimestre'), use_container_width=True)
     
-# 2. NUEVA PESTAÑA UNIFICADA: MONITOREO Y TIEMPO REAL
-
+# CENTRO DE MONITOREO Y TIEMPO REAL (DASHBOARD)
+# -----------------------------------------------------------------------------
 def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
     st.header("🚨 Centro de Monitoreo y Tiempo Real")
     
     tab_fc, tab_sat, tab_alert = st.tabs(["🌦️ Pronóstico Semanal", "🛰️ Satélite en Vivo", "📊 Alertas Históricas"])
 
-    # --- SUB-PESTAÑA 1: PRONÓSTICO COMPLETO (RESTAURADO) ---
+    # --- SUB-PESTAÑA 1: PRONÓSTICO COMPLETO ---
     with tab_fc:
-        if gdf_filtered is None or gdf_filtered.empty: st.warning("Seleccione estaciones."); return
-        sel_st = st.selectbox("Estación:", sorted(gdf_filtered[Config.STATION_NAME_COL].unique()))
+        if gdf_filtered is None or gdf_filtered.empty: 
+            st.warning("⚠️ Seleccione al menos una estación en el menú lateral.")
+            return
+            
+        # Selector de Estación
+        estaciones_list = sorted(gdf_filtered[Config.STATION_NAME_COL].unique())
+        sel_st = st.selectbox("Estación para Pronóstico:", estaciones_list)
         
         if sel_st:
             st_dat = gdf_filtered[gdf_filtered[Config.STATION_NAME_COL] == sel_st].iloc[0]
-            with st.spinner("Consultando satélites y modelos meteorológicos..."):
-                lat = st_dat['latitude'] if 'latitude' in st_dat else st_dat.geometry.y
-                lon = st_dat['longitude'] if 'longitude' in st_dat else st_dat.geometry.x
-                df = get_weather_forecast_detailed(lat, lon)
             
-            if not df.empty:
+            # Intentar obtener pronóstico
+            df_forecast = pd.DataFrame()
+            try:
+                # Importamos aquí para evitar ciclos si no se usa
+                from modules.openmeteo_api import get_weather_forecast_detailed
+                
+                with st.spinner("Consultando modelos meteorológicos globales..."):
+                    lat = st_dat['latitude'] if 'latitude' in st_dat else st_dat.geometry.y
+                    lon = st_dat['longitude'] if 'longitude' in st_dat else st_dat.geometry.x
+                    df_forecast = get_weather_forecast_detailed(lat, lon)
+            except Exception as e:
+                st.error(f"Error consultando pronóstico: {e}")
+            
+            if not df_forecast.empty:
                 # 1. TARJETAS DE RESUMEN (HOY)
-                td = df.iloc[0]
+                td = df_forecast.iloc[0] # Datos de hoy/ahora
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("T. Máx/Mín", f"{td['T. Máx (°C)']}/{td['T. Mín (°C)']}°C")
-                c2.metric("Lluvia Hoy", f"{td['Ppt. (mm)']}mm")
-                c3.metric("Viento Máx", f"{td['Viento Máx (km/h)']}km/h")
-                c4.metric("Radiación", f"{td['Radiación SW (MJ/m²)']}MJ/m²")
+                c1.metric("🌡️ T. Máx/Mín", f"{td.get('T. Máx (°C)', '--')}/{td.get('T. Mín (°C)', '--')}°C")
+                c2.metric("🌧️ Lluvia Hoy", f"{td.get('Ppt. (mm)', 0):.1f} mm")
+                c3.metric("🌬️ Viento Máx", f"{td.get('Viento Máx (km/h)', 0):.1f} km/h")
+                c4.metric("☀️ Radiación", f"{td.get('Radiación SW (MJ/m²)', 0):.1f} MJ/m²")
                 
                 # 2. GRÁFICO PRINCIPAL (Climograma)
-                st.markdown("#### 🌡️ Temperatura y Precipitación")
+                st.markdown("#### 🌡️ Temperatura y Precipitación (7 Días)")
+                
                 fig = make_subplots(specs=[[{"secondary_y": True}]])
-                fig.add_trace(go.Scatter(x=df['Fecha'], y=df['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
-                fig.add_trace(go.Scatter(x=df['Fecha'], y=df['T. Mín (°C)'], name='Min', line=dict(color='blue'), fill='tonexty'), secondary_y=False)
-                fig.add_trace(go.Bar(x=df['Fecha'], y=df['Ppt. (mm)'], name='Ppt', marker_color='green', opacity=0.6), secondary_y=True)
-                fig.update_layout(height=400, hovermode="x unified")
-                st.plotly_chart(fig, use_container_width=True) # Plotly siempre usa container_width, eso está bien
+                
+                # Lluvia (Barras - Eje Derecha)
+                fig.add_trace(go.Bar(
+                    x=df_forecast['Fecha'], y=df_forecast['Ppt. (mm)'], 
+                    name='Lluvia (mm)', marker_color='#4682B4', opacity=0.6
+                ), secondary_y=True)
+                
+                # Temperatura (Líneas - Eje Izquierda)
+                fig.add_trace(go.Scatter(
+                    x=df_forecast['Fecha'], y=df_forecast['T. Máx (°C)'], 
+                    name='T. Máx', line=dict(color='#FF4500', width=2)
+                ), secondary_y=False)
+                
+                fig.add_trace(go.Scatter(
+                    x=df_forecast['Fecha'], y=df_forecast['T. Mín (°C)'], 
+                    name='T. Mín', line=dict(color='#1E90FF', width=2),
+                    fill='tonexty' # Relleno entre lineas
+                ), secondary_y=False)
+                
+                # Layout Ajustado para evitar cortes
+                fig.update_layout(
+                    height=450, 
+                    hovermode="x unified",
+                    legend=dict(
+                        orientation="h",       # Horizontal
+                        yanchor="bottom", y=1.02, # Arriba del gráfico
+                        xanchor="right", x=1
+                    ),
+                    margin=dict(l=50, r=50, t=50, b=50)
+                )
+                
+                # Ejes
+                fig.update_yaxes(title_text="Temperatura (°C)", secondary_y=False, showgrid=True)
+                fig.update_yaxes(title_text="Precipitación (mm)", secondary_y=True, showgrid=False, range=[0, max(df_forecast['Ppt. (mm)'].max()*3, 10)])
+                
+                st.plotly_chart(fig, use_container_width=True)
 
-                # 3. GRÁFICOS SECUNDARIOS (LO QUE FALTABA)
+                # 3. GRÁFICOS SECUNDARIOS
                 st.markdown("#### 🍃 Condiciones Atmosféricas")
                 col_g1, col_g2 = st.columns(2)
                 
                 with col_g1:
                     # Humedad y Presión
                     fig_atm = make_subplots(specs=[[{"secondary_y": True}]])
-                    fig_atm.add_trace(go.Scatter(x=df['Fecha'], y=df['HR Media (%)'], name='Humedad', line=dict(color='teal')), secondary_y=False)
-                    fig_atm.add_trace(go.Scatter(x=df['Fecha'], y=df['Presión (hPa)'], name='Presión', line=dict(color='purple', dash='dot')), secondary_y=True)
-                    fig_atm.update_layout(title="Humedad y Presión", height=350, legend=dict(orientation="h"))
+                    fig_atm.add_trace(go.Scatter(x=df_forecast['Fecha'], y=df_forecast['HR Media (%)'], name='Humedad', line=dict(color='teal')), secondary_y=False)
+                    fig_atm.add_trace(go.Scatter(x=df_forecast['Fecha'], y=df_forecast.get('Presión (hPa)', [1013]*len(df_forecast)), name='Presión', line=dict(color='purple', dash='dot')), secondary_y=True)
+                    
+                    fig_atm.update_layout(title="Humedad y Presión", height=350, legend=dict(orientation="h", y=-0.2))
                     fig_atm.update_yaxes(title_text="HR (%)", secondary_y=False)
                     fig_atm.update_yaxes(title_text="hPa", secondary_y=True, showgrid=False)
                     st.plotly_chart(fig_atm, use_container_width=True)
@@ -539,16 +586,19 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
                 with col_g2:
                     # Energía y Agua (Radiación + ET0)
                     fig_nrg = make_subplots(specs=[[{"secondary_y": True}]])
-                    fig_nrg.add_trace(go.Bar(x=df['Fecha'], y=df['Radiación SW (MJ/m²)'], name='Radiación', marker_color='gold'), secondary_y=False)
-                    fig_nrg.add_trace(go.Scatter(x=df['Fecha'], y=df['ET₀ (mm)'], name='Evapotranspiración', line=dict(color='green')), secondary_y=True)
-                    fig_nrg.update_layout(title="Energía y Ciclo del Agua", height=350, legend=dict(orientation="h"))
+                    fig_nrg.add_trace(go.Bar(x=df_forecast['Fecha'], y=df_forecast['Radiación SW (MJ/m²)'], name='Radiación', marker_color='gold'), secondary_y=False)
+                    fig_nrg.add_trace(go.Scatter(x=df_forecast['Fecha'], y=df_forecast['ET₀ (mm)'], name='Evapotranspiración', line=dict(color='green')), secondary_y=True)
+                    
+                    fig_nrg.update_layout(title="Energía y Ciclo del Agua", height=350, legend=dict(orientation="h", y=-0.2))
                     fig_nrg.update_yaxes(title_text="MJ/m²", secondary_y=False)
                     fig_nrg.update_yaxes(title_text="mm", secondary_y=True, showgrid=False)
                     st.plotly_chart(fig_nrg, use_container_width=True)
 
                 # 4. TABLA DETALLADA
                 with st.expander("Ver Tabla de Datos Completa"): 
-                    st.dataframe(df, use_container_width=True)
+                    st.dataframe(df_forecast, use_container_width=True)
+            else:
+                st.info("No se pudo obtener el pronóstico para esta ubicación. Intente más tarde.")
 
     # --- SUB-PESTAÑA 2: SATÉLITE (ESTABILIZADA) ---
     with tab_sat:
@@ -3240,6 +3290,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
