@@ -8,7 +8,7 @@ import pandas as pd
 import geopandas as gpd
 import numpy as np
 import folium
-from folium.plugins import MarkerCluster
+from folium.plugins import MarkerCluster, LocateControl
 from streamlit_folium import st_folium
 from shapely.geometry import Point, LineString
 from shapely.ops import unary_union
@@ -49,6 +49,16 @@ except ImportError:
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
+
+# --- HELPER: GEOLOCALIZACIÓN MANUAL PARA PLOTLY ---
+def _get_user_location_sidebar():
+    """Agrega controles en el sidebar para ubicar al usuario en mapas Plotly."""
+    with st.sidebar.expander("📍 Mi Ubicación (Referencia)", expanded=False):
+        st.caption("Ingrese coordenadas para ver su ubicación en los mapas estáticos (Zonas de Vida, etc).")
+        u_lat = st.number_input("Latitud:", value=6.25, format="%.4f")
+        u_lon = st.number_input("Longitud:", value=-75.56, format="%.4f")
+        show_loc = st.checkbox("Mostrar en mapa", value=False)
+        return (u_lat, u_lon) if show_loc else None
 
 @st.cache_data(ttl=3600)
 def get_img_as_base64(url):
@@ -3290,6 +3300,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
