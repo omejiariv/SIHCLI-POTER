@@ -666,12 +666,11 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
                             ).add_to(m)
 
                     # --- GEOLOCALIZADOR NATIVO DE FOLIUM ---
-                    LocateControl(auto_start=False).add_to(m) # <--- AQUÍ ESTÁ EL BOTÓN DE GPS                    
-
+                    LocateControl(auto_start=False).add_to(m) # <--- AQUÍ ESTÁ EL BOTÓN DE GPS
+                    
                     folium.LayerControl().add_to(m)
                     st_folium(m, height=600, width="100%")
-                    
-                    st.caption("🔵 Capa de Lluvia: Radar Meteorológico (RainViewer). ☁️ Capa de Nubes: GOES-16 Infrarrojo.")
+                    st.caption("🔵 Radar: RainViewer. ☁️ Nubes: GOES-16. | 📍 Usa el botón de GPS en el mapa para ubicarte.")
                 except Exception as e:
                     st.error(f"Error cargando el mapa satelital: {e}")
 
@@ -1327,6 +1326,10 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             # ------------------------------------------
                             showlegend=False
                         ))
+
+                        # --- CAPA USUARIO ---
+                        if user_loc:
+                            fig.add_trace(go.Scatter(x=[user_loc[1]], y=[user_loc[0]], mode='markers+text', marker=dict(color='red', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))                        
                         
                         fig.update_layout(
                             title=f"Ppt Media Anual ({rng[0]}-{rng[1]})",
@@ -1467,7 +1470,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             q_m3s = vol_m3 / seconds_per_year
                             vol_hm3 = vol_m3 / 1_000_000 
 
-# 5. Cálculos Hidrológicos Completos (CORREGIDO)
+                            # 5. Cálculos Hidrológicos Completos (CORREGIDO)
                             # Calcular precipitación media usando la malla interpolada (más preciso)
                             ppt_med = np.nanmean(gz) if gz is not None else df_interp[Config.PRECIPITATION_COL].mean()
                             if np.isnan(ppt_med) or ppt_med <= 0: ppt_med = df_interp[Config.PRECIPITATION_COL].mean()
@@ -1561,6 +1564,10 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     else: xs, ys = g.geoms[0].exterior.xy
                     fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='black', width=3), name="Cuenca"))
                 except: pass
+
+                # --- CAPA USUARIO EN MAPA ISOYETAS ---
+                if user_loc:
+                    fig.add_trace(go.Scatter(x=[user_loc[1]], y=[user_loc[0]], mode='markers+text', marker=dict(color='black', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))                
                 
                 fig.update_layout(height=500, margin=dict(l=0,r=0,b=0,t=30))
                 st.plotly_chart(fig, use_container_width=True)
@@ -1649,12 +1656,11 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         * **Curva en 'S' (Madura):** Equilibrio.
                         """)
 
-                # F. Mapa Contexto
+                # C. Contexto Espacial (Folium) con GPS
                 st.markdown("---"); st.subheader("📍 Contexto Espacial")
                 bnd = res['bounds']
                 m_ctx = folium.Map([(bnd[2]+bnd[3])/2, (bnd[0]+bnd[1])/2], zoom_start=10, tiles="CartoDB positron")
-                
-                folium.GeoJson(res['gdf_cuenca'], name="Cuenca", style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
+                folium.GeoJson(res['gdf_cuenca'], style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
                 folium.GeoJson(res['gdf_buffer'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
                 
                 df_raw_ctx = res['df_raw']
@@ -1696,7 +1702,8 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         popup=popup,
                         tooltip=f"{nm} ({val:.0f} mm)"
                     ).add_to(m_ctx)
-                
+
+                LocateControl(auto_start=False).add_to(m_ctx)
                 st_folium(m_ctx, height=500, width="100%")
                 
                 with st.expander("ℹ️ Nota del Mapa de Contexto"):
@@ -2465,9 +2472,9 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         </div>
         """, unsafe_allow_html=True)
 
-    # Obtener ubicación del usuario desde el sidebar
-    user_loc = _get_user_location_sidebar()    
-    
+    # Obtener ubicación del usuario
+    user_loc = _get_user_location_sidebar()
+
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
     
     # --- PESTAÑA 1: MAPA RASTER ---
@@ -2589,6 +2596,17 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                     text=hover_text,
                                     hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
                                 ))
+                                
+                                # --- CAPA DE USUARIO (TU UBICACIÓN) ---
+                                if user_loc:
+                                    fig.add_trace(go.Scattermapbox(
+                                        lat=[user_loc[0]], lon=[user_loc[1]],
+                                        mode='markers+text',
+                                        marker=go.scattermapbox.Marker(size=15, color='black', symbol='star'),
+                                        text=["📍 TÚ ESTÁS AQUÍ"],
+                                        textposition="top center",
+                                        hoverinfo='text'
+                                    ))
                                 
                                 fig.update_layout(
                                     title="Zonas de Vida (Clasificación Holdridge)",
@@ -3372,6 +3390,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
