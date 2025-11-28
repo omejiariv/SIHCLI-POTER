@@ -665,6 +665,9 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
                                 tooltip=row[Config.STATION_NAME_COL]
                             ).add_to(m)
 
+                    # --- GEOLOCALIZADOR NATIVO DE FOLIUM ---
+                    LocateControl(auto_start=False).add_to(m) # <--- AQUÍ ESTÁ EL BOTÓN DE GPS                    
+
                     folium.LayerControl().add_to(m)
                     st_folium(m, height=600, width="100%")
                     
@@ -2419,6 +2422,9 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                 
         </div>
         """, unsafe_allow_html=True)
+
+    # Obtener ubicación del usuario desde el sidebar
+    user_loc = _get_user_location_sidebar()    
     
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
     
@@ -2497,6 +2503,17 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                     text=hover_text,
                                     hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
                                 ))
+
+                                # --- CAPA DE USUARIO (TU UBICACIÓN) ---
+                                if user_loc:
+                                    fig.add_trace(go.Scattermapbox(
+                                        lat=[user_loc[0]], lon=[user_loc[1]],
+                                        mode='markers+text',
+                                        marker=go.scattermapbox.Marker(size=15, color='black', symbol='star'),
+                                        text=["📍 TÚ ESTÁS AQUÍ"],
+                                        textposition="top center",
+                                        hoverinfo='text'
+                                    ))
                                 
                                 center_lat = np.mean(lat_clean)
                                 center_lon = np.mean(lon_clean)
@@ -2605,6 +2622,15 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                     merged, lat="latitude", lon="longitude", color="Zona de Vida", size=Config.PRECIPITATION_COL,
                     hover_name=Config.STATION_NAME_COL, zoom=8, mapbox_style="carto-positron", title="Clasificación en Estaciones"
                 )
+
+                # Capa Usuario
+                if user_loc:
+                    fig_map.add_trace(go.Scattermapbox(
+                        lat=[user_loc[0]], lon=[user_loc[1]], mode='markers+text',
+                        marker=go.scattermapbox.Marker(size=12, color='black', symbol='star'),
+                        text=["📍 TÚ"], textposition="top center"
+                    ))
+                
                 st.plotly_chart(fig_map, use_container_width=True)
                 st.dataframe(merged[[Config.STATION_NAME_COL, 'Zona de Vida', Config.PRECIPITATION_COL, Config.ALTITUDE_COL]], use_container_width=True)
             except Exception as e:
@@ -2911,6 +2937,10 @@ def display_land_cover_analysis_tab(df_long, gdf_stations, **kwargs):
                 style_function=lambda x: {'fillColor': '#228B22', 'color': '#006400', 'weight': 2, 'fillOpacity': 0.3},
                 tooltip=basin_name
             ).add_to(m)
+
+            # --- GEOLOCALIZADOR FOLIUM ---
+            LocateControl(auto_start=False).add_to(m)
+            
             st_folium(m, height=350, use_container_width=True)
             return
 
@@ -3300,6 +3330,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
