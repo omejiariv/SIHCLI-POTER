@@ -1675,6 +1675,10 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 st.markdown("---"); st.subheader("📍 Contexto Espacial")
                 bnd = res['bounds']
                 m_ctx = folium.Map([(bnd[2]+bnd[3])/2, (bnd[0]+bnd[1])/2], zoom_start=10, tiles="CartoDB positron")
+                # Capa Buffer para contexto
+                if 'gdf_buffer' in res and res['gdf_buffer'] is not None:
+                    folium.GeoJson(res['gdf_buffer'], style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}, name="Área Influencia").add_to(m_ctx)
+                
                 folium.GeoJson(res['gdf_cuenca'], style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
 
                 df_raw_ctx = res['df_raw']
@@ -3404,6 +3408,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
