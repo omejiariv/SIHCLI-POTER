@@ -1310,16 +1310,14 @@ def display_satellite_imagery_tab(gdf_filtered):
             st.error("⚠️ No se pudo descargar la animación automáticamente.")
             st.markdown(f"[Haga clic aquí para verla directamente en la NOAA]({url_gif})")
 
-def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtered, **kwargs):
+def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
     """
-    Módulo Completo de Análisis Espacial e Hidrológico.
-    Incluye: Interpolación Regional, Comparación, Balance Hídrico, Curvas FDC/Hipsométricas y Popups Ricos.
+    Versión Completa: Interpolación Regional + Análisis de Cuenca Detallado.
+    Incluye Geolocation y Fix de Balance Hídrico (Turc).
     """
     selected_months = kwargs.get('selected_months', [])
-    
     titulo_meses = ""
     if selected_months and len(selected_months) < 12:
-        # Convertir números de mes a nombres cortos
         nombres_meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
         meses_str = ", ".join([nombres_meses[m-1] for m in selected_months])
         titulo_meses = f" ({meses_str})"
@@ -1332,14 +1330,10 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
     # Obtener ubicación del usuario (PARA MAPAS ESTÁTICOS)
     user_loc = _get_user_location_sidebar()
 
-    # --- LÓGICA DE INTERPOLACIÓN ROBUSTA ---
+    # --- HELPER INTERPOLACIÓN ---
     def run_interp(df_puntos, metodo, bounds_box):
-        """Genera la malla de interpolación (gx, gy, gz)."""
         try:
-            # Grid denso (100x100)
             gx, gy = np.mgrid[bounds_box[0]:bounds_box[1]:100j, bounds_box[2]:bounds_box[3]:100j]
-            
-            # Limpiar coordenadas duplicadas para evitar errores de matriz singular en RBF
             df_unique = df_puntos.drop_duplicates(subset=['longitude', 'latitude'])
             pts = df_unique[['longitude', 'latitude']].values
             vals = df_unique[Config.PRECIPITATION_COL].values
@@ -1347,67 +1341,70 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             if len(pts) < 3: return None, None, None
 
             if "Kriging" in metodo or "RBF" in metodo:
-                # Rbf 'thin_plate' es excelente para topografía y lluvia (suave y extrapola bien para llenar huecos)
                 rbf = Rbf(pts[:,0], pts[:,1], vals, function='thin_plate')
                 gz = rbf(gx, gy)
             else:
-                # IDW / Spline (Scipy griddata) - Puede dejar huecos fuera del Convex Hull
                 method_scipy = 'cubic' if 'Spline' in metodo else 'linear'
                 gz = griddata(pts, vals, (gx, gy), method=method_scipy)
             return gx, gy, gz
-        except Exception as e:
-            print(f"Error Interpolación: {e}")
-            return None, None, None
+        except Exception: return None, None, None
 
-    # --- LÓGICA DE CÁLCULO DE LLUVIA ANUAL REAL ---
+    # --- HELPER PROMEDIOS ---
     def calcular_promedios_reales(df_datos):
-        """Calcula Ppt Anual sumando solo años completos (>10 meses)."""
         if df_datos.empty: return pd.DataFrame()
-        
-        # 1. Contar registros por año/estación
         conteo = df_datos[df_datos[Config.PRECIPITATION_COL] >= 0].groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).size()
-        # 2. Identificar años válidos (ej. >= 10 meses de datos)
         anos_validos = conteo[conteo >= 10].index
-        
-        # 3. Filtrar datos originales
         df_filtrado = df_datos.set_index([Config.STATION_NAME_COL, Config.YEAR_COL]).loc[anos_validos].reset_index()
-        
-        # 4. Suma Anual -> Promedio Multianual
         suma_anual = df_filtrado.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
-        promedio_multianual = suma_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-        
-        return promedio_multianual
+        return suma_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
 
-    # ==========================================================================
-    # MODO 1: REGIONAL (COMPARACIÓN)
-    # ==========================================================================
+    # MODO 1: REGIONAL
     if mode == "Regional (Comparación)":
         st.markdown("#### 🆚 Comparación de Periodos Climáticos")
-        st.info("Visualice cambios en el patrón de lluvias entre dos periodos.")
-
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("###### Periodo 1 (Referencia)")
+            st.markdown("###### Periodo 1")
             r1 = st.slider("Rango P1:", 1980, 2024, (1990, 2000), key="r1")
             m1 = st.selectbox("Método P1:", ["Kriging (RBF)", "IDW (Lineal)", "Spline"], key="m1")
         with c2:
-            st.markdown("###### Periodo 2 (Reciente)")
+            st.markdown("###### Periodo 2")
             r2 = st.slider("Rango P2:", 1980, 2024, (2010, 2020), key="r2")
             m2 = st.selectbox("Método P2:", ["Kriging (RBF)", "IDW (Lineal)", "Spline"], key="m2")
 
-        # Botón de cálculo con persistencia de estado
         if st.button("🚀 Generar Comparación"):
             st.session_state['regional_done'] = True
-            st.session_state['reg_params'] = {'r1': r1, 'm1': m1, 'r2': r2, 'm2': m2}
+            st.session_state['reg_params'] = {'r1':r1, 'm1':m1, 'r2':r2, 'm2':m2}
 
-        # Si ya se ejecutó el cálculo, mostrar resultados
         if st.session_state.get('regional_done'):
             p = st.session_state['reg_params']
+            def plot_panel(rng, meth, col, tag, u_loc):
+                mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
+                df_sub = df_long[mask]
+                df_avg = calcular_promedios_reales(df_sub)
+                
+                if df_avg.empty: col.warning(f"Sin datos para {rng}"); return
+
+                # Corrección de índice si es necesario
+                if Config.STATION_NAME_COL not in df_avg.columns: df_avg = df_avg.reset_index()
+                
+                df_m = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
+                if len(df_m) > 2:
+                    bounds = [df_m.longitude.min()-0.1, df_m.longitude.max()+0.1, df_m.latitude.min()-0.1, df_m.latitude.max()+0.1]
+                    gx, gy, gz = run_interp(df_m, meth, bounds)
+                    
+                    if gz is not None:
+                        fig = go.Figure(go.Contour(z=gz.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis', colorbar=dict(title='mm'), contours=dict(start=0, end=5000, size=200)))
+                        fig.add_trace(go.Scatter(x=df_m.longitude, y=df_m.latitude, mode='markers', marker=dict(color='black', size=5), text=df_m[Config.STATION_NAME_COL], hoverinfo='text', showlegend=False))
+                        
+                        # --- CAPA USUARIO ---
+                        if u_loc:
+                            fig.add_trace(go.Scatter(x=[u_loc[1]], y=[u_loc[0]], mode='markers+text', marker=dict(color='red', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))
+
+                        fig.update_layout(title=f"Ppt Media ({rng[0]}-{rng[1]})", margin=dict(l=0, r=0, b=0, t=30), height=350)
+                        col.plotly_chart(fig, use_container_width=True)
             
-            # Llamamos a la función helper externa, pasando 'user_loc' explícitamente
-            # Esto evita errores de indentación y variables no definidas
-            _plot_panel_regional(p['r1'], p['m1'], c1, "A", user_loc, df_long, gdf_stations)
-            _plot_panel_regional(p['r2'], p['m2'], c2, "B", user_loc, df_long, gdf_stations)
+            plot_panel(p['r1'], p['m1'], c1, "A", user_loc)
+            plot_panel(p['r2'], p['m2'], c2, "B", user_loc)
             
             with st.expander("ℹ️ Nota Metodológica: Interpolación Espacial"):
                 st.markdown("""
@@ -1418,10 +1415,12 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 """)
             
     # ==========================================================================
-    # MODO 2: ANÁLISIS DE CUENCA (DETALLADO)
-    # ==========================================================================
+    # MODO 2: CUENCA
     else:
         st.markdown("#### ⛰️ Análisis Hidrológico Detallado por Cuenca")
+        # gdf_subcuencas se pasa en kwargs o se asume disponible globalmente si no se pasa explícitamente en argumentos de función
+        # Ajuste: Recuperar de kwargs si existe
+        gdf_subcuencas = kwargs.get('gdf_subcuencas')
         
         if gdf_subcuencas is None or gdf_subcuencas.empty:
             st.warning("⚠️ No se ha cargado la capa de Cuencas.")
@@ -1436,7 +1435,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             meth_c = c_p2.selectbox("Método:", ["Kriging (RBF)", "IDW"])
             
             if st.button("⚡ Analizar Cuenca"):
-                with st.spinner("Procesando hidrología y morfometría..."):
+                with st.spinner("Procesando hidrología..."):
                     # 1. Geometría
                     sub = gdf_subcuencas[gdf_subcuencas[col_name].isin(sel_cuencas)]
                     geom_union = gpd.GeoDataFrame({'geometry': [sub.unary_union]}, crs=gdf_subcuencas.crs)
@@ -1453,23 +1452,9 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                         
                         # 3. Promedios Reales
                         df_ppt = calcular_promedios_reales(df_raw)
-
-                        # --- CORRECCIÓN ROBUSTA DE INDICE (A PRUEBA DE FALLOS) ---
-                        # 1. Asegurar que es DataFrame
-                        if isinstance(df_ppt, pd.Series):
-                            df_ppt = df_ppt.to_frame()
-
-                        # 2. Si 'nom_est' no es una columna, reseteamos el índice
-                        if Config.STATION_NAME_COL not in df_ppt.columns:
-                            df_ppt = df_ppt.reset_index()
+                        if isinstance(df_ppt, pd.Series): df_ppt = df_ppt.to_frame()
+                        if Config.STATION_NAME_COL not in df_ppt.columns: df_ppt = df_ppt.reset_index()
                         
-                        # 3. SALVAVIDAS: Si al resetear la columna se llamó 'index' en vez de 'nom_est', la renombramos
-                        if Config.STATION_NAME_COL not in df_ppt.columns:
-                            # Asumimos que la columna que contiene los nombres es la primera (columna 0)
-                            first_col = df_ppt.columns[0]
-                            df_ppt = df_ppt.rename(columns={first_col: Config.STATION_NAME_COL})
-                        # ---------------------------------------------------------
-
                         df_interp = pd.merge(df_ppt, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
                         
                         if len(df_interp) >= 3:
@@ -1478,96 +1463,35 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                             bounds = [b[0]-0.05, b[2]+0.05, b[1]-0.05, b[3]+0.05]
                             gx, gy, gz = run_interp(df_interp, meth_c, bounds)
                             
-                            # 5. Cálculos Hidrológicos Completos
-                            ppt_med = np.nanmean(gz) if gz is not None else df_interp[Config.PRECIPITATION_COL].mean()
-                            if np.isnan(ppt_med) or ppt_med <= 0: ppt_med = df_interp[Config.PRECIPITATION_COL].mean()
-
-                            # =================================================================
-                            # BLOQUE QUIRÚRGICO: CÁLCULOS HIDROLÓGICOS ROBUSTOS (TURC)
-                            # =================================================================
-                            
-                            # 1. Morfometría Base
-                            morph = calculate_morphometry(geom_union)
-                            area_km2 = morph.get('area_km2', 100)
-                            alt_media = morph.get('alt_prom_m', 1500)
-
-                            # 2. Temperatura Media (Estimada por gradiente)
-                            # T = 28 - 0.006 * h (Gradiente húmedo tropical)
-                            temp_media = 28 - (0.006 * alt_media)
-                            if temp_media < 0: temp_media = 0
-
-                            # 3. Balance Hídrico (Turc) usando tu función de analysis.py
-                            from modules.analysis import calculate_water_balance_turc
-                            etr_mm, q_mm = calculate_water_balance_turc(ppt_med, temp_media)
-
-                            # 4. Conversión a Caudal (m³/s) y Volumen (Mm³)
-                            seconds_per_year = 31536000
-                            vol_m3 = (q_mm / 1000) * (area_km2 * 1_000_000)
-                            q_m3s = vol_m3 / seconds_per_year
-                            vol_hm3 = vol_m3 / 1_000_000 
-
                             # 5. Cálculos Hidrológicos Completos (CORREGIDO)
-                            # Calcular precipitación media usando la malla interpolada (más preciso)
                             ppt_med = np.nanmean(gz) if gz is not None else df_interp[Config.PRECIPITATION_COL].mean()
                             if np.isnan(ppt_med) or ppt_med <= 0: ppt_med = df_interp[Config.PRECIPITATION_COL].mean()
 
-                            # A. Morfometría
                             morph = calculate_morphometry(geom_union)
                             area_km2 = morph.get('area_km2', 100)
                             alt_media = morph.get('alt_prom_m', 1500)
 
-                            # B. Temperatura Media (Estimación por gradiente altitudinal)
-                            # T = 28 - 0.006 * h (Fórmula estándar Andes tropicales)
+                            # Temperatura Media (Estimación)
                             temp_media = 28 - (0.006 * alt_media)
                             if temp_media < 0: temp_media = 0
 
-                            # C. Balance Hídrico (Turc) - Importación Segura
+                            # Balance Hídrico (Turc)
                             from modules.analysis import calculate_water_balance_turc
                             etr_mm, q_mm = calculate_water_balance_turc(ppt_med, temp_media)
 
-                            # D. Caudal y Volumen
-                            seconds_per_year = 31536000
+                            # Caudal y Volumen
                             vol_m3 = (q_mm / 1000) * (area_km2 * 1_000_000)
-                            q_m3s = vol_m3 / seconds_per_year
+                            q_m3s = vol_m3 / 31536000
                             vol_hm3 = vol_m3 / 1_000_000
 
-                            # Estructurar diccionario de balance
-                            bal = {
-                                'P': ppt_med,
-                                'ET': etr_mm,
-                                'Q': q_mm,      # Q en mm (Escorrentía)
-                                'Q_mm': q_mm,   # Redundancia explícita
-                                'Q_m3s': q_m3s, # Caudal medio (m3/s)
-                                'Vol': vol_hm3, # Volumen (Mm3)
-                                'T_avg': temp_media
-                            }
+                            bal = {'P': ppt_med, 'ET': etr_mm, 'Q': q_mm, 'Q_mm': q_mm, 'Q_m3s': q_m3s, 'Vol': vol_hm3, 'T_avg': temp_media}
 
-                            # E. Series de Tiempo e Índices
+                            # Series de Tiempo e Índices
                             bs_ts = df_raw.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
                             c_run = q_mm / ppt_med if ppt_med > 0 else 0.4
-                            
                             fdc = calculate_duration_curve(bs_ts, c_run, area_km2)
                             idx = calculate_climatic_indices(bs_ts, alt_media)
 
-                            # --- GUARDADO EN SESIÓN ---
-                            st.session_state['basin_res'] = {
-                                'ready': True, 
-                                'gz': gz, 'gx': gx, 'gy': gy, # Mantenemos la interpolación
-                                'df_interp': df_interp, 'df_raw': df_raw,
-                                'gdf_cuenca': geom_union, 'gdf_buffer': gdf_buffer, 
-                                'bal': bal, 'morph': morph, 'fdc': fdc, 'idx': idx,
-                                'bounds': bounds, 'names': ", ".join(sel_cuencas)
-                            }
-                            
-                            # 6. Cálculos adicionales (Series de Tiempo e Índices)
-                            bs_ts = df_raw.groupby(Config.DATE_COL)[Config.PRECIPITATION_COL].mean()
-                            # Coeficiente de escorrentía real calculado
-                            c_run = q_mm / ppt_med if ppt_med > 0 else 0.4
-                            
-                            fdc = calculate_duration_curve(bs_ts, c_run, area_km2)
-                            idx = calculate_climatic_indices(bs_ts, alt_media)
-
-                            # 7. GUARDADO EN SESIÓN (CON NUEVO BALANCE)
                             st.session_state['basin_res'] = {
                                 'ready': True, 'gz': gz, 'gx': gx, 'gy': gy,
                                 'df_interp': df_interp, 'df_raw': df_raw,
@@ -1575,31 +1499,8 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                                 'bal': bal, 'morph': morph, 'fdc': fdc, 'idx': idx,
                                 'bounds': bounds, 'names': ", ".join(sel_cuencas)
                             }
-                            # =================================================================
-                        else: st.error("Insuficientes estaciones (<3) con datos válidos.")
+                        else: st.error("Insuficientes estaciones (<3).")
                     else: st.error("Sin estaciones cercanas.")
-
-            # --- MOSTRAR RESULTADOS ---
-            res = st.session_state.get('basin_res')
-            if res and res.get('ready'):
-                
-                # A. Mapa Isoyetas
-                st.markdown(f"##### 🌧️ Mapa de Isoyetas: {res['names']}")
-                fig = go.Figure(go.Contour(
-                    z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:], colorscale='Blues', 
-                    colorbar=dict(title='mm/año'), contours=dict(start=0, end=6000, size=250, showlabels=True)
-                ))
-                fig.add_trace(go.Scatter(
-                    x=res['df_interp'].longitude, y=res['df_interp'].latitude, 
-                    mode='markers+text', marker=dict(color='red', size=8, line=dict(width=1, color='white')),
-                    text=res['df_interp'][Config.STATION_NAME_COL], textposition="top center", name="Estaciones"
-                ))
-                try:
-                    g = res['gdf_cuenca'].geometry.iloc[0] 
-                    if g.geom_type == 'Polygon': xs, ys = g.exterior.xy
-                    else: xs, ys = g.geoms[0].exterior.xy
-                    fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='black', width=3), name="Cuenca"))
-                except: pass
 
             # --- MOSTRAR RESULTADOS ---
             res = st.session_state.get('basin_res')
@@ -3004,49 +2905,33 @@ def display_station_table_tab(**kwargs):
 def display_land_cover_analysis_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌿 Análisis de Cobertura del Suelo y Escenarios")
     
-    # 1. Recuperar la cuenca de la sesión (Usando la llave estandarizada 'basin_res')
     res_basin = st.session_state.get('basin_res')
-    
-    # Validación robusta de la cuenca
     if not res_basin or not res_basin.get('ready'):
         st.info("ℹ️ Para ver el análisis de coberturas, primero debes delimitar y procesar una cuenca en la pestaña **'Mapas Avanzados'**.")
         return
 
-    # Recuperación segura de la geometría (gdf_union o gdf_cuenca)
     gdf_basin = res_basin.get('gdf_cuenca', res_basin.get('gdf_union'))
     basin_name = res_basin.get('names', 'Cuenca')
     
-    if gdf_basin is None:
-        st.error("Error: Geometría de cuenca no encontrada en memoria.")
-        return
+    if gdf_basin is None: st.error("Error: Geometría no encontrada."); return
 
-    # 2. Recuperación segura de variables hidrológicas
     bal = res_basin.get('bal', {})
     ppt_anual = bal.get('P', 0)
-    q_actual = bal.get('Q', 0)
-    if q_actual == 0 and 'Q_mm' in bal: q_actual = bal['Q_mm']
+    q_actual_bal = bal.get('Q', 0)
+    if q_actual_bal == 0 and 'Q_mm' in bal: q_actual_bal = bal['Q_mm']
     vol_actual = bal.get('Vol', 0)
 
-    # Recuperar Área de la cuenca
     morph = res_basin.get('morph', {})
-    area_total_km2 = morph.get('area_km2', 100) # Default 100 para evitar división por cero
+    area_total_km2 = morph.get('area_km2', 100)
 
     st.markdown(f"Cuenca: **{basin_name}** (Ppt ref: {ppt_anual:.0f} mm/año)")
 
-    # 3. LÓGICA DE RASTER Y SIMULADOR
     try:
-        # Verificar existencia del raster
         if not hasattr(Config, 'LAND_COVER_RASTER_PATH') or not os.path.exists(Config.LAND_COVER_RASTER_PATH):
-            st.warning(f"⚠️ Archivo raster de coberturas no configurado o no encontrado.")
-            st.caption("Verifica 'Config.LAND_COVER_RASTER_PATH' en config.py y que el archivo exista en 'data/'.")
-            # Fallback: Mapa visual simple
+            st.warning(f"⚠️ Archivo raster de coberturas no configurado.")
             m = folium.Map(location=[gdf_basin.centroid.y.mean(), gdf_basin.centroid.x.mean()], zoom_start=11)
-            folium.GeoJson(
-                gdf_basin, 
-                style_function=lambda x: {'fillColor': '#228B22', 'color': '#006400', 'weight': 2, 'fillOpacity': 0.3},
-                tooltip=basin_name
-            ).add_to(m)
-
+            folium.GeoJson(gdf_basin, style_function=lambda x: {'fillColor': '#228B22', 'color': '#006400', 'weight': 2, 'fillOpacity': 0.3}, tooltip=basin_name).add_to(m)
+            
             # --- GEOLOCALIZADOR FOLIUM ---
             LocateControl(auto_start=False).add_to(m)
             
@@ -3057,16 +2942,12 @@ def display_land_cover_analysis_tab(df_long, gdf_stations, **kwargs):
         from rasterio.mask import mask
 
         with rasterio.open(Config.LAND_COVER_RASTER_PATH) as src:
-            # Asegurar CRS coincidente
-            if gdf_basin.crs != src.crs: 
-                gdf_basin_proj = gdf_basin.to_crs(src.crs)
-            else:
-                gdf_basin_proj = gdf_basin
+            if gdf_basin.crs != src.crs: gdf_basin_proj = gdf_basin.to_crs(src.crs)
+            else: gdf_basin_proj = gdf_basin
             
             out_image, _ = mask(src, gdf_basin_proj.geometry, crop=True)
             data = out_image[0]
 
-        # Leyenda Estándar (CORINE / ESA)
         legend = {
             1: "Zonas Urbanas", 2: "Cultivos Transitorios", 3: "Pastos", 4: "Áreas Agrícolas",
             5: "Bosques", 6: "Vegetación Herbácea", 7: "Áreas Abiertas", 8: "Aguas",
@@ -3074,12 +2955,9 @@ def display_land_cover_analysis_tab(df_long, gdf_stations, **kwargs):
         }
         
         valid_pixels = data[data != src.nodata]
-        if valid_pixels.size == 0:
-            st.warning("La cuenca seleccionada está fuera del área del raster de coberturas.")
-            return
+        if valid_pixels.size == 0: st.warning("Cuenca fuera del raster."); return
 
         unique, counts = np.unique(valid_pixels, return_counts=True)
-        
         rows = []
         for val, count in zip(unique, counts):
             perc = (count / counts.sum()) * 100
@@ -3096,13 +2974,10 @@ def display_land_cover_analysis_tab(df_long, gdf_stations, **kwargs):
             fig = px.pie(df_cover, values='Área (km²)', names='Cobertura', hole=0.4)
             fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
             st.plotly_chart(fig, use_container_width=True)
-            st.metric("Escorrentía Actual (Q)", f"{q_actual:.0f} mm/año", f"Vol: {vol_actual:.2f} Mm³")
+            st.metric("Escorrentía Balance (Turc)", f"{q_actual_bal:.0f} mm/año", f"Vol: {vol_actual:.2f} Mm³")
 
         st.markdown("---")
-
-        # --- SIMULADOR DE ESCENARIOS (SCS-CN) ---
-        st.subheader("🎛️ Simulador de Escorrentía (SCS-CN)")
-        
+        st.subheader("🎛️ Simulador de Escorrentía (Método SCS-CN)")
         with st.expander("Configuración de Números de Curva (CN)", expanded=False):
             c_cn = st.columns(5)
             cn_bosque = c_cn[0].number_input("CN Bosque", 30, 100, 55)
@@ -3117,42 +2992,52 @@ def display_land_cover_analysis_tab(df_long, gdf_stations, **kwargs):
         p_pasto = s2.slider("% Pasto", 0, 100, 30)
         p_cultivo = s3.slider("% Cultivo", 0, 100, 20)
         p_urbano = s4.slider("% Urbano", 0, 100, 5)
-        p_suelo = s5.slider("% Suelo", 0, 100, 5)
+        p_suelo = s5.slider("% Suelo Desnudo", 0, 100, 5)
         
         total_p = p_bosque + p_pasto + p_cultivo + p_urbano + p_suelo
         
         if total_p != 100:
-            st.warning(f"⚠️ Suma: {total_p}%. Debe ser 100%.")
+            st.warning(f"⚠️ La suma de porcentajes es {total_p}%. Debe ajustar los sliders para que sumen exactamente 100%.")
         else:
             if st.button("Estimar Escorrentía del Escenario"):
-                # Cálculo de CN Ponderado
-                cn_comp = ((p_bosque*cn_bosque) + (p_pasto*cn_pasto) + (p_cultivo*cn_cultivo) + (p_urbano*cn_urbano) + (p_suelo*cn_suelo)) / 100
+                cn_escenario = ((p_bosque*cn_bosque) + (p_pasto*cn_pasto) + (p_cultivo*cn_cultivo) + (p_urbano*cn_urbano) + (p_suelo*cn_suelo)) / 100
+                if cn_escenario <= 0: cn_escenario = 1 
+                S = (25400 / cn_escenario) - 254
+                Ia = 0.2 * S 
+                if ppt_anual > Ia: Q_escenario = ((ppt_anual - Ia)**2) / (ppt_anual - Ia + S)
+                else: Q_escenario = 0
                 
-                # Método SCS-CN
-                # S = Retención potencial máxima (mm)
-                S = (25400 / cn_comp) - 254
+                vol_escenario = (Q_escenario * area_total_km2) / 1000 
                 
-                # Q = (P - 0.2S)^2 / (P + 0.8S)
-                if ppt_anual > 0.2 * S:
-                    Q_escenario = ((ppt_anual - 0.2 * S)**2) / (ppt_anual + 0.8 * S)
-                else:
-                    Q_escenario = 0
+                # Baseline aproximada SCS para comparación
+                cn_actual_pond = 0
+                for _, row in df_cover.iterrows():
+                    cob = row['Cobertura']
+                    pct = row['%']
+                    if "Bosque" in cob: cn_val = cn_bosque
+                    elif "Pasto" in cob or "Herbácea" in cob: cn_val = cn_pasto
+                    elif "Urban" in cob: cn_val = cn_urbano
+                    elif "Agua" in cob: cn_val = 100
+                    else: cn_val = cn_cultivo
+                    cn_actual_pond += (cn_val * pct / 100)
                 
-                vol_escenario = (Q_escenario * area_total_km2) / 1000
+                S_act = (25400 / cn_actual_pond) - 254
+                Ia_act = 0.2 * S_act
+                Q_actual_scs = ((ppt_anual - Ia_act)**2) / (ppt_anual - Ia_act + S_act) if ppt_anual > Ia_act else 0
                 
-                delta_q = Q_escenario - q_actual
+                delta_q = Q_escenario - Q_actual_scs
                 
-                st.success("Escenario Calculado")
+                st.success("Escenario Calculado Exitosamente")
                 col_res1, col_res2, col_res3 = st.columns(3)
-                col_res1.metric("CN Ponderado", f"{cn_comp:.1f}")
-                col_res2.metric("Escorrentía (Q)", f"{Q_escenario:.0f} mm/año", delta=f"{delta_q:+.0f} mm/año")
-                col_res3.metric("Volumen Total", f"{vol_escenario:.2f} Mm³", delta=f"{(vol_escenario - vol_actual):+.2f} Mm³")
+                col_res1.metric("CN Ponderado (Escenario)", f"{cn_escenario:.1f}", delta=f"{cn_escenario - cn_actual_pond:.1f}")
+                col_res2.metric("Escorrentía SCS (Q)", f"{Q_escenario:.0f} mm/año", delta=f"{delta_q:+.0f} mm/año")
+                col_res3.metric("Volumen Total", f"{vol_escenario:.2f} Mm³")
                 
                 fig_sim = go.Figure(data=[
-                    go.Bar(name='Actual', x=['Escorrentía'], y=[q_actual], marker_color='#1f77b4'),
-                    go.Bar(name='Escenario', x=['Escorrentía'], y=[Q_escenario], marker_color='#2ca02c')
+                    go.Bar(name='Actual (Est. SCS)', x=['Escorrentía'], y=[Q_actual_scs], marker_color='#1f77b4', text=f"{Q_actual_scs:.0f}", textposition='auto'),
+                    go.Bar(name='Escenario Futuro', x=['Escorrentía'], y=[Q_escenario], marker_color='#2ca02c', text=f"{Q_escenario:.0f}", textposition='auto')
                 ])
-                fig_sim.update_layout(title="Comparación Q (mm/año)", height=300)
+                fig_sim.update_layout(title="Comparación de Escorrentía Directa (mm/año)", height=300, yaxis_title="Q (mm)")
                 st.plotly_chart(fig_sim, use_container_width=True)
 
     except Exception as e:
@@ -3439,6 +3324,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
