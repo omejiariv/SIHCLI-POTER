@@ -152,8 +152,17 @@ def _plot_panel_regional(rng, meth, col, tag, u_loc, df_long, gdf_stations):
                         popup=popup, tooltip=f"{nombre}"
                     ).add_to(m)
                 
-                # Geolocalizador Folium
+                # 1. Marcador de Usuario (Si existe)
+                if u_loc:
+                    folium.Marker(
+                        [u_loc[0], u_loc[1]], 
+                        icon=folium.Icon(color='black', icon='star'), 
+                        tooltip="Tu Ubicación"
+                    ).add_to(m)
+
+                # 2. Botón de Geolocalización (El ícono que pediste)
                 LocateControl(auto_start=False).add_to(m)
+
                 st_folium(m, height=350, use_container_width=True, key=f"folium_comp_{tag}")
 
 @st.cache_data(ttl=3600)
@@ -3267,6 +3276,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
