@@ -2426,7 +2426,7 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
     # Obtener ubicación del usuario
     user_loc = _get_user_location_sidebar()
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
-    
+        
     # --- PESTAÑA 1: MAPA RASTER ---
     with tab_raster:
         col1, col2 = st.columns(2)
@@ -2455,7 +2455,6 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                     try:
                         from modules.life_zones import generate_life_zone_map
                         
-                        # Llamada a la función recibiendo 4 valores (incluyendo colores)
                         lz_arr, profile, dynamic_legend, color_map = generate_life_zone_map(
                             Config.DEM_FILE_PATH, 
                             Config.PRECIP_RASTER_PATH, 
@@ -2468,15 +2467,12 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                             transform = profile['transform']
                             x0, y0 = transform.c, transform.f
                             dx, dy = transform.a, transform.e
-                            
                             xs = np.linspace(x0, x0 + dx * w, w)
                             ys = np.linspace(y0, y0 + dy * h, h)
                             xx, yy = np.meshgrid(xs, ys)
-                            
                             lat_flat = yy.flatten()
                             lon_flat = xx.flatten()
                             z_flat = lz_arr.flatten()
-                            
                             mask = z_flat > 0
                             
                             if not np.any(mask):
@@ -2485,166 +2481,80 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 lat_clean = lat_flat[mask]
                                 lon_clean = lon_flat[mask]
                                 z_clean = z_flat[mask]
-                                
-                                # Convertimos cada ID numérico a su color HEX oficial
-                                colors_hex = [color_map.get(v, "#808080") for v in z_clean]
-                                hover_text = [dynamic_legend.get(v, f"ID: {v}") for v in z_clean]
-                                
-                                fig = go.Figure(go.Scattermapbox(
-                                    lat=lat_clean,
-                                    lon=lon_clean,
-                                    mode='markers',
-                                    marker=go.scattermapbox.Marker(
-                                        size=8 if downscale > 4 else 5,
-                                        color=colors_hex,
-                                        opacity=0.75
-                                    ),
-                                    text=hover_text,
-                                    hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
-                                ))
-
-                                # --- CAPA DE USUARIO (TU UBICACIÓN) ---
-                                if user_loc:
-                                    fig.add_trace(go.Scattermapbox(
-                                        lat=[user_loc[0]], lon=[user_loc[1]],
-                                        mode='markers+text',
-                                        marker=go.scattermapbox.Marker(size=15, color='black', symbol='star'),
-                                        text=["📍 TÚ ESTÁS AQUÍ"],
-                                        textposition="top center",
-                                        hoverinfo='text'
-                                    ))
-                                
                                 center_lat = np.mean(lat_clean)
                                 center_lon = np.mean(lon_clean)
 
-                                # --- CÁLCULO DE HECTÁREAS ---
-                                # 1 grado latitud ≈ 111,132 metros
-                                # 1 grado longitud ≈ 111,132 * cos(lat) metros
+                                # Cálculo de Hectáreas
                                 meters_per_deg_lat = 111132.0
                                 meters_per_deg_lon = 111132.0 * cos(radians(center_lat))
-                                
-                                # Área de un píxel en metros cuadrados
                                 pixel_width_m = abs(dx) * meters_per_deg_lon
                                 pixel_height_m = abs(dy) * meters_per_deg_lat
                                 pixel_area_ha = (pixel_width_m * pixel_height_m) / 10000.0
                                 
-                                # --- VISUALIZACIÓN ---
                                 colors_hex = [color_map.get(v, "#808080") for v in z_clean]
-                                
-                                # AHORA EL HOVER INCLUYE EL ID
                                 hover_text = [f"[ID: {v}] {dynamic_legend.get(v, 'Desconocido')}" for v in z_clean]
                                 
                                 fig = go.Figure(go.Scattermapbox(
-                                    lat=lat_clean,
-                                    lon=lon_clean,
-                                    mode='markers',
-                                    marker=go.scattermapbox.Marker(
-                                        size=8 if downscale > 4 else 5,
-                                        color=colors_hex,
-                                        opacity=0.75
-                                    ),
-                                    text=hover_text,
-                                    hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
+                                    lat=lat_clean, lon=lon_clean, mode='markers',
+                                    marker=go.scattermapbox.Marker(size=8 if downscale > 4 else 5, color=colors_hex, opacity=0.75),
+                                    text=hover_text, hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
                                 ))
                                 
-                                # --- CAPA DE USUARIO (TU UBICACIÓN) ---
                                 if user_loc:
                                     fig.add_trace(go.Scattermapbox(
-                                        lat=[user_loc[0]], lon=[user_loc[1]],
-                                        mode='markers+text',
+                                        lat=[user_loc[0]], lon=[user_loc[1]], mode='markers+text',
                                         marker=go.scattermapbox.Marker(size=15, color='black', symbol='star'),
-                                        text=["📍 TÚ ESTÁS AQUÍ"],
-                                        textposition="top center",
-                                        hoverinfo='text'
+                                        text=["📍 TÚ ESTÁS AQUÍ"], textposition="top center", hoverinfo='text'
                                     ))
-                                
+
                                 fig.update_layout(
                                     title="Zonas de Vida (Clasificación Holdridge)",
                                     mapbox_style="carto-positron",
                                     mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=9),
-                                    height=600,
-                                    margin={"r":0,"t":30,"l":0,"b":0},
-                                    showlegend=False
+                                    height=600, margin={"r":0,"t":30,"l":0,"b":0}, showlegend=False
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
                                 
-                                # --- TABLA DE ÁREAS CON HECTÁREAS ---
                                 unique, counts = np.unique(z_clean, return_counts=True)
                                 data_table = []
                                 total_px = counts.sum()
-                                
                                 for v, c in zip(unique, counts):
                                     name = dynamic_legend.get(v, f"Clase {v}")
                                     area_ha = c * pixel_area_ha
-                                    
-                                    data_table.append({
-                                        "ID": v,
-                                        "Zona de Vida": name, 
-                                        "Píxeles": c,
-                                        "Área (ha)": area_ha, # Nueva columna
-                                        "%": (c/total_px)*100
-                                    })
+                                    data_table.append({"ID": v, "Zona de Vida": name, "Píxeles": c, "Área (ha)": area_ha, "%": (c/total_px)*100})
                                 
                                 df_areas = pd.DataFrame(data_table).sort_values("%", ascending=False)
-                                
-                                # Formato numérico
-                                st.dataframe(
-                                    df_areas.style.format({
-                                        "%": "{:.1f}%",
-                                        "Área (ha)": "{:,.2f}"
-                                    }), 
-                                    use_container_width=True
-                                )
+                                st.dataframe(df_areas.style.format({"%": "{:.1f}%", "Área (ha)": "{:,.2f}"}), use_container_width=True)
 
-                    except ImportError as ie:
-                        st.error(f"Error de Importación: {ie}.")
-                    except Exception as e:
-                        st.error(f"Error visualizando: {e}")
-                        import traceback
-                        st.code(traceback.format_exc())                                
-                                
-    # --- PESTAÑA 2: PUNTOS ---
+                    except ImportError as ie: st.error(f"Error de Importación: {ie}.")
+                    except Exception as e: st.error(f"Error visualizando: {e}")
+
     with tab_puntos:
         df_anual = kwargs.get('df_anual_melted')
         if df_anual is None or gdf_stations is None:
-            st.warning("Datos insuficientes para clasificación puntual.")
+            st.warning("Datos insuficientes.")
         else:
             try:
-                # Importar función auxiliar
-                from modules.life_zones import classify_life_zone_alt_ppt, holdridge_int_to_name_simplified
-
+                from modules.life_zones import classify_life_zone_alt_ppt, holdridge_int_to_name_simplified, holdridge_colors
                 ppt_media = df_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
-                
-                # CORRECCIÓN DE INDICE: Verificar si nom_est quedó en index o col
-                if Config.STATION_NAME_COL not in ppt_media.columns:
-                     ppt_media = ppt_media.reset_index()
-
+                if Config.STATION_NAME_COL not in ppt_media.columns: ppt_media = ppt_media.reset_index()
                 merged = pd.merge(ppt_media, gdf_stations[[Config.STATION_NAME_COL, Config.ALTITUDE_COL, 'latitude', 'longitude']], on=Config.STATION_NAME_COL)
                 
-                # Clasificar puntos
-                def get_zone_name(row):
+                def get_zone_data(row):
                     z_id = classify_life_zone_alt_ppt(row[Config.ALTITUDE_COL], row[Config.PRECIPITATION_COL])
-                    return holdridge_int_to_name_simplified.get(z_id, "Desconocido")
+                    return pd.Series([holdridge_int_to_name_simplified.get(z_id, "Desconocido"), holdridge_colors.get(z_id, "#808080")])
 
-                merged['Zona de Vida'] = merged.apply(get_zone_name, axis=1)
-                
+                merged[['Zona de Vida', 'Color']] = merged.apply(get_zone_data, axis=1)
                 fig_map = px.scatter_mapbox(
                     merged, lat="latitude", lon="longitude", color="Zona de Vida", size=Config.PRECIPITATION_COL,
                     hover_name=Config.STATION_NAME_COL, zoom=8, mapbox_style="carto-positron", title="Clasificación en Estaciones"
                 )
-
-                # Capa Usuario
                 if user_loc:
-                    fig_map.add_trace(go.Scattermapbox(
-                        lat=[user_loc[0]], lon=[user_loc[1]], mode='markers+text',
-                        marker=go.scattermapbox.Marker(size=12, color='black', symbol='star'),
-                        text=["📍 TÚ"], textposition="top center"
-                    ))
-                
+                    fig_map.add_trace(go.Scattermapbox(lat=[user_loc[0]], lon=[user_loc[1]], mode='markers+text', marker=go.scattermapbox.Marker(size=12, color='black', symbol='star'), text=["📍 TÚ"], textposition="top center"))
+                    
                 st.plotly_chart(fig_map, use_container_width=True)
                 st.dataframe(merged[[Config.STATION_NAME_COL, 'Zona de Vida', Config.PRECIPITATION_COL, Config.ALTITUDE_COL]], use_container_width=True)
-            except Exception as e:
-                 st.error(f"Error en puntos: {e}")
+            except Exception as e: st.error(f"Error en puntos: {e}")
             
 def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌊 Análisis de Extremos Hidrológicos")
@@ -3324,6 +3234,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
