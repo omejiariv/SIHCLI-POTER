@@ -55,10 +55,9 @@ def _get_user_location_sidebar():
     """Agrega controles en el sidebar para ubicar al usuario en mapas Plotly."""
     with st.sidebar.expander("📍 Mi Ubicación (Referencia)", expanded=False):
         st.caption("Ingrese coordenadas para ver su ubicación en los mapas estáticos (Zonas de Vida, Isoyetas, etc).")
-        # Coordenadas por defecto (Medellín aprox)
-        u_lat = st.number_input("Latitud:", value=6.25, format="%.4f", step=0.01)
-        u_lon = st.number_input("Longitud:", value=-75.56, format="%.4f", step=0.01)
-        show_loc = st.checkbox("Mostrar en mapa", value=False)
+        u_lat = st.number_input("Latitud:", value=6.25, format="%.4f", step=0.01, key="u_lat_input")
+        u_lon = st.number_input("Longitud:", value=-75.56, format="%.4f", step=0.01, key="u_lon_input")
+        show_loc = st.checkbox("Mostrar en mapa", value=False, key="show_loc_chk")
         return (u_lat, u_lon) if show_loc else None
 
 def _plot_panel_regional(rng, meth, col, tag, u_loc, df_long, gdf_stations):
@@ -3440,6 +3439,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
