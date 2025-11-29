@@ -59,96 +59,83 @@ def _get_user_location_sidebar(key_suffix=""):
         u_lat = st.number_input("Latitud:", value=6.25, format="%.4f", step=0.01, key=f"u_lat_{key_suffix}")
         u_lon = st.number_input("Longitud:", value=-75.56, format="%.4f", step=0.01, key=f"u_lon_{key_suffix}")
         show_loc = st.checkbox("Mostrar en mapa", value=False, key=f"show_loc_{key_suffix}")
-        return (u_lat, u_lon) if show_loc else None
+        
+        if show_loc:
+            st.success(f"📍 Ubicación activa:\nLat: {u_lat}\nLon: {u_lon}")
+            return (u_lat, u_lon)
+        return None
 
 def _plot_panel_regional(rng, meth, col, tag, u_loc, df_long, gdf_stations):
-    """
-    Helper para graficar un panel regional (A o B) en la pestaña de Mapas Avanzados.
-    Maneja el filtrado, interpolación y visualización con Plotly y Folium.
-    """
-    # 1. Filtrar datos por rango de años
+    """Helper para graficar un panel regional (A o B)."""
     mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
     df_sub = df_long[mask]
-    
-    # 2. Calcular promedios reales
-    # Nota: Asumimos que _calcular_promedios_reales ya está definida como helper global o importada
     df_avg = _calcular_promedios_reales(df_sub)
     
     if df_avg.empty: 
-        col.warning(f"Sin datos válidos para el periodo {rng}")
+        col.warning(f"Sin datos para {rng}")
         return
 
-    # Corrección de índice si es necesario
-    if Config.STATION_NAME_COL not in df_avg.columns: 
-        df_avg = df_avg.reset_index()
+    if Config.STATION_NAME_COL not in df_avg.columns: df_avg = df_avg.reset_index()
     
-    # 3. Unir con geometría de estaciones
     df_m = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
     
-    # 4. Interpolación y Gráficos
     if len(df_m) > 2:
-        # Definir límites del mapa (bounding box) con un pequeño margen
-        bounds = [
-            df_m.longitude.min()-0.1, df_m.longitude.max()+0.1, 
-            df_m.latitude.min()-0.1, df_m.latitude.max()+0.1
-        ]
-        
-        # Ejecutar interpolación (asumiendo _run_interp como helper global)
+        bounds = [df_m.longitude.min()-0.1, df_m.longitude.max()+0.1, df_m.latitude.min()-0.1, df_m.latitude.max()+0.1]
         gx, gy, gz = _run_interp(df_m, meth, bounds)
         
         if gz is not None:
-            # --- A. MAPA DE ISOYETAS (PLOTLY) ---
+            # Mapa Plotly (Isoyetas)
             fig = go.Figure(go.Contour(
                 z=gz.T, x=gx[:,0], y=gy[0,:], 
-                colorscale='Viridis', 
-                colorbar=dict(title='mm/año', len=0.8), 
+                colorscale='Viridis', colorbar=dict(title='mm'), 
                 contours=dict(start=0, end=5000, size=200)
             ))
             
-            # Capa de Estaciones (Puntos negros)
+            # Estaciones
             fig.add_trace(go.Scatter(
                 x=df_m.longitude, y=df_m.latitude, 
-                mode='markers', 
-                marker=dict(color='black', size=5), 
-                text=df_m.apply(lambda x: f"<b>{x[Config.STATION_NAME_COL]}</b><br>Ppt: {x[Config.PRECIPITATION_COL]:.0f} mm", axis=1),
-                hoverinfo='text', 
-                showlegend=False
+                mode='markers', marker=dict(color='black', size=5), 
+                text=df_m[Config.STATION_NAME_COL], hoverinfo='text', showlegend=False
             ))
             
-            # --- CAPA DE USUARIO (Estrella Roja) ---
+            # --- CAPA USUARIO (Estrella Roja) ---
             if u_loc:
                 fig.add_trace(go.Scatter(
                     x=[u_loc[1]], y=[u_loc[0]], 
                     mode='markers+text', 
-                    marker=dict(color='red', size=12, symbol='star', line=dict(width=1, color='black')), 
-                    text=["📍 TÚ"], 
-                    textposition="top center",
-                    hoverinfo='skip'
+                    marker=dict(color='red', size=15, symbol='star'), 
+                    text=["📍 TÚ"], textposition="top center",
+                    name="Tu Ubicación"
                 ))
 
             fig.update_layout(
-                title=f"Ppt Media Anual ({rng[0]}-{rng[1]})", 
-                margin=dict(l=0, r=0, b=0, t=40), 
-                height=400
+                title=f"Ppt Media ({rng[0]}-{rng[1]})", 
+                margin=dict(l=0, r=0, b=0, t=30), 
+                height=350
             )
             col.plotly_chart(fig, use_container_width=True)
             
-            # --- B. MAPA INTERACTIVO (FOLIUM) ---
+            # Mapa Interactivo (Folium)
             with col.expander(f"🔎 Ver Mapa Interactivo Detallado ({tag})", expanded=True):
                 col.write(f"Mapa navegable con detalles por estación. Haga clic en los puntos.")
-                center_lat = (bounds[2] + bounds[3]) / 2
-                center_lon = (bounds[0] + bounds[1]) / 2
                 
-                m = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB positron")
+                # Centrar mapa en usuario si existe, sino en el centro de los datos
+                if u_loc:
+                    center_lat, center_lon = u_loc
+                    zoom = 10
+                else:
+                    center_lat = (bounds[2] + bounds[3]) / 2
+                    center_lon = (bounds[0] + bounds[1]) / 2
+                    zoom = 8
+
+                m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles="CartoDB positron")
                 
-                # Agregar marcadores para cada estación
                 for _, row in df_m.iterrows():
                     nombre = row[Config.STATION_NAME_COL]
                     lluvia = row[Config.PRECIPITATION_COL]
                     altura = row.get(Config.ALTITUDE_COL, 'N/A')
                     muni = row.get(Config.MUNICIPALITY_COL, 'N/A')
                     
-                    # Contenido del Popup HTML
                     html = f"""
                     <div style='font-family:sans-serif;font-size:13px;min-width:180px'>
                         <h5 style='margin:0; color:#c0392b; border-bottom:1px solid #ccc; padding-bottom:4px'>{nombre}</h5>
@@ -159,20 +146,15 @@ def _plot_panel_regional(rng, meth, col, tag, u_loc, df_long, gdf_stations):
                     </div>
                     """
                     popup = folium.Popup(folium.IFrame(html, width=220, height=160), max_width=220)
-                    
                     folium.CircleMarker(
                         [row['latitude'], row['longitude']], 
                         radius=6, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9, 
-                        popup=popup, tooltip=f"{nombre} ({lluvia:.0f} mm)"
+                        popup=popup, tooltip=f"{nombre}"
                     ).add_to(m)
                 
-                # Geolocalizador Nativo de Folium
+                # Geolocalizador Folium
                 LocateControl(auto_start=False).add_to(m)
-                
-                # Renderizar Folium en Streamlit con una clave única para evitar conflictos
-                st_folium(m, height=350, use_container_width=True, key=f"folium_comp_{tag}_{rng[0]}")
-    else:
-        col.warning("Insuficientes estaciones (<3) para interpolar en este periodo.")
+                st_folium(m, height=350, use_container_width=True, key=f"folium_comp_{tag}")
 
 @st.cache_data(ttl=3600)
 def get_img_as_base64(url):
@@ -1316,6 +1298,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
     Versión Completa: Interpolación Regional + Análisis de Cuenca Detallado.
     Incluye Geolocation y Fix de Balance Hídrico (Turc).
     """
+    # 1. Configuración de Meses y Título
     selected_months = kwargs.get('selected_months', [])
     titulo_meses = ""
     if selected_months and len(selected_months) < 12:
@@ -1325,13 +1308,14 @@ def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
     
     st.subheader(f"🌍 Superficies de Interpolación{titulo_meses} y Análisis Hidrológico")
     
-    # Control de Modo
+    # 2. Control de Modo
     mode = st.radio("Modo de Análisis:", ["Regional (Comparación)", "Por Cuenca (Detallado)"], horizontal=True)
     
-    # Obtener ubicación del usuario (PARA MAPAS ESTÁTICOS)
+    # 3. Obtener ubicación del usuario (DEFINIDA AL INICIO PARA TODO EL SCOPE)
+    # Esto soluciona el NameError 'user_loc' más adelante
     user_loc = _get_user_location_sidebar(key_suffix="Adv")
 
-    # --- HELPER INTERPOLACIÓN ---
+    # --- HELPER INTERPOLACIÓN (Definida internamente) ---
     def run_interp(df_puntos, metodo, bounds_box):
         try:
             gx, gy = np.mgrid[bounds_box[0]:bounds_box[1]:100j, bounds_box[2]:bounds_box[3]:100j]
@@ -1350,7 +1334,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
             return gx, gy, gz
         except Exception: return None, None, None
 
-    # --- HELPER PROMEDIOS ---
+    # --- HELPER PROMEDIOS (Definida internamente) ---
     def calcular_promedios_reales(df_datos):
         if df_datos.empty: return pd.DataFrame()
         conteo = df_datos[df_datos[Config.PRECIPITATION_COL] >= 0].groupby([Config.STATION_NAME_COL, Config.YEAR_COL]).size()
@@ -1359,61 +1343,109 @@ def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
         suma_anual = df_filtrado.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
         return suma_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
 
-    # MODO 1: REGIONAL
+    # MODO 1: REGIONAL (COMPARACIÓN)
+    # ==========================================================================
     if mode == "Regional (Comparación)":
         st.markdown("#### 🆚 Comparación de Periodos Climáticos")
+        st.info("Visualice cambios en el patrón de lluvias entre dos periodos.")
+
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("###### Periodo 1")
+            st.markdown("###### Periodo 1 (Referencia)")
             r1 = st.slider("Rango P1:", 1980, 2024, (1990, 2000), key="r1")
             m1 = st.selectbox("Método P1:", ["Kriging (RBF)", "IDW (Lineal)", "Spline"], key="m1")
         with c2:
-            st.markdown("###### Periodo 2")
+            st.markdown("###### Periodo 2 (Reciente)")
             r2 = st.slider("Rango P2:", 1980, 2024, (2010, 2020), key="r2")
             m2 = st.selectbox("Método P2:", ["Kriging (RBF)", "IDW (Lineal)", "Spline"], key="m2")
 
+        # Botón de cálculo con PERSISTENCIA
         if st.button("🚀 Generar Comparación"):
             st.session_state['regional_done'] = True
             st.session_state['reg_params'] = {'r1':r1, 'm1':m1, 'r2':r2, 'm2':m2}
 
         if st.session_state.get('regional_done'):
             p = st.session_state['reg_params']
+            
+            # Función interna plot_panel corregida (Recibe u_loc)
             def plot_panel(rng, meth, col, tag, u_loc):
                 mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
                 df_sub = df_long[mask]
                 df_avg = calcular_promedios_reales(df_sub)
                 
-                if df_avg.empty: col.warning(f"Sin datos para {rng}"); return
+                if df_avg.empty:
+                    col.warning(f"Sin datos válidos para {rng}")
+                    return
 
-                # Corrección de índice si es necesario
-                if Config.STATION_NAME_COL not in df_avg.columns: df_avg = df_avg.reset_index()
-                
+                # Merge con estaciones (Asegurando índice correcto)
+                if Config.STATION_NAME_COL not in df_avg.columns:
+                    df_avg = df_avg.reset_index()
+
                 df_m = pd.merge(df_avg, gdf_stations, on=Config.STATION_NAME_COL).dropna(subset=['latitude', 'longitude'])
+                
                 if len(df_m) > 2:
                     bounds = [df_m.longitude.min()-0.1, df_m.longitude.max()+0.1, df_m.latitude.min()-0.1, df_m.latitude.max()+0.1]
                     gx, gy, gz = run_interp(df_m, meth, bounds)
                     
                     if gz is not None:
-                        fig = go.Figure(go.Contour(z=gz.T, x=gx[:,0], y=gy[0,:], colorscale='Viridis', colorbar=dict(title='mm'), contours=dict(start=0, end=5000, size=200)))
-                        fig.add_trace(go.Scatter(x=df_m.longitude, y=df_m.latitude, mode='markers', marker=dict(color='black', size=5), text=df_m[Config.STATION_NAME_COL], hoverinfo='text', showlegend=False))
+                        # Mapa Plotly (Isoyetas)
+                        fig = go.Figure(go.Contour(
+                            z=gz.T, x=gx[:,0], y=gy[0,:], 
+                            colorscale='Viridis', 
+                            colorbar=dict(title='mm/año', len=0.5),
+                            contours=dict(start=0, end=5000, size=200)
+                        ))
                         
-                        # --- CAPA USUARIO ---
-                        if u_loc:
-                            fig.add_trace(go.Scatter(x=[u_loc[1]], y=[u_loc[0]], mode='markers+text', marker=dict(color='red', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))
+                        # Puntos Estaciones
+                        fig.add_trace(go.Scatter(
+                            x=df_m.longitude, y=df_m.latitude, mode='markers',
+                            marker=dict(color='black', size=7, line=dict(width=1, color='white')),
+                            text=df_m.apply(lambda x: f"<b>{x[Config.STATION_NAME_COL]}</b><br>Ppt: {x[Config.PRECIPITATION_COL]:.0f} mm", axis=1),
+                            hoverinfo='text',
+                            showlegend=False
+                        ))
 
-                        fig.update_layout(title=f"Ppt Media ({rng[0]}-{rng[1]})", margin=dict(l=0, r=0, b=0, t=30), height=350)
+                        # --- CAPA USUARIO (CORREGIDO) ---
+                        if u_loc:
+                            fig.add_trace(go.Scatter(
+                                x=[u_loc[1]], y=[u_loc[0]], 
+                                mode='markers+text', 
+                                marker=dict(color='red', size=12, symbol='star'), 
+                                text=["📍 TÚ"], textposition="top center"
+                            ))
+                        
+                        fig.update_layout(
+                            title=f"Ppt Media Anual ({rng[0]}-{rng[1]})",
+                            margin=dict(l=0, r=0, b=0, t=40),
+                            height=400
+                        )
                         col.plotly_chart(fig, use_container_width=True)
-            
+                        
+                        # Mapa Interactivo (Folium) con Popups
+                        with col.expander(f"🔎 Ver Mapa Interactivo Detallado ({tag})", expanded=True):
+                            col.write(f"Mapa navegable con detalles por estación.")
+                            center_lat = (bounds[2] + bounds[3]) / 2
+                            center_lon = (bounds[0] + bounds[1]) / 2
+                            m = folium.Map(location=[center_lat, center_lon], zoom_start=8, tiles="CartoDB positron")
+                            
+                            for _, row in df_m.iterrows():
+                                nombre = row[Config.STATION_NAME_COL]
+                                lluvia = row[Config.PRECIPITATION_COL]
+                                
+                                html = f"<b>{nombre}</b><br>{lluvia:.0f} mm"
+                                folium.CircleMarker(
+                                    [row['latitude'], row['longitude']], 
+                                    radius=6, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9, 
+                                    tooltip=html
+                                ).add_to(m)
+                            
+                            # Botón GPS en Folium
+                            LocateControl(auto_start=False).add_to(m)
+                            st_folium(m, height=350, use_container_width=True, key=f"folium_comp_{tag}")
+
+            # Llamadas a la función interna pasando user_loc explícitamente
             plot_panel(p['r1'], p['m1'], c1, "A", user_loc)
             plot_panel(p['r2'], p['m2'], c2, "B", user_loc)
-            
-            with st.expander("ℹ️ Nota Metodológica: Interpolación Espacial"):
-                st.markdown("""
-                **Métodos de Interpolación:**
-                * **IDW (Distancia Inversa):** Asume influencia decreciente con la distancia. Útil para densidades altas.
-                * **Kriging/RBF (Radial Basis Function):** El método recomendado. Genera superficies suaves y continuas (Thin Plate Spline), llenando huecos eficientemente.
-                * **Spline:** Ajuste polinómico local.
-                """)
             
     # ==========================================================================
     # MODO 2: CUENCA
@@ -3235,6 +3267,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
