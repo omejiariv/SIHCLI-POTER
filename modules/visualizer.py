@@ -1388,7 +1388,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
             # --- FIX: PASAMOS user_loc A LA FUNCIÓN INTERNA ---
             plot_panel(p['r1'], p['m1'], c1, "A", user_loc)
             plot_panel(p['r2'], p['m2'], c2, "B", user_loc)
-
+            
     # ==========================================================================
     # MODO 2: ANÁLISIS DE CUENCA (DETALLADO)
     # ==========================================================================
@@ -3408,6 +3408,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
