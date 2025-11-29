@@ -1558,22 +1558,26 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                     fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='black', width=3), name="Cuenca"))
                 except: pass
 
-                # --- CAPA USUARIO EN MAPA ISOYETAS ---
-                if user_loc:
-                    fig.add_trace(go.Scatter(x=[user_loc[1]], y=[user_loc[0]], mode='markers+text', marker=dict(color='black', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))                
+            # --- MOSTRAR RESULTADOS ---
+            res = st.session_state.get('basin_res')
+            if res and res.get('ready'):
+                # A. Mapa Isoyetas
+                st.markdown(f"##### 🌧️ Mapa de Isoyetas: {res['names']}")
+                fig = go.Figure(go.Contour(z=res['gz'].T, x=res['gx'][:,0], y=res['gy'][0,:], colorscale='Blues', colorbar=dict(title='mm'), contours=dict(start=0, end=6000, size=250)))
+                fig.add_trace(go.Scatter(x=res['df_interp'].longitude, y=res['df_interp'].latitude, mode='markers+text', marker=dict(color='red', size=8), text=res['df_interp'][Config.STATION_NAME_COL], textposition="top center"))
+                try:
+                    g = res['gdf_cuenca'].geometry.iloc[0] 
+                    if g.geom_type == 'Polygon': xs, ys = g.exterior.xy
+                    else: xs, ys = g.geoms[0].exterior.xy
+                    fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode='lines', line=dict(color='black', width=3)))
+                except: pass
                 
-                fig.update_layout(height=500, margin=dict(l=0,r=0,b=0,t=30))
-                st.plotly_chart(fig, use_container_width=True)
-                
-                with st.expander("ℹ️ Nota sobre Interpolación"):
-                    st.write("Este mapa muestra la distribución espacial de la lluvia media anual interpolada a partir de las estaciones puntuales, usando un modelo matemático para estimar los valores en toda la cuenca.")
-
                 # --- CAPA USUARIO EN MAPA ISOYETAS ---
                 if user_loc:
                     fig.add_trace(go.Scatter(x=[user_loc[1]], y=[user_loc[0]], mode='markers+text', marker=dict(color='black', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))
 
                 fig.update_layout(height=500, margin=dict(l=0,r=0,b=0,t=30))
-                st.plotly_chart(fig, use_container_width=True)                
+                st.plotly_chart(fig, use_container_width=True)
 
                 # B. Métricas
                 st.markdown("---"); st.subheader("💧 Balance Hídrico y Morfometría")
@@ -3393,6 +3397,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
