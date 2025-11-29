@@ -51,13 +51,14 @@ except ImportError:
 # -----------------------------------------------------------------------------
 
 # --- HELPER: GEOLOCALIZACIÓN MANUAL PARA PLOTLY ---
-def _get_user_location_sidebar():
+def _get_user_location_sidebar(key_suffix=""):
     """Agrega controles en el sidebar para ubicar al usuario en mapas Plotly."""
-    with st.sidebar.expander("📍 Mi Ubicación (Referencia)", expanded=False):
+    with st.sidebar.expander(f"📍 Mi Ubicación ({key_suffix})", expanded=False):
         st.caption("Ingrese coordenadas para ver su ubicación en los mapas estáticos (Zonas de Vida, Isoyetas, etc).")
-        u_lat = st.number_input("Latitud:", value=6.25, format="%.4f", step=0.01, key="u_lat_input")
-        u_lon = st.number_input("Longitud:", value=-75.56, format="%.4f", step=0.01, key="u_lon_input")
-        show_loc = st.checkbox("Mostrar en mapa", value=False, key="show_loc_chk")
+        # Usamos key_suffix para hacer únicos los keys
+        u_lat = st.number_input("Latitud:", value=6.25, format="%.4f", step=0.01, key=f"u_lat_{key_suffix}")
+        u_lon = st.number_input("Longitud:", value=-75.56, format="%.4f", step=0.01, key=f"u_lon_{key_suffix}")
+        show_loc = st.checkbox("Mostrar en mapa", value=False, key=f"show_loc_{key_suffix}")
         return (u_lat, u_lon) if show_loc else None
 
 def _plot_panel_regional(rng, meth, col, tag, u_loc, df_long, gdf_stations):
@@ -1328,7 +1329,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
     mode = st.radio("Modo de Análisis:", ["Regional (Comparación)", "Por Cuenca (Detallado)"], horizontal=True)
     
     # Obtener ubicación del usuario (PARA MAPAS ESTÁTICOS)
-    user_loc = _get_user_location_sidebar()
+    user_loc = _get_user_location_sidebar(key_suffix="Adv")
 
     # --- HELPER INTERPOLACIÓN ---
     def run_interp(df_puntos, metodo, bounds_box):
@@ -2424,7 +2425,7 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         """, unsafe_allow_html=True)
 
     # Obtener ubicación del usuario
-    user_loc = _get_user_location_sidebar()
+    user_loc = _get_user_location_sidebar(key_suffix="LZ")
     tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
         
     # --- PESTAÑA 1: MAPA RASTER ---
@@ -3234,6 +3235,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
