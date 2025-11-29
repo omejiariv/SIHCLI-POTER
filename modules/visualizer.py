@@ -1360,9 +1360,11 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                                 popup = folium.Popup(folium.IFrame(html, width=220, height=160), max_width=220)
                                 folium.CircleMarker([row['latitude'], row['longitude']], radius=6, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9, popup=popup, tooltip=f"{nombre}").add_to(m)
                             
+                            # Geolocalizador Folium
+                            LocateControl(auto_start=False).add_to(m)
                             st_folium(m, height=350, use_container_width=True, key=f"folium_comp_{tag}")
             
-            # --- FIX: PASAMOS user_loc A LA FUNCIÓN INTERNA ---
+            # --- LLAMADA CORREGIDA: PASAMOS user_loc ---
             plot_panel(p['r1'], p['m1'], c1, "A", user_loc)
             plot_panel(p['r2'], p['m2'], c2, "B", user_loc)
             
@@ -3397,6 +3399,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
