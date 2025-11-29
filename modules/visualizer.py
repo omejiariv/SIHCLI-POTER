@@ -54,9 +54,10 @@ except ImportError:
 def _get_user_location_sidebar():
     """Agrega controles en el sidebar para ubicar al usuario en mapas Plotly."""
     with st.sidebar.expander("📍 Mi Ubicación (Referencia)", expanded=False):
-        st.caption("Ingrese coordenadas para ver su ubicación en los mapas estáticos (Zonas de Vida, etc).")
-        u_lat = st.number_input("Latitud:", value=6.25, format="%.4f")
-        u_lon = st.number_input("Longitud:", value=-75.56, format="%.4f")
+        st.caption("Ingrese coordenadas para ver su ubicación en los mapas estáticos (Zonas de Vida, Isoyetas, etc).")
+        # Coordenadas por defecto (Medellín aprox)
+        u_lat = st.number_input("Latitud:", value=6.25, format="%.4f", step=0.01)
+        u_lon = st.number_input("Longitud:", value=-75.56, format="%.4f", step=0.01)
         show_loc = st.checkbox("Mostrar en mapa", value=False)
         return (u_lat, u_lon) if show_loc else None
 
@@ -1286,13 +1287,9 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
 
         if st.session_state.get('regional_done'):
             p = st.session_state['reg_params']
-            
-            def plot_panel(rng, meth, col, tag):
-                # Filtrar
+            def plot_panel(rng, meth, col, tag, u_loc):
                 mask = (df_long[Config.YEAR_COL] >= rng[0]) & (df_long[Config.YEAR_COL] <= rng[1])
                 df_sub = df_long[mask]
-                
-                # Calcular Promedios Reales
                 df_avg = calcular_promedios_reales(df_sub)
                 
                 if df_avg.empty:
@@ -1380,6 +1377,17 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 * **Kriging/RBF (Radial Basis Function):** El método recomendado. Genera superficies suaves y continuas (Thin Plate Spline), llenando huecos eficientemente.
                 * **Spline:** Ajuste polinómico local.
                 """)
+
+                        # --- CAPA USUARIO ---
+                        if u_loc:
+                            fig.add_trace(go.Scatter(x=[u_loc[1]], y=[u_loc[0]], mode='markers+text', marker=dict(color='red', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))
+
+                        fig.update_layout(title=f"Ppt Media ({rng[0]}-{rng[1]})", margin=dict(l=0, r=0, b=0, t=30), height=350)
+                        col.plotly_chart(fig, use_container_width=True)
+            
+            # --- FIX: PASAMOS user_loc A LA FUNCIÓN INTERNA ---
+            plot_panel(p['r1'], p['m1'], c1, "A", user_loc)
+            plot_panel(p['r2'], p['m2'], c2, "B", user_loc)
 
     # ==========================================================================
     # MODO 2: ANÁLISIS DE CUENCA (DETALLADO)
@@ -1575,6 +1583,13 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 with st.expander("ℹ️ Nota sobre Interpolación"):
                     st.write("Este mapa muestra la distribución espacial de la lluvia media anual interpolada a partir de las estaciones puntuales, usando un modelo matemático para estimar los valores en toda la cuenca.")
 
+                # --- CAPA USUARIO EN MAPA ISOYETAS ---
+                if user_loc:
+                    fig.add_trace(go.Scatter(x=[user_loc[1]], y=[user_loc[0]], mode='markers+text', marker=dict(color='black', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))
+
+                fig.update_layout(height=500, margin=dict(l=0,r=0,b=0,t=30))
+                st.plotly_chart(fig, use_container_width=True)                
+
                 # B. Métricas
                 st.markdown("---"); st.subheader("💧 Balance Hídrico y Morfometría")
                 b, m = res['bal'], res['morph']
@@ -1661,8 +1676,7 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 bnd = res['bounds']
                 m_ctx = folium.Map([(bnd[2]+bnd[3])/2, (bnd[0]+bnd[1])/2], zoom_start=10, tiles="CartoDB positron")
                 folium.GeoJson(res['gdf_cuenca'], style_function=lambda x:{'color':'blue','weight':2, 'fillOpacity':0.1}).add_to(m_ctx)
-                folium.GeoJson(res['gdf_buffer'], name="Buffer", style_function=lambda x:{'color':'gray','dashArray':'5,5','fill':False}).add_to(m_ctx)
-                
+
                 df_raw_ctx = res['df_raw']
                 for _, row in res['df_interp'].iterrows():
                     nm = row[Config.STATION_NAME_COL]
@@ -3390,6 +3404,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
