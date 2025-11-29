@@ -1347,28 +1347,24 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                                 lluvia = row[Config.PRECIPITATION_COL]
                                 altura = row.get(Config.ALTITUDE_COL, 'N/A')
                                 muni = row.get(Config.MUNICIPALITY_COL, 'N/A')
-                                n_years = years_count.get(nombre, 0)
                                 
                                 html = f"""
-                                <div style="font-family:sans-serif; font-size:13px; min-width:200px;">
-                                    <h5 style="margin:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:4px;">{nombre}</h5>
+                                <div style='font-family:sans-serif;font-size:13px;min-width:180px'>
+                                    <h5 style='margin:0; color:#c0392b; border-bottom:1px solid #ccc; padding-bottom:4px'>{nombre}</h5>
                                     <div style="margin-top:5px;"><b>Mun:</b> {muni}<br><b>Alt:</b> {altura} m</div>
-                                    <div style="background-color:#f0f2f6; padding:5px; margin-top:5px; border-radius:4px;">
+                                    <div style='background-color:#f0f2f6; padding:5px; margin-top:5px; border-radius:4px;'>
                                         <b>Ppt Media:</b> {lluvia:,.0f} mm<br>
-                                        <b>Años Datos:</b> {n_years}
                                     </div>
                                 </div>
                                 """
                                 popup = folium.Popup(folium.IFrame(html, width=220, height=160), max_width=220)
-                                folium.CircleMarker(
-                                    [row['latitude'], row['longitude']], radius=6, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9,
-                                    popup=popup, tooltip=f"{nombre}"
-                                ).add_to(m)
+                                folium.CircleMarker([row['latitude'], row['longitude']], radius=6, color='blue', fill=True, fill_color='cyan', fill_opacity=0.9, popup=popup, tooltip=f"{nombre}").add_to(m)
                             
                             st_folium(m, height=350, use_container_width=True, key=f"folium_comp_{tag}")
             
-            plot_panel(p['r1'], p['m1'], c1, "A")
-            plot_panel(p['r2'], p['m2'], c2, "B")
+            # --- FIX: PASAMOS user_loc A LA FUNCIÓN INTERNA ---
+            plot_panel(p['r1'], p['m1'], c1, "A", user_loc)
+            plot_panel(p['r2'], p['m2'], c2, "B", user_loc)
             
             with st.expander("ℹ️ Nota Metodológica: Interpolación Espacial"):
                 st.markdown("""
@@ -1377,17 +1373,6 @@ def display_advanced_maps_tab(df_long, gdf_stations, gdf_subcuencas, gdf_filtere
                 * **Kriging/RBF (Radial Basis Function):** El método recomendado. Genera superficies suaves y continuas (Thin Plate Spline), llenando huecos eficientemente.
                 * **Spline:** Ajuste polinómico local.
                 """)
-
-                        # --- CAPA USUARIO ---
-                        if u_loc:
-                            fig.add_trace(go.Scatter(x=[u_loc[1]], y=[u_loc[0]], mode='markers+text', marker=dict(color='red', size=12, symbol='star'), text=["📍 TÚ"], textposition="top center"))
-
-                        fig.update_layout(title=f"Ppt Media ({rng[0]}-{rng[1]})", margin=dict(l=0, r=0, b=0, t=30), height=350)
-                        col.plotly_chart(fig, use_container_width=True)
-            
-            # --- FIX: PASAMOS user_loc A LA FUNCIÓN INTERNA ---
-            plot_panel(p['r1'], p['m1'], c1, "A", user_loc)
-            plot_panel(p['r2'], p['m2'], c2, "B", user_loc)
             
     # ==========================================================================
     # MODO 2: ANÁLISIS DE CUENCA (DETALLADO)
@@ -3408,6 +3393,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
