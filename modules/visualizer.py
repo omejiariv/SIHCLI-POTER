@@ -828,6 +828,9 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
             sel_tile = base_map_options[base_map_name]
         
+    # Obtener ubicación del usuario para centrar este mapa también
+    user_loc = _get_user_location_sidebar(key_suffix="MainMap")
+        
         with col_map:
             # Centrar
             if st.session_state.selected_point:
@@ -3276,6 +3279,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
