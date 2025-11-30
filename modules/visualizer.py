@@ -1640,10 +1640,17 @@ def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
                     
                     with st.expander("ℹ️ Interpretación Hipsométrica"):
                         st.markdown("""
-                        Representa la distribución del área de la cuenca en función de la altitud.
-                        * **Curva Convexa (Joven):** Fase de erosión activa.
-                        * **Curva Cóncava (Vieja):** Fase de sedimentación / estabilización.
-                        * **Curva en 'S' (Madura):** Equilibrio.
+                        Curva Hipsométrica: Representa la distribución del área de una cuenca en función de su altura. 
+                        Para su cálculo, se grafica la altitud (H) contra el porcentaje de área acumulada (A) que queda por encima de cada altura correspondiente.
+                        Importancia: Indica la etapa evolutiva de la cuenca (juventud, madurez o vejez) y su potencial erosivo.
+                        Aplicaciones: Fundamental en hidrología para comparar cuencas, predecir escurrimientos y analizar la estabilidad geomorfológica.
+                        Bibliografía Clave: Strahler, A. N. (1952). Hypsometric (Area-Altitude) Analysis of Erosional Topography. Bulletin of the Geological Society of America.
+
+                        La curvatura indica la "edad" geomorfológica de la cuenca y cuánto material queda por erosionar.
+                        Curva Convexa (Juventud): La línea se abomba hacia arriba. Indica una cuenca inestable con alto potencial erosivo y gran cantidad de material en las partes altas aún por remover. (Integral Hipsométrica > 0.60).
+                        Curva en "S" (Madurez): La línea cruza el centro. Representa una cuenca en equilibrio, donde la erosión y el transporte de sedimentos están balanceados. (Integral Hipsométrica 0.35 - 0.60).
+                        Curva Cóncava (Vejez): La línea se hunde hacia abajo. Indica una cuenca estabilizada, erosionada y con predominio de sedimentación (llanuras aluviales). (Integral Hipsométrica < 0.35).
+                        Nota práctica: Las cuencas con curvas muy convexas suelen responder más rápido a las tormentas (picos de caudal agresivos) debido a sus pendientes pronunciadas.
                         """)
 
                 # C. Contexto Espacial (Folium) con GPS
@@ -3276,6 +3283,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
