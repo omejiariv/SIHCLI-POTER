@@ -190,7 +190,7 @@ def get_img_as_base64(url):
     
 # 0. DISTRIBUCIÓN ESPACIAL (TABLERO PRINCIPAL)
 # ==============================================================================
-def display_current_filters(gdf_filtered, df_monthly_filtered):
+def display_current_filters(gdf_filtered, df_monthly_filtered, *args, **kwargs):
     """Muestra el mapa inicial de estaciones seleccionadas."""
     st.subheader("📍 Distribución Espacial y Análisis Puntual")
     
@@ -3334,6 +3334,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
