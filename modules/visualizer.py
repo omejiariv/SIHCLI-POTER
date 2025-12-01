@@ -200,14 +200,25 @@ def display_current_filters(gdf_filtered, df_monthly_filtered, *args, **kwargs):
     user_loc = _get_user_location_sidebar(key_suffix="MainMap")
 
     with col_map:
-        if gdf_filtered is not None and not gdf_filtered.empty:
+        # Validación robusta de datos
+        has_data = False
+        if gdf_filtered is not None:
+            try:
+                if not gdf_filtered.empty: has_data = True
+            except AttributeError:
+                if len(gdf_filtered) > 0: has_data = True
+
+        if has_data:
             # Centro del mapa
             if user_loc:
                  center_lat, center_lon = user_loc
                  zoom = 10
             else:
-                 center_lat = gdf_filtered.geometry.y.mean()
-                 center_lon = gdf_filtered.geometry.x.mean()
+                 try:
+                     center_lat = gdf_filtered.geometry.y.mean()
+                     center_lon = gdf_filtered.geometry.x.mean()
+                 except:
+                     center_lat, center_lon = 6.2, -75.5
                  zoom = 8
             
             m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles="CartoDB positron")
@@ -215,11 +226,25 @@ def display_current_filters(gdf_filtered, df_monthly_filtered, *args, **kwargs):
             # Cluster de marcadores
             marker_cluster = MarkerCluster().add_to(m)
             
-            for _, row in gdf_filtered.iterrows():
+            # Iterar de forma segura
+            if isinstance(gdf_filtered, (pd.DataFrame, gpd.GeoDataFrame)):
+                iterator = gdf_filtered.iterrows()
+            else:
+                iterator = enumerate(gdf_filtered)
+            
+            for _, row in iterator:
+                if not isinstance(row, (pd.Series, dict)): continue
+                try:
+                    lat = row.geometry.y if hasattr(row, 'geometry') else row.get('latitude')
+                    lon = row.geometry.x if hasattr(row, 'geometry') else row.get('longitude')
+                    name = row[Config.STATION_NAME_COL]
+                    alt = row.get(Config.ALTITUDE_COL, '-')
+                except: continue
+
                 folium.Marker(
-                    location=[row.geometry.y, row.geometry.x],
-                    popup=f"<b>{row[Config.STATION_NAME_COL]}</b><br>Alt: {row.get(Config.ALTITUDE_COL, '-')} m",
-                    tooltip=row[Config.STATION_NAME_COL],
+                    location=[lat, lon],
+                    popup=f"<b>{name}</b><br>Alt: {alt} m",
+                    tooltip=name,
                     icon=folium.Icon(color="blue", icon="info-sign")
                 ).add_to(marker_cluster)
             
@@ -243,9 +268,11 @@ def display_current_filters(gdf_filtered, df_monthly_filtered, *args, **kwargs):
     with col_stat:
         st.markdown("#### Resumen")
         if gdf_filtered is not None:
-            st.metric("Estaciones", len(gdf_filtered))
-            if df_monthly_filtered is not None:
-                st.metric("Registros", len(df_monthly_filtered))
+            try: st.metric("Estaciones", len(gdf_filtered))
+            except: pass
+        if df_monthly_filtered is not None:
+            try: st.metric("Registros", len(df_monthly_filtered))
+            except: pass
 
 def analyze_point_data(lat, lon, df_long, gdf_stations, gdf_municipios, gdf_subcuencas):
     """
@@ -3334,6 +3361,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
