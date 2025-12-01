@@ -162,8 +162,11 @@ def _plot_panel_regional(rng, meth, col, tag, u_loc, df_long, gdf_stations):
 
                 # 2. Botón de Geolocalización (El ícono que pediste)
                 LocateControl(auto_start=False).add_to(m)
-
                 st_folium(m, height=350, use_container_width=True, key=f"folium_comp_{tag}")
+
+                # Botón GPS Nativo
+                LocateControl(auto_start=False).add_to(m)
+                st_folium(m, height=350, use_container_width=True, key=f"fol_comp_{tag}")
 
 @st.cache_data(ttl=3600)
 def get_img_as_base64(url):
@@ -185,16 +188,64 @@ def get_img_as_base64(url):
         print(f"Error Base64: {e}")
     return None
     
-def display_current_filters(stations, regions, municipios, years):
-    """Muestra un resumen colapsable de los filtros activos en toda la app."""
-    with st.expander("ℹ️ Resumen de Filtros Activos (Sidebar)", expanded=False):
-        c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(f"**Período:** {years[0]} - {years[1]}")
-        c2.markdown(f"**Regiones:** {', '.join(regions) if regions else 'Todas'}")
-        c3.markdown(f"**Municipios:** {', '.join(municipios) if municipios else 'Todos'}")
-        c4.markdown(f"**Estaciones:** {len(stations)} seleccionadas")
-        if len(stations) < 10:
-            st.caption(f"Selección: {', '.join(stations)}")
+# 0. DISTRIBUCIÓN ESPACIAL (TABLERO PRINCIPAL)
+# ==============================================================================
+def display_current_filters(gdf_filtered, df_monthly_filtered):
+    """Muestra el mapa inicial de estaciones seleccionadas."""
+    st.subheader("📍 Distribución Espacial y Análisis Puntual")
+    
+    col_map, col_stat = st.columns([3, 1])
+    
+    # Obtener ubicación del usuario para centrar este mapa también
+    user_loc = _get_user_location_sidebar(key_suffix="MainMap")
+
+    with col_map:
+        if gdf_filtered is not None and not gdf_filtered.empty:
+            # Centro del mapa
+            if user_loc:
+                 center_lat, center_lon = user_loc
+                 zoom = 10
+            else:
+                 center_lat = gdf_filtered.geometry.y.mean()
+                 center_lon = gdf_filtered.geometry.x.mean()
+                 zoom = 8
+            
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles="CartoDB positron")
+            
+            # Cluster de marcadores
+            marker_cluster = MarkerCluster().add_to(m)
+            
+            for _, row in gdf_filtered.iterrows():
+                folium.Marker(
+                    location=[row.geometry.y, row.geometry.x],
+                    popup=f"<b>{row[Config.STATION_NAME_COL]}</b><br>Alt: {row.get(Config.ALTITUDE_COL, '-')} m",
+                    tooltip=row[Config.STATION_NAME_COL],
+                    icon=folium.Icon(color="blue", icon="info-sign")
+                ).add_to(marker_cluster)
+            
+            # --- CAPA USUARIO ---
+            if user_loc:
+                folium.Marker(
+                    [user_loc[0], user_loc[1]], 
+                    icon=folium.Icon(color='black', icon='star'), 
+                    tooltip="Tu Ubicación"
+                ).add_to(m)
+
+            # --- GEOLOCALIZADOR (BOTÓN GPS) ---
+            # Posicionado explícitamente en 'topleft' (debajo del zoom)
+            LocateControl(auto_start=False, position="topleft").add_to(m)
+            
+            # Renderizado
+            st_folium(m, height=500, use_container_width=True)
+        else:
+            st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
+            
+    with col_stat:
+        st.markdown("#### Resumen")
+        if gdf_filtered is not None:
+            st.metric("Estaciones", len(gdf_filtered))
+            if df_monthly_filtered is not None:
+                st.metric("Registros", len(df_monthly_filtered))
 
 def analyze_point_data(lat, lon, df_long, gdf_stations, gdf_municipios, gdf_subcuencas):
     """
@@ -3283,6 +3334,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
