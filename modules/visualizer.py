@@ -248,16 +248,16 @@ def display_current_filters(gdf_filtered, df_monthly_filtered, *args, **kwargs):
                     icon=folium.Icon(color="blue", icon="info-sign")
                 ).add_to(marker_cluster)
             
-            # --- CAPA USUARIO ---
+            # --- CAPA USUARIO (Estrella manual si se ingresa en sidebar) ---
             if user_loc:
                 folium.Marker(
                     [user_loc[0], user_loc[1]], 
                     icon=folium.Icon(color='black', icon='star'), 
-                    tooltip="Tu Ubicación"
+                    tooltip="Tu Ubicación (Manual)"
                 ).add_to(m)
 
-            # --- GEOLOCALIZADOR (BOTÓN GPS) ---
-            # Posicionado explícitamente en 'topleft' (debajo del zoom)
+            # --- GEOLOCALIZADOR NATIVO (Botón GPS) ---
+            # Este es el botón que rastrea la ubicación real del dispositivo
             LocateControl(auto_start=False, position="topleft").add_to(m)
             
             # Renderizado
@@ -273,7 +273,7 @@ def display_current_filters(gdf_filtered, df_monthly_filtered, *args, **kwargs):
         if df_monthly_filtered is not None:
             try: st.metric("Registros", len(df_monthly_filtered))
             except: pass
-
+                
 def analyze_point_data(lat, lon, df_long, gdf_stations, gdf_municipios, gdf_subcuencas):
     """
     Analiza un punto geográfico:
@@ -3361,6 +3361,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
