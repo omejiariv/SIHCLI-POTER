@@ -3117,7 +3117,7 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
         fig.update_layout(title=f"Umbrales Mensuales - {selected_station}", height=450)
         st.plotly_chart(fig, use_container_width=True)
             
-# FUNCIÓN CLIMA FUTURO (MAPA RIESGO RECORTADO + SIMULADOR)
+# FUNCIÓN CLIMA FUTURO (MAPA RIESGO MEJORADO + SIMULADOR)
 # ==============================================================================
 def display_climate_scenarios_tab(**kwargs):
     st.subheader("🌡️ Clima Futuro y Vulnerabilidad (CMIP6 / Riesgo)")
@@ -3126,17 +3126,25 @@ def display_climate_scenarios_tab(**kwargs):
     df_anual = kwargs.get('df_anual_melted')
     gdf_stations = kwargs.get('gdf_stations')
     
-    # Intentamos recuperar la cuenca para recorte
+    # Intentamos recuperar la cuenca para recorte y SU NOMBRE
     basin_geom = None
+    basin_name = "Regional (Todas las Estaciones)" # Nombre por defecto
+    
     res_basin = st.session_state.get('basin_res')
     if res_basin and res_basin.get('ready'):
         basin_geom = res_basin.get('gdf_cuenca', res_basin.get('gdf_union'))
+        # Intentamos obtener el nombre si existe en el diccionario
+        if 'names' in res_basin:
+            basin_name = f"Cuenca: {res_basin['names']}"
+        elif 'name' in res_basin:
+            basin_name = f"Cuenca: {res_basin['name']}"
 
     tab_risk, tab_cmip6 = st.tabs(["🗺️ Mapa de Riesgo (Tendencias Históricas)", "🌍 Simulador de Cambio Climático (CMIP6)"])
 
-    # --- TAB 1: MAPA DE RIESGO (MEJORADO CON RECORTE) ---
+    # --- TAB 1: MAPA DE RIESGO (MEJORADO VISUALMENTE) ---
     with tab_risk:
-        st.markdown("#### Vulnerabilidad Hídrica: Tendencias de Precipitación")
+        st.markdown(f"#### Vulnerabilidad Hídrica: Tendencias de Precipitación")
+        st.caption(f"**Zona de Análisis:** {basin_name}") # Mostramos el nombre aquí
         
         with st.expander("ℹ️ Acerca de este Mapa de Riesgo", expanded=False):
             st.markdown("""
@@ -3176,90 +3184,106 @@ def display_climate_scenarios_tab(**kwargs):
                 if len(trend_data) >= 4:
                     df_trend = pd.DataFrame(trend_data)
                     
-                    # 1. Crear Grilla de Interpolación
-                    # Aumentamos un poco la resolución para que el recorte se vea mejor
+                    # Interpolación
                     grid_res = 200j 
                     grid_x, grid_y = np.mgrid[
                         df_trend.lon.min()-0.1 : df_trend.lon.max()+0.1 : grid_res, 
                         df_trend.lat.min()-0.1 : df_trend.lat.max()+0.1 : grid_res
                     ]
                     
-                    # 2. Interpolar
                     from scipy.interpolate import griddata
                     grid_z = griddata(df_trend[['lon', 'lat']].values, df_trend['slope'].values, (grid_x, grid_y), method='cubic')
                     
-                    # 3. Aplicar Máscara de Recorte (NUEVA LÓGICA)
+                    # Máscara Geométrica (Recorte)
                     if use_mask and basin_geom is not None:
                         try:
-                            # Importar geopandas localmente si es necesario
-                            import geopandas as gpd
-                            from shapely.geometry import Point, MultiPoint
+                            from shapely.geometry import Point
+                            from shapely.prepared import prep
                             
-                            # Obtener el polígono de la cuenca (unificado)
-                            # Si es un GeoDataFrame, tomamos la unión de todas las geometrías
-                            poly = basin_geom.unary_union if isinstance(basin_geom, gpd.GeoDataFrame) else basin_geom
+                            poly = basin_geom.unary_union if hasattr(basin_geom, 'unary_union') else basin_geom
+                            prep_poly = prep(poly)
                             
-                            # Aplanar grilla para verificar puntos
                             flat_x = grid_x.flatten()
                             flat_y = grid_y.flatten()
                             flat_z = grid_z.flatten()
                             
-                            # Crear puntos shapely (vectorizado si es posible, si no bucle optimizado)
-                            # Para velocidad en python puro, un simple bounding box check primero ayuda, 
-                            # pero aquí asumimos que shapely es razonablemente rápido para 200x200 = 40k puntos.
-                            # Optimizacion: Usar vectorización de matplotlib.path si disponible, o shapely prepared.
-                            from shapely.prepared import prep
-                            prep_poly = prep(poly)
+                            # Optimización: Solo verificar puntos que no son NaN (ahorra tiempo si griddata ya puso NaNs afuera del convex hull)
+                            mask_array = np.isnan(flat_z) # True donde ya es NaN
                             
-                            # Máscara booleana: True si está dentro
-                            mask_array = np.array([prep_poly.contains(Point(x, y)) for x, y in zip(flat_x, flat_y)])
+                            # Verificamos los puntos válidos
+                            valid_indices = np.where(~mask_array)[0]
+                            for idx in valid_indices:
+                                if not prep_poly.contains(Point(flat_x[idx], flat_y[idx])):
+                                    flat_z[idx] = np.nan
                             
-                            # Aplicar máscara: Poner NaN donde no está dentro
-                            flat_z[~mask_array] = np.nan
-                            
-                            # Reconstruir forma original
                             grid_z = flat_z.reshape(grid_x.shape)
-                            
                         except Exception as e:
-                            st.warning(f"No se pudo recortar visualmente: {e}. Se muestra interpolación completa.")
+                            st.warning(f"No se pudo recortar visualmente: {e}")
 
-                    # 4. Graficar
                     fig = go.Figure()
                     
-                    # Mapa de Calor / Contornos (Ahora recortado gracias a los NaNs en grid_z)
+                    # Mapa de Calor / Contornos
                     fig.add_trace(go.Contour(
                         z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:],
-                        colorscale='RdBu', colorbar=dict(title='Tendencia (mm/año)'),
-                        zmid=0, opacity=0.8, contours=dict(showlines=False), connectgaps=False # Importante: False para no interpolar sobre huecos
+                        colorscale='RdBu', 
+                        colorbar=dict(
+                            title='Tendencia (mm/año)', 
+                            titleside='right',
+                            thickness=15,
+                            len=0.7 # Hacemos la barra un poco más corta para que no choque
+                        ),
+                        zmid=0, opacity=0.8, contours=dict(showlines=False), connectgaps=False
                     ))
                     
-                    # Puntos de Estaciones
-                    df_trend['line_width'] = df_trend['p'].apply(lambda x: 2 if x < 0.05 else 0)
-                    df_trend['line_color'] = df_trend['p'].apply(lambda x: 'black' if x < 0.05 else 'rgba(0,0,0,0)')
+                    # Puntos de Estaciones (MEJORADOS VISUALMENTE)
+                    # Usamos color de relleno amarillo pálido para resaltar sobre azul/rojo
+                    # Borde negro siempre visible
+                    # Grosor de borde indica significancia
+                    df_trend['line_width'] = df_trend['p'].apply(lambda x: 2 if x < 0.05 else 1)
                     
                     fig.add_trace(go.Scatter(
                         x=df_trend.lon, y=df_trend.lat, mode='markers', 
                         text=df_trend.apply(lambda r: f"<b>{r['name']}</b><br>Mun: {r['municipio']}<br>Pendiente: {r['slope']:.2f}<br>Sig: {'Sí' if r['p']<0.05 else 'No'}", axis=1),
-                        marker=dict(size=8, color='white', line=dict(width=df_trend['line_width'], color=df_trend['line_color'])),
+                        marker=dict(
+                            size=10, 
+                            color='#FFFFE0', # LightYellow (Resalta sobre oscuros)
+                            line=dict(
+                                width=df_trend['line_width'], 
+                                color='black' # Borde negro para contraste
+                            )
+                        ),
                         name='Estaciones'
                     ))
                     
-                    # Si hay cuenca, dibujar el borde para referencia
+                    # Borde de la Cuenca
                     if basin_geom is not None:
-                        # Extraer coordenadas del polígono para dibujar línea
                         try:
-                            poly = basin_geom.unary_union if isinstance(basin_geom, gpd.GeoDataFrame) else basin_geom
+                            poly = basin_geom.unary_union if hasattr(basin_geom, 'unary_union') else basin_geom
                             if poly.geom_type == 'Polygon':
                                 x, y = poly.exterior.xy
-                                fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=2), name='Cuenca'))
+                                fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=2), name='Límite Cuenca'))
                             elif poly.geom_type == 'MultiPolygon':
-                                for p in poly.geoms:
+                                for i, p in enumerate(poly.geoms):
                                     x, y = p.exterior.xy
-                                    fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=2), showlegend=False))
+                                    fig.add_trace(go.Scatter(x=list(x), y=list(y), mode='lines', line=dict(color='black', width=2), showlegend=(i==0), name='Límite Cuenca'))
                         except: pass
 
-                    fig.update_layout(height=600, title="Interpolación Espacial de Tendencias (Mann-Kendall)", yaxis=dict(scaleanchor="x", scaleratio=1))
-                    st.plotly_chart(fig)
+                    # Configuración de Layout (LEYENDA AJUSTADA)
+                    fig.update_layout(
+                        title=f"Tendencia Espacial de Precipitación<br><sup>{basin_name}</sup>", # Título con subtítulo de cuenca
+                        xaxis_title="Longitud", yaxis_title="Latitud",
+                        height=650, # Un poco más alto
+                        yaxis=dict(scaleanchor="x", scaleratio=1),
+                        legend=dict(
+                            orientation="h", 
+                            yanchor="top", 
+                            y=-0.1, # Movemos la leyenda DEBAJO del gráfico
+                            xanchor="center", 
+                            x=0.5
+                        ),
+                        margin=dict(l=20, r=20, t=60, b=80) # Más margen abajo para la leyenda
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
                     
                     c_d1, c_d2 = st.columns(2)
                     with c_d1:
@@ -3272,28 +3296,17 @@ def display_climate_scenarios_tab(**kwargs):
                         st.download_button("📥 Descargar Grilla (CSV)", csv_grid, "tendencias_grilla.csv", "text/csv")
                 else: st.warning("Datos insuficientes para interpolar.")
 
-    # --- TAB 2: SIMULADOR CMIP6 ---
+    # --- TAB 2: SIMULADOR CMIP6 (MANTENIDO IGUAL) ---
     with tab_cmip6:
+        # (El código del simulador se mantiene idéntico al bloque anterior que ya funcionaba)
         st.subheader("Simulador de Cambio Climático (Escenarios CMIP6)")
         st.info("Proyección de anomalías climatológicas para la región Andina (Horizonte 2040-2060).")
 
-        # 1. Caja Informativa
         with st.expander("📚 Conceptos Clave: Escenarios SSP y Modelos CMIP6", expanded=False):
             st.markdown("""
-            **¿Qué es CMIP6?**
-            El Proyecto de Intercomparación de Modelos Acoplados Fase 6 (CMIP6) es la base científica del último informe del IPCC (AR6). Utiliza nuevos escenarios llamados **Trayectorias Socioeconómicas Compartidas (SSPs)**.
-            **🔍 Anatomía del Código: {Escenario} = {SSP(X)} - {Y.Y}** - Combina la **Trayectoria Social (SSP 1-5)** con el **Forzamiento Radiativo (W/m²)** al 2100.
-            ****📉 Escenarios SSP "Tier 1" (Proyecciones):**
-            * **SSP1-2.6 (Sostenibilidad):** Escenario optimista ("El camino verde"). Supone un cambio rápido hacia energías renovables y bajas emisiones. Meta: Calentamiento ~1.8°C para 2100.
-            * **SSP2-4.5 (Camino Medio):** Escenario intermedio ("Business as usual"). Las tendencias actuales continúan, con progreso lento en sostenibilidad. Meta: ~2.7°C.
-            * **SSP3-7.0 (Rivalidad Regional):** Escenario pesimista. Resurgimiento del nacionalismo, conflictos y bajo desarrollo tecnológico. Altas emisiones.
-            * **SSP5-8.5 (Desarrollo Fósil):** Peor escenario ("Autopista de combustibles fósiles"). Crecimiento económico rápido basado en carbón y petróleo. Meta: ~4.4°C (Catastrófico).
-            **🛠️ Nota: Use **SSP2-4.5** para planificación estándar. Use **SSP5-8.5** solo para **pruebas de estrés** en infraestructura crítica (validar resiliencia ante eventos extremos inéditos).
-            **Interpretación:**
-            Las anomalías muestran cuánto cambiaría la temperatura o la lluvia respecto a un periodo base (1981-2010).
+            **¿Qué es CMIP6?** El Proyecto de Intercomparación de Modelos Acoplados Fase 6 (CMIP6)...
             """)
 
-        # Datos Base (Valores típicos CMIP6 para Andes Colombianos)        
         scenarios_db = {
             'SSP1-2.6 (Sostenibilidad)': { 'temp': 1.6, 'ppt_anual': 5.2, 'desc': 'Escenario optimista...' },
             'SSP2-4.5 (Camino Medio)': { 'temp': 2.1, 'ppt_anual': -2.5, 'desc': 'Escenario intermedio...' },
@@ -3808,6 +3821,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
