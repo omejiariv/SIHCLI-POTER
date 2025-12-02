@@ -15,14 +15,14 @@ from modules.visualizer import (
     display_trends_and_forecast_tab,
     display_anomalies_tab,
     display_correlation_tab,
-    display_enso_tab,
+    # display_enso_tab,  <-- ELIMINADO (Ya integrado en Pronóstico Climático)
     display_drought_analysis_tab,
     display_advanced_maps_tab,
     display_life_zones_tab,
     display_land_cover_analysis_tab,
     display_climate_scenarios_tab,
     display_station_table_tab,
-    display_weekly_forecast_tab,      # Importaciones de seguridad
+    display_weekly_forecast_tab,      
     display_satellite_imagery_tab,
     display_climate_forecast_tab
 )
@@ -58,7 +58,6 @@ def main():
 
     # 3. PREPARAR DATAFRAME COMPLETO (CONTINUO) PARA PRONÓSTICOS
     # Este DF se filtra por Años y Estaciones, pero MANTIENE todos los meses.
-    # Es vital para que Prophet/SARIMA entiendan la estacionalidad anual sin huecos.
     mask_base = (
         (df_long[Config.YEAR_COL] >= year_range[0]) & 
         (df_long[Config.YEAR_COL] <= year_range[1]) &
@@ -67,7 +66,6 @@ def main():
     df_complete_filtered = df_long.loc[mask_base].copy()
 
     # 4. Argumentos Unificados (display_args)
-    # Agregamos 'df_complete' y 'selected_months' al diccionario
     display_args = {
         "df_long": df_monthly_filtered,        # Por defecto: Filtrado (Mapas, Estadísticas)
         "df_complete": df_complete_filtered,   # Para Pronósticos (Serie continua)
@@ -90,9 +88,9 @@ def main():
     }
 
     # --- CAJA DE INFORMACIÓN GLOBAL ---
-    display_current_filters(stations_for_analysis, sel_regions, sel_munis, year_range)     
+    display_current_filters(stations_for_analysis, sel_regions, sel_munis, year_range)      
 
-    # 5. Pestañas
+    # 5. Pestañas (LISTA ACTUALIZADA - SIN "ENSO")
     tab_titles = [
         "🏠 Inicio", 
         "🚨 Monitoreo (Tiempo Real)", 
@@ -103,7 +101,7 @@ def main():
         "📉 Tendencias",
         "⚠️ Anomalías", 
         "🔗 Correlación", 
-        "🌊 ENSO", 
+        # "🌊 ENSO",  <-- ELIMINADO
         "🌊 Extremos",
         "🌍 Mapas Avanzados",
         "🧪 Corrección de Sesgo",
@@ -116,65 +114,84 @@ def main():
     tabs = st.tabs(tab_titles)
 
     # 6. Renderizado (Usando siempre display_args)
+    
+    # TAB 0: INICIO
     with tabs[0]: 
         display_welcome_tab()
     
+    # TAB 1: MONITOREO
     with tabs[1]: 
-        # Dashboard usa el último dato real disponible (usamos df_complete para asegurar continuidad reciente)
         display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
 
+    # TAB 2: DISTRIBUCIÓN (Con argumentos corregidos)
     with tabs[2]: 
-        display_spatial_distribution_tab(user_loc=None, gdf_region=None, interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", **display_args)
+        display_spatial_distribution_tab(
+            user_loc=None, 
+            gdf_region=None, 
+            interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", 
+            **display_args
+        )
 
+    # TAB 3: GRÁFICOS
     with tabs[3]: 
         display_graphs_tab(**display_args)
 
+    # TAB 4: ESTADÍSTICAS
     with tabs[4]: 
         display_stats_tab(**display_args)
         st.markdown("---")
         display_station_table_tab(**display_args)
 
-    with tabs[5]: # PRONÓSTICO CLIMÁTICO
-        from modules.visualizer import display_climate_forecast_tab
+    # TAB 5: PRONÓSTICO CLIMÁTICO (INTEGRADO: IRI + HISTORIA + PROPHET)
+    with tabs[5]: 
         display_climate_forecast_tab(**display_args)
 
-    with tabs[6]: # TENDENCIAS (Usa df_complete internamente si está bien configurado en forecasting.py)
+    # TAB 6: TENDENCIAS
+    with tabs[6]: 
         display_trends_and_forecast_tab(**display_args)
 
+    # TAB 7: ANOMALÍAS
     with tabs[7]: 
         display_anomalies_tab(**display_args)
 
+    # TAB 8: CORRELACIÓN
     with tabs[8]: 
         display_correlation_tab(**display_args)
 
+    # NOTA: TAB 9 ANTERIOR ERA ENSO. AHORA "EXTREMOS" TOMA SU LUGAR.
+    
+    # TAB 9: EXTREMOS
     with tabs[9]: 
-        display_enso_tab(**display_args)
+        # display_enso_tab(**display_args) <-- ELIMINADO
+        display_drought_analysis_tab(**display_args) # Asumo que esta es la de extremos/sequía
 
+    # TAB 10: MAPAS AVANZADOS
     with tabs[10]: 
-        display_drought_analysis_tab(**display_args)
-
-    with tabs[11]: 
         display_advanced_maps_tab(**display_args)
 
-    with tabs[12]: 
+    # TAB 11: CORRECCIÓN DE SESGO
+    with tabs[11]: 
         from modules.visualizer import display_bias_correction_tab
         display_bias_correction_tab(**display_args)
 
-    with tabs[13]: 
+    # TAB 12: COBERTURA
+    with tabs[12]: 
         display_land_cover_analysis_tab(**display_args)
 
-    with tabs[14]: 
+    # TAB 13: ZONAS DE VIDA
+    with tabs[13]: 
         display_life_zones_tab(**display_args)
 
-    with tabs[15]: 
+    # TAB 14: CLIMA FUTURO
+    with tabs[14]: 
         display_climate_scenarios_tab(**display_args)
 
-    with tabs[16]: 
+    # TAB 15: REPORTE
+    with tabs[15]: 
         st.header("Generar Reporte PDF")
         if st.button("Generar Reporte Ejecutivo", type="primary"):
             with st.spinner("Generando..."):
                 res = {"n_estaciones": len(stations_for_analysis), "rango": f"{year_range}"}
-                # Reporte usa los datos filtrados por mes si el usuario así lo eligió
                 pdf = generate_pdf_report(df_monthly_filtered, gdf_filtered, res)
                 if pdf: 
                     st.download_button("📥 Descargar PDF", pdf, "reporte.pdf", "application/pdf")
@@ -192,4 +209,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
