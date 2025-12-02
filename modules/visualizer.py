@@ -2547,6 +2547,8 @@ def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, user_loc=
         </div>
         """, unsafe_allow_html=True)
 
+    tab_raster, tab_puntos, tab_vector = st.tabs(["🗺️ Mapa Raster", "📍 Puntos (Estaciones)", "📐 Descarga Vectorial"])
+
     # --- PESTAÑA 1: MAPA RASTER ---
     with tab_raster:
         col1, col2 = st.columns(2)
@@ -3392,6 +3394,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
