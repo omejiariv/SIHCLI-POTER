@@ -3117,9 +3117,7 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
         fig.update_layout(title=f"Umbrales Mensuales - {selected_station}", height=450)
         st.plotly_chart(fig, use_container_width=True)
             
-# FUNCIÓN CLIMA FUTURO (MAPA RIESGO MEJORADO + SIMULADOR RESTAURADO)
-# ==============================================================================
-# FUNCIÓN CLIMA FUTURO (MAPA RIESGO MEJORADO + SIMULADOR RESTAURADO)
+# FUNCIÓN CLIMA FUTURO (MAPA RIESGO + SIMULADOR COMPLETO)
 # ==============================================================================
 def display_climate_scenarios_tab(**kwargs):
     st.subheader("🌡️ Clima Futuro y Vulnerabilidad (CMIP6 / Riesgo)")
@@ -3136,11 +3134,10 @@ def display_climate_scenarios_tab(**kwargs):
 
     tab_risk, tab_cmip6 = st.tabs(["🗺️ Mapa de Riesgo (Tendencias Históricas)", "🌍 Simulador de Cambio Climático (CMIP6)"])
 
-    # --- TAB 1: MAPA DE RIESGO (MEJORADO) ---
+    # --- TAB 1: MAPA DE RIESGO (MANTENIDO IGUAL) ---
     with tab_risk:
         st.markdown("#### Vulnerabilidad Hídrica: Tendencias de Precipitación")
         
-        # 1. Caja Desplegable (Solicitud A.1)
         with st.expander("ℹ️ Acerca de este Mapa de Riesgo", expanded=False):
             st.markdown("""
             Este mapa muestra la **tendencia espacial histórica** de la lluvia interpolando la pendiente de Sen (Mann-Kendall).
@@ -3151,9 +3148,7 @@ def display_climate_scenarios_tab(**kwargs):
             * **Metodología:** Se calcula la tendencia para cada estación con >10 años de datos y se interpola espacialmente.
             """)
         
-        # Opciones de visualización
         c1, c2 = st.columns(2)
-        # CORRECCIÓN AQUÍ: Agregamos key="risk_mask_cb"
         use_mask = c1.checkbox("Recortar por Cuenca Seleccionada", value=True, key="risk_mask_cb")
         
         if st.button("Generar Mapa de Vulnerabilidad"):
@@ -3163,14 +3158,13 @@ def display_climate_scenarios_tab(**kwargs):
                     stations_pool = df_anual[Config.STATION_NAME_COL].unique()
                     for stn in stations_pool:
                         sub = df_anual[df_anual[Config.STATION_NAME_COL] == stn]
-                        if len(sub) > 10: # Mínimo 10 años
+                        if len(sub) > 10: 
                             try:
                                 res = mk.original_test(sub[Config.PRECIPITATION_COL])
                                 if gdf_stations is not None:
                                     loc = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == stn]
                                     if not loc.empty:
                                         iloc = loc.iloc[0]
-                                        # 3. Popup con Municipio (Solicitud A.3)
                                         muni = iloc[Config.MUNICIPALITY_COL] if Config.MUNICIPALITY_COL in iloc else "Desconocido"
                                         trend_data.append({
                                             'lat': iloc['latitude'], 'lon': iloc['longitude'], 
@@ -3182,7 +3176,6 @@ def display_climate_scenarios_tab(**kwargs):
                 if len(trend_data) >= 4:
                     df_trend = pd.DataFrame(trend_data)
                     
-                    # Interpolación
                     grid_x, grid_y = np.mgrid[
                         df_trend.lon.min()-0.1 : df_trend.lon.max()+0.1 : 200j, 
                         df_trend.lat.min()-0.1 : df_trend.lat.max()+0.1 : 200j
@@ -3190,35 +3183,17 @@ def display_climate_scenarios_tab(**kwargs):
                     from scipy.interpolate import griddata
                     grid_z = griddata(df_trend[['lon', 'lat']].values, df_trend['slope'].values, (grid_x, grid_y), method='cubic')
                     
-                    # 4. Recorte por Cuenca (Solicitud A.4)
                     if use_mask and basin_geom is not None:
-                        try:
-                            # Importar rasterio solo si es necesario para enmascarar
-                            from rasterio.transform import from_origin
-                            from rasterio.features import rasterize
-                            
-                            # Crear transform para rasterizar la máscara
-                            # Nota: Grid es de abajo hacia arriba en Y para numpy/plotly, pero rasterio espera top-down usualmente
-                            # Ajuste simple: Crear máscara booleana usando shapely vectorizado si rasterio es complejo aquí
-                            # O más simple: Usar puntos dentro del polígono
-                            pass # Implementación completa de máscara raster requiere librerías geo pesadas,
-                                 # Por ahora mostramos todo o implementamos máscara visual en Plotly si es posible.
-                                 # Plotly no soporta máscara raster nativa fácilmente sobre contornos.
-                                 # Alternativa robusta: Filtrar puntos de grid antes de graficar (lento) o dejar visualización completa.
-                            st.info("Nota: El recorte visual exacto en contornos requiere procesamiento adicional. Se muestra interpolación completa.")
-                        except: pass
+                        # Nota: Implementación de máscara visual simplificada o pendiente de rasterio
+                        st.info("Nota: Visualización completa (recorte exacto requiere librería rasterio avanzada).")
 
                     fig = go.Figure()
-                    
-                    # Contornos
                     fig.add_trace(go.Contour(
                         z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:],
                         colorscale='RdBu', colorbar=dict(title='Tendencia (mm/año)'),
-                        zmid=0, opacity=0.8, contours=dict(showlines=False),
-                        connectgaps=True
+                        zmid=0, opacity=0.8, contours=dict(showlines=False), connectgaps=True
                     ))
                     
-                    # Puntos
                     df_trend['line_width'] = df_trend['p'].apply(lambda x: 2 if x < 0.05 else 0)
                     df_trend['line_color'] = df_trend['p'].apply(lambda x: 'black' if x < 0.05 else 'rgba(0,0,0,0)')
                     
@@ -3232,30 +3207,23 @@ def display_climate_scenarios_tab(**kwargs):
                     fig.update_layout(height=600, title="Interpolación Espacial de Tendencias (Mann-Kendall)", yaxis=dict(scaleanchor="x", scaleratio=1))
                     st.plotly_chart(fig)
                     
-                    # 2. Descargas (Solicitud A.2)
                     c_d1, c_d2 = st.columns(2)
                     with c_d1:
-                        # Descarga Puntos (GeoJSON)
-                        geojson = df_trend.to_json(orient='records') # Simple JSON
+                        geojson = df_trend.to_json(orient='records')
                         st.download_button("📥 Descargar Puntos (JSON)", geojson, "tendencias_puntos.json", "application/json")
                     with c_d2:
-                        # Descarga Datos Interpolados (CSV Grilla)
-                        # Aplanar grilla para CSV
-                        flat_x = grid_x.flatten()
-                        flat_y = grid_y.flatten()
-                        flat_z = grid_z.flatten()
+                        flat_x = grid_x.flatten(); flat_y = grid_y.flatten(); flat_z = grid_z.flatten()
                         df_grid = pd.DataFrame({'lon': flat_x, 'lat': flat_y, 'tendencia': flat_z}).dropna()
                         csv_grid = df_grid.to_csv(index=False).encode('utf-8')
-                        st.download_button("📥 Descargar Grilla Interpolada (CSV)", csv_grid, "tendencias_grilla.csv", "text/csv")
-                        
+                        st.download_button("📥 Descargar Grilla (CSV)", csv_grid, "tendencias_grilla.csv", "text/csv")
                 else: st.warning("Datos insuficientes para interpolar.")
 
-    # --- TAB 2: SIMULADOR CMIP6 (RESTAURADO COMPLETO) ---
+    # --- TAB 2: SIMULADOR CMIP6 (RESTAURADO) ---
     with tab_cmip6:
         st.subheader("Simulador de Cambio Climático (Escenarios CMIP6)")
         st.info("Proyección de anomalías climatológicas para la región Andina (Horizonte 2040-2060).")
 
-        # --- 2. CAJA INFORMATIVA EDUCATIVA (SOLICITUD 2) ---
+        # 1. Caja Informativa
         with st.expander("📚 Conceptos Clave: Escenarios SSP y Modelos CMIP6", expanded=False):
             st.markdown("""
             **¿Qué es CMIP6?**
@@ -3269,31 +3237,17 @@ def display_climate_scenarios_tab(**kwargs):
 
             **Interpretación:**
             Las anomalías muestran cuánto cambiaría la temperatura o la lluvia respecto a un periodo base (1981-2010).
-            
-            **Fuentes:** [IPCC AR6](https://www.ipcc.ch/assessment-report/ar6/), [Atlas Interactivo del IPCC](https://interactive-atlas.ipcc.ch/).
             """)
 
         # Datos Base (Valores típicos CMIP6 para Andes Colombianos)
         scenarios_db = {
-            'SSP1-2.6 (Sostenibilidad)': {
-                'temp': 1.6, 'ppt_anual': 5.2, 
-                'desc': 'Escenario optimista: Emisiones netas cero para 2050.'
-            },
-            'SSP2-4.5 (Camino Medio)': {
-                'temp': 2.1, 'ppt_anual': -2.5, 
-                'desc': 'Escenario intermedio: Las emisiones se mantienen actuales hasta 2050.'
-            },
-            'SSP3-7.0 (Rivalidad Regional)': {
-                'temp': 2.8, 'ppt_anual': -8.4, 
-                'desc': 'Escenario pesimista: Resurgimiento del nacionalismo y conflictos.'
-            },
-            'SSP5-8.5 (Desarrollo Fósil)': {
-                'temp': 3.4, 'ppt_anual': -12.1, 
-                'desc': 'Peor escenario: Uso intensivo de combustibles fósiles.'
-            }
+            'SSP1-2.6 (Sostenibilidad)': { 'temp': 1.6, 'ppt_anual': 5.2, 'desc': 'Escenario optimista: Emisiones netas cero para 2050.' },
+            'SSP2-4.5 (Camino Medio)': { 'temp': 2.1, 'ppt_anual': -2.5, 'desc': 'Escenario intermedio: Las emisiones se mantienen.' },
+            'SSP3-7.0 (Rivalidad Regional)': { 'temp': 2.8, 'ppt_anual': -8.4, 'desc': 'Escenario pesimista: Conflictos y bajas tecnologías.' },
+            'SSP5-8.5 (Desarrollo Fósil)': { 'temp': 3.4, 'ppt_anual': -12.1, 'desc': 'Peor escenario: Uso intensivo de combustibles fósiles.' }
         }
 
-        # --- SIMULADOR INTERACTIVO ---
+        # 2. Simulador Interactivo
         st.markdown("##### 🎛️ Ajuste Manual de Escenarios (Simulación)")
         c_sim1, c_sim2 = st.columns(2)
         
@@ -3302,10 +3256,10 @@ def display_climate_scenarios_tab(**kwargs):
         with c_sim2:
             delta_ppt = st.slider("Cambio en Precipitación (%):", -30, 30, -5, 1, help="Simular cambio porcentual en la lluvia anual.")
 
-        # Botón para activar simulación (SOLICITUD 1 - Botón)
+        # Botón de Simulación
         if st.button("🚀 Simular Escenario Futuro"):
-            # Calcular impacto simple (Ejemplo: Déficit Hídrico aproximado)
-            et_increase = delta_temp * 3 # Regla empírica: ET aumenta ~3% por cada °C
+            # Impacto simple
+            et_increase = delta_temp * 3 
             water_balance_change = delta_ppt - et_increase
             
             st.metric(
@@ -3318,22 +3272,17 @@ def display_climate_scenarios_tab(**kwargs):
 
         st.divider()
 
-        # --- COMPARATIVA ESCENARIOS (GRÁFICOS RESTAURADOS) ---
+        # 3. Gráficos Comparativos (RESTAURADOS)
         st.markdown("##### 📊 Comparativa de Escenarios Oficiales vs. Simulación")
         
         c_sel, c_sort = st.columns([2, 1])
         with c_sel:
-            selected_scenarios = st.multiselect(
-                "Seleccionar Escenarios:", 
-                list(scenarios_db.keys()), 
-                default=list(scenarios_db.keys())
-            )
+            selected_scenarios = st.multiselect("Seleccionar Escenarios:", list(scenarios_db.keys()), default=list(scenarios_db.keys()))
         
         with c_sort:
             sort_order = st.selectbox("Ordenar Gráfico:", ["Ascendente ⬆️", "Descendente ⬇️", "Nombre Escenario"])
 
         if selected_scenarios:
-            # Incluir el escenario personalizado del usuario
             plot_data = []
             for sc in selected_scenarios:
                 row = scenarios_db[sc]
@@ -3344,7 +3293,7 @@ def display_climate_scenarios_tab(**kwargs):
                     'Tipo': 'Oficial'
                 })
             
-            # Agregar simulación manual al gráfico
+            # Agregar simulación manual
             plot_data.append({
                 'Escenario': 'Mi Simulación (Manual)',
                 'Anomalía Temperatura (°C)': delta_temp,
@@ -3354,7 +3303,7 @@ def display_climate_scenarios_tab(**kwargs):
             
             df_sim = pd.DataFrame(plot_data)
             
-            # Aplicar Ordenamiento
+            # Ordenar
             if "Ascendente" in sort_order:
                 df_sim = df_sim.sort_values("Anomalía Precipitación (%)", ascending=True)
             elif "Descendente" in sort_order:
@@ -3365,7 +3314,7 @@ def display_climate_scenarios_tab(**kwargs):
             c_g1, c_g2 = st.columns(2)
             
             with c_g1:
-                # Gráfico Precipitación (Solicitud 1 - Recuperado)
+                # Gráfico Precipitación
                 fig_ppt = px.bar(
                     df_sim, y='Escenario', x='Anomalía Precipitación (%)', 
                     color='Anomalía Precipitación (%)', title="Anomalía de Precipitación (%)",
@@ -3382,6 +3331,13 @@ def display_climate_scenarios_tab(**kwargs):
                     color_continuous_scale='YlOrRd', text_auto='.1f', orientation='h'
                 )
                 st.plotly_chart(fig_temp, use_container_width=True)
+
+            # 4. Tabla de Datos (RESTAURADA)
+            st.markdown("##### 📋 Detalles de Escenarios")
+            st.dataframe(
+                df_sim[['Escenario', 'Anomalía Precipitación (%)', 'Anomalía Temperatura (°C)', 'Tipo']],
+                use_container_width=True
+            )
         else:
             st.warning("Seleccione escenarios para comparar.")
             
@@ -3841,6 +3797,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
