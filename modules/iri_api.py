@@ -1,108 +1,52 @@
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import json
+import os
 import pandas as pd
 import streamlit as st
 
-# URL Base HTTPS (Tal como sugirió el soporte del IRI)
-IRI_BASE_URL = "https://ftp.iri.columbia.edu/ensodata"
+# Ruta donde guardaste los archivos descargados manualmente
+# Asegúrate de crear esta carpeta y poner los archivos ahí
+LOCAL_DATA_PATH = "data/iri" 
 
-def get_iri_session():
-    """
-    Crea una sesión HTTP 'camuflada' como un navegador web.
-    Esto es necesario porque los servidores universitarios suelen bloquear
-    las peticiones que se identifican como scripts de Python.
-    """
-    session = requests.Session()
-    
-    # 1. MÁSCARA DE NAVEGADOR (User-Agent)
-    # Hacemos creer al servidor que somos Chrome en Windows
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
-    }
-    session.headers.update(headers)
-    
-    # 2. ESTRATEGIA DE REINTENTOS ROBUSTA
-    # Si falla, reintenta 3 veces esperando un poco entre intentos
-    retry = Retry(
-        total=3,
-        backoff_factor=2,  # Espera 2s, 4s, 8s...
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET", "OPTIONS"]
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    
-    return session
-
-# Usamos caché para no bombardear al servidor (12 horas)
-@st.cache_data(ttl=12*3600, show_spinner=False)
 def fetch_iri_data(filename):
     """
-    Descarga archivos JSON del IRI usando autenticación y sesión robusta.
-    """
-    url = f"{IRI_BASE_URL}/{filename}"
+    Carga los datos del IRI desde archivos locales (GeoJSON/JSON)
+    previamente descargados, en lugar de conectar en vivo.
     
-    # 1. VALIDACIÓN Y LIMPIEZA DE CREDENCIALES
+    Esto evita errores de conexión SSL/Firewall y es ideal dado que
+    el pronóstico solo cambia mensualmente.
+    """
+    file_path = os.path.join(LOCAL_DATA_PATH, filename)
+    
     try:
-        if "iri" not in st.secrets:
-            # Fallback silencioso o error controlado si no hay secrets locales
-            return None
-            
-        # .strip() elimina espacios en blanco accidentales al inicio o final
-        user = st.secrets["iri"]["username"].strip()
-        pwd = st.secrets["iri"]["password"].strip()
-        
-    except Exception as e:
-        st.error(f"❌ Error leyendo credenciales IRI: {e}")
-        return None
+        # Verificar si el archivo existe
+        if not os.path.exists(file_path):
+            # Intentar buscar en la raíz si no está en subcarpeta (por si acaso)
+            if os.path.exists(filename):
+                file_path = filename
+            else:
+                st.warning(f"⚠️ Archivo de datos no encontrado: `{filename}`. Verifica que esté en `{LOCAL_DATA_PATH}`.")
+                return None
 
-    # 2. INTENTO DE DESCARGA
-    try:
-        session = get_iri_session()
-        
-        # Timeout de 30 segundos para redes lentas
-        response = session.get(url, auth=(user, pwd), timeout=30)
-        
-        if response.status_code == 200:
-            return response.json()
+        # Leer archivo local
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data
             
-        elif response.status_code == 401:
-            st.error(f"🔒 ACCESO DENEGADO (401) al archivo `{filename}`.")
-            st.caption("El servidor rechazó la contraseña. Verifica en .streamlit/secrets.toml")
-            return None
-            
-        elif response.status_code == 404:
-            st.warning(f"🔍 Archivo no encontrado en el servidor: `{filename}`")
-            return None
-            
-        else:
-            st.error(f"⚠️ Error del Servidor IRI ({response.status_code}): {response.reason}")
-            return None
-            
-    except requests.exceptions.SSLError:
-        st.error("🔒 Error de seguridad SSL con el servidor del IRI.")
-        return None
-    except requests.exceptions.ConnectionError:
-        st.error("📡 No se pudo conectar a `ftp.iri.columbia.edu`. Posible bloqueo de firewall o sitio caído.")
+    except json.JSONDecodeError:
+        st.error(f"❌ Error: El archivo `{filename}` no tiene un formato JSON válido.")
         return None
     except Exception as e:
-        st.error(f"🔥 Error inesperado: {e}")
+        st.error(f"❌ Error leyendo archivo local `{filename}`: {e}")
         return None
 
-# --- FUNCIONES DE PROCESAMIENTO (TU LÓGICA ESTÁ PERFECTA) ---
+# --- FUNCIONES DE PROCESAMIENTO (SE MANTIENEN IGUAL) ---
 
 def process_iri_plume(data_json):
     """Procesa el JSON de plumas (modelos spaghetti)"""
     if not data_json or 'years' not in data_json: return None
     
     try:
-        # Busca el último año disponible
+        # Busca el último año disponible en el archivo
         last_year_entry = data_json['years'][-1]
         year = last_year_entry['year']
         
@@ -133,6 +77,7 @@ def process_iri_plume(data_json):
             'models': models_data
         }
     except Exception as e:
+        st.error(f"Error procesando estructura Plume: {e}")
         return None
 
 def process_iri_probabilities(data_json):
@@ -157,4 +102,5 @@ def process_iri_probabilities(data_json):
             
         return pd.DataFrame(probs)
     except Exception as e:
+        st.error(f"Error procesando estructura Probabilities: {e}")
         return None
