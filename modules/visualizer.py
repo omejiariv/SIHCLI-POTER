@@ -3516,12 +3516,14 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
             # Agrupar: Suma total por mes y estación
             df_obs = df_subset.groupby([Config.STATION_NAME_COL, 'date'])[Config.PRECIPITATION_COL].sum().reset_index()
 
-        # --- PASO 2: DESCARGA SATELITAL ---
+# --- PASO 2: DESCARGA SATELITAL (ACTUALIZADO) ---
         with st.spinner("2/3. Descargando series satelitales (ERA5-Land)..."):
+            # Obtener coordenadas únicas
             unique_locs = target_gdf[[Config.STATION_NAME_COL, 'latitude', 'longitude']].drop_duplicates(Config.STATION_NAME_COL)
             lats = unique_locs['latitude'].tolist()
             lons = unique_locs['longitude'].tolist()
             
+            # Llamada a la función robusta
             df_sat = get_historical_monthly_series(
                 lats, lons, 
                 f"{start_year}-01-01", 
@@ -3529,7 +3531,8 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
             )
             
             if df_sat.empty:
-                st.error("La API satelital no retornó datos.")
+                st.error("📡 La API satelital no retornó datos. Puede ser un error de conexión o timeout.")
+                st.info("Intenta reducir el rango de años o el número de estaciones seleccionadas.")
                 return
 
         # --- PASO 3: EMPAREJAMIENTO ---
@@ -3684,6 +3687,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
