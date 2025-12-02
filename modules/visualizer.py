@@ -797,7 +797,7 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
             if not alts.empty: 
                 st.dataframe(alts.sort_values(Config.PRECIPITATION_COL, ascending=False).head(100), use_container_width=True)
         
-def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, user_loc=user_location_data, region="Antioquia", interpolacion="No", **kwargs):
+def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, user_loc, region="Antioquia", interpolacion="No", **kwargs):
 
     # --- 1. LÓGICA DE RESUMEN DE FILTROS (NUEVO) ---
     # Obtenemos datos para el resumen
@@ -3282,6 +3282,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
