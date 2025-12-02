@@ -5,6 +5,73 @@ import time
 import streamlit as st
 from datetime import datetime
 
+# ==============================================================================
+# 1. FUNCIÓN PARA PROMEDIOS CLIMÁTICOS (RESTAURADA)
+# ==============================================================================
+@st.cache_data(ttl=3600*24) # Cache de 24 horas
+def get_historical_climate_average(latitudes, longitudes, variable, start_date_str, end_date_str):
+    """
+    Obtiene el promedio histórico de una variable climática para un conjunto de coordenadas.
+    Útil para mapas de climatología base.
+    """
+    url = "https://archive-api.open-meteo.com/v1/archive"
+    
+    # Validaciones básicas
+    if not latitudes or not longitudes or len(latitudes) != len(longitudes):
+        return pd.DataFrame()
+    
+    # Asegurar formato lista
+    if not isinstance(latitudes, list): latitudes = [latitudes]
+    if not isinstance(longitudes, list): longitudes = [longitudes]
+
+    BATCH_SIZE = 20
+    all_results = []
+
+    for i in range(0, len(latitudes), BATCH_SIZE):
+        lats_batch = latitudes[i : i + BATCH_SIZE]
+        lons_batch = longitudes[i : i + BATCH_SIZE]
+        
+        params = {
+            "latitude": ",".join(map(str, lats_batch)),
+            "longitude": ",".join(map(str, lons_batch)),
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "daily": variable,
+            "timezone": "America/Bogota"
+        }
+
+        try:
+            response = requests.get(url, params=params, timeout=60)
+            if response.status_code == 200:
+                data = response.json()
+                results = data if isinstance(data, list) else [data]
+                
+                for j, res in enumerate(results):
+                    if "daily" in res and variable in res["daily"]:
+                        values = res["daily"][variable]
+                        # Limpiar nulos antes de promediar
+                        clean_vals = [v for v in values if v is not None]
+                        avg_val = sum(clean_vals) / len(clean_vals) if clean_vals else None
+                        
+                        all_results.append({
+                            "latitude": lats_batch[j],
+                            "longitude": lons_batch[j],
+                            "avg_value": avg_val
+                        })
+            elif response.status_code == 429:
+                time.sleep(2) # Espera breve si hay límite
+            
+            time.sleep(0.2) # Cortesía con la API
+
+        except Exception as e:
+            print(f"Error lote clima promedio {i}: {e}")
+            continue
+
+    return pd.DataFrame(all_results)
+
+# ==============================================================================
+# 2. FUNCIÓN PARA SERIES MENSUALES (CORRECCIÓN DE SESGO)
+# ==============================================================================
 def get_historical_monthly_series(lats, lons, start_date, end_date):
     """
     Descarga series de tiempo históricas de precipitación (ERA5-Land) usando Open-Meteo Archive API.
@@ -25,14 +92,12 @@ def get_historical_monthly_series(lats, lons, start_date, end_date):
     if not isinstance(lons, list): lons = [lons]
     
     # --- CONFIGURACIÓN DE LOTES ---
-    # Open-Meteo permite múltiples puntos, pero URLs muy largas fallan.
-    # Procesaremos de a 20 estaciones por llamada.
     BATCH_SIZE = 20
     all_series = []
     
     total_points = len(lats)
     
-    # Barra de progreso auxiliar (opcional, solo si estamos en Streamlit)
+    # Barra de progreso auxiliar (solo si hay muchos puntos)
     progress_bar = None
     if total_points > BATCH_SIZE:
         progress_bar = st.progress(0, text="📡 Descargando datos satelitales por lotes...")
