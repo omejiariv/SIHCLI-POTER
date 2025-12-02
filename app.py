@@ -32,6 +32,16 @@ st.set_page_config(page_title="SIHCLI-POTER", page_icon="🌧️", layout="wide"
 warnings.filterwarnings('ignore')
 
 def main():
+    # --- INICIALIZACIÓN DE ESTADO (ZONAS DE VIDA) ---
+    if 'lz_raster_result' not in st.session_state:
+        st.session_state.lz_raster_result = None
+    if 'lz_profile' not in st.session_state:
+        st.session_state.lz_profile = None
+    if 'lz_names' not in st.session_state:
+        st.session_state.lz_names = None
+    if 'lz_colors' not in st.session_state:
+        st.session_state.lz_colors = None
+
     # 1. Cargar Datos
     gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
     
@@ -209,3 +219,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
