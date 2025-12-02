@@ -3272,7 +3272,7 @@ def display_climate_scenarios_tab(**kwargs):
                         st.download_button("📥 Descargar Grilla (CSV)", csv_grid, "tendencias_grilla.csv", "text/csv")
                 else: st.warning("Datos insuficientes para interpolar.")
 
-    # --- TAB 2: SIMULADOR CMIP6 (MANTENIDO) ---
+    # --- TAB 2: SIMULADOR CMIP6 ---
     with tab_cmip6:
         st.subheader("Simulador de Cambio Climático (Escenarios CMIP6)")
         st.info("Proyección de anomalías climatológicas para la región Andina (Horizonte 2040-2060).")
@@ -3282,13 +3282,13 @@ def display_climate_scenarios_tab(**kwargs):
             st.markdown("""
             **¿Qué es CMIP6?**
             El Proyecto de Intercomparación de Modelos Acoplados Fase 6 (CMIP6) es la base científica del último informe del IPCC (AR6). Utiliza nuevos escenarios llamados **Trayectorias Socioeconómicas Compartidas (SSPs)**.
-
-            **Definición de Escenarios (SSPs):**
+            **🔍 Anatomía del Código: {Escenario} = {SSP(X)} - {Y.Y}** - Combina la **Trayectoria Social (SSP 1-5)** con el **Forzamiento Radiativo (W/m²)** al 2100.
+            ****📉 Escenarios SSP "Tier 1" (Proyecciones):**
             * **SSP1-2.6 (Sostenibilidad):** Escenario optimista ("El camino verde"). Supone un cambio rápido hacia energías renovables y bajas emisiones. Meta: Calentamiento ~1.8°C para 2100.
             * **SSP2-4.5 (Camino Medio):** Escenario intermedio ("Business as usual"). Las tendencias actuales continúan, con progreso lento en sostenibilidad. Meta: ~2.7°C.
             * **SSP3-7.0 (Rivalidad Regional):** Escenario pesimista. Resurgimiento del nacionalismo, conflictos y bajo desarrollo tecnológico. Altas emisiones.
             * **SSP5-8.5 (Desarrollo Fósil):** Peor escenario ("Autopista de combustibles fósiles"). Crecimiento económico rápido basado en carbón y petróleo. Meta: ~4.4°C (Catastrófico).
-
+            **🛠️ Nota: Use **SSP2-4.5** para planificación estándar. Use **SSP5-8.5** solo para **pruebas de estrés** en infraestructura crítica (validar resiliencia ante eventos extremos inéditos).
             **Interpretación:**
             Las anomalías muestran cuánto cambiaría la temperatura o la lluvia respecto a un periodo base (1981-2010).
             """)
@@ -3808,6 +3808,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
