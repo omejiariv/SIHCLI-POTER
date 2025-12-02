@@ -1849,13 +1849,30 @@ def display_climate_forecast_tab(**kwargs):
             with col2:
                 st.markdown("#### 📊 Probabilidad Multimodelo")
                 df_probs = process_iri_probabilities(json_probs)
-                if df_probs is not None:
-                    df_melt = df_probs.melt(id_vars="Trimestre", var_name="Evento", value_name="Probabilidad")
-                    color_map = {"El Niño": "#FF4B4B", "La Niña": "#1C83E1", "Neutral": "#808495"}
-                    fig_probs = px.bar(df_melt, x="Trimestre", y="Probabilidad", color="Evento", color_discrete_map=color_map, text="Probabilidad", barmode='group')
-                    fig_probs.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
-                    fig_probs.update_layout(height=450, yaxis=dict(range=[0, 105]))
-                    st.plotly_chart(fig_probs, use_container_width=True)
+                
+                if df_probs is not None and not df_probs.empty:
+                    # CORRECCIÓN DE KEYERROR: Verificar y normalizar nombres de columnas
+                    # El JSON original suele traer 'season' en lugar de 'Trimestre'
+                    if 'Trimestre' not in df_probs.columns:
+                        # Intentar encontrar columnas parecidas o renombrar
+                        if 'season' in df_probs.columns:
+                            df_probs.rename(columns={'season': 'Trimestre'}, inplace=True)
+                        elif df_probs.columns[0] != 'Trimestre':
+                             # Si no encuentra 'season', asume la primera columna es el tiempo
+                             df_probs.rename(columns={df_probs.columns[0]: 'Trimestre'}, inplace=True)
+
+                    # Verificar nuevamente después del intento de corrección
+                    if 'Trimestre' in df_probs.columns:
+                        df_melt = df_probs.melt(id_vars="Trimestre", var_name="Evento", value_name="Probabilidad")
+                        color_map = {"El Niño": "#FF4B4B", "La Niña": "#1C83E1", "Neutral": "#808495"}
+                        fig_probs = px.bar(df_melt, x="Trimestre", y="Probabilidad", color="Evento", color_discrete_map=color_map, text="Probabilidad", barmode='group')
+                        fig_probs.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
+                        fig_probs.update_layout(height=450, yaxis=dict(range=[0, 105]))
+                        st.plotly_chart(fig_probs, use_container_width=True)
+                    else:
+                        st.error(f"Error de estructura: No se encontró la columna de tiempo. Columnas disponibles: {df_probs.columns.tolist()}")
+                else:
+                    st.warning("Error procesando probabilidades.")
         else:
             st.error("⚠️ No se encontraron los archivos JSON en `data/iri/`. Por favor verifica la carga.")
 
@@ -3518,6 +3535,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
