@@ -2547,18 +2547,7 @@ def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, user_loc=
         </div>
         """, unsafe_allow_html=True)
 
-    # --- 2. GESTIÓN DE ESTADO ---
-    if 'lz_raster_result' not in st.session_state:
-        st.session_state.lz_raster_result = None
-        st.session_state.lz_profile = None
-        st.session_state.lz_names = None
-        st.session_state.lz_colors = None
-
-    # --- 3. DEFINICIÓN DE PESTAÑAS (CORRECCIÓN DEL ERROR) ---
-    # Aquí definimos las 3 variables antes de usarlas
-    tab_raster, tab_puntos, tab_vector = st.tabs(["🗺️ Mapa Raster", "📍 Puntos (Estaciones)", "📐 Descarga Vectorial"])
-
-    # --- PESTAÑA 1: MAPA RASTER (TU LÓGICA + BACKEND OPTIMIZADO) ---
+    # --- PESTAÑA 1: MAPA RASTER ---
     with tab_raster:
         col1, col2 = st.columns(2)
         with col1:
@@ -2570,21 +2559,22 @@ def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, user_loc=
             
         basin_geom = None
         if use_mask:
-            # Intentamos obtener la cuenca de varias fuentes posibles
-            if gdf_subcuencas is not None and not gdf_subcuencas.empty:
+            # --- CORRECCIÓN DE PRIORIDAD DE MÁSCARA ---
+            # 1. Prioridad ALTA: Verificar si hay una cuenca específica en memoria (desde Mapas Avanzados)
+            res_basin = st.session_state.get('basin_res') 
+            if res_basin and res_basin.get('ready'):
+                basin_geom = res_basin.get('gdf_cuenca', res_basin.get('gdf_union'))
+                st.success(f"✅ Máscara activa: {res_basin.get('names', 'Cuenca Específica')}")
+            
+            # 2. Prioridad BAJA: Si no hay específica, usar la capa general de subcuencas (si existe)
+            elif gdf_subcuencas is not None and not gdf_subcuencas.empty:
                 basin_geom = gdf_subcuencas
-                st.success("✅ Máscara activa: Subcuencas cargadas.")
+                st.info("ℹ️ Usando todas las subcuencas (Regional). Para una específica, ve a 'Mapas Avanzados'.")
+            
             else:
-                # Fallback a la sesión si existe
-                res_basin = st.session_state.get('basin_res') 
-                if res_basin and res_basin.get('ready'):
-                    basin_geom = res_basin.get('gdf_cuenca', res_basin.get('gdf_union'))
-                    st.success(f"✅ Máscara activa: {res_basin.get('names', 'Cuenca')}")
-                else:
-                    st.warning("⚠️ No se detectó geometría de cuenca. Se usará el mapa completo.")
+                st.warning("⚠️ No se detectó ninguna geometría para recortar. Se usará el mapa completo.")
 
         if st.button("Generar Mapa de Zonas de Vida"):
-            # Usamos getattr para evitar error si Config no tiene la variable definida
             dem_path = getattr(Config, 'DEM_FILE_PATH', 'data/static/dem_antioquia.tif')
             ppt_path = getattr(Config, 'PRECIP_RASTER_PATH', 'data/static/ppt_anual_media.tif')
 
@@ -2593,28 +2583,22 @@ def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, user_loc=
             else:
                 with st.spinner("Generando mapa clasificado..."):
                     try:
-                        # LLAMADA AL NUEVO BACKEND OPTIMIZADO
                         lz_arr, profile, dynamic_legend, color_map = lz.generate_life_zone_map(
-                            dem_path, 
-                            ppt_path, 
-                            mask_geometry=basin_geom, 
-                            downscale_factor=downscale
+                            dem_path, ppt_path, mask_geometry=basin_geom, downscale_factor=downscale
                         )
                         
                         if lz_arr is not None:
-                            # Guardamos en sesión para usar en la pestaña de vectores
                             st.session_state.lz_raster_result = lz_arr
                             st.session_state.lz_profile = profile
                             st.session_state.lz_names = dynamic_legend
                             st.session_state.lz_colors = color_map
                             
-                            # --- TU VISUALIZACIÓN ORIGINAL (SCATTER MAPBOX) ---
+                            # VISUALIZACIÓN
                             h, w = lz_arr.shape
                             transform = profile['transform']
-                            x0, y0 = transform.c, transform.f
                             dx, dy = transform.a, transform.e
+                            x0, y0 = transform.c, transform.f
                             
-                            # Creamos malla de coordenadas
                             xs = np.linspace(x0, x0 + dx * w, w)
                             ys = np.linspace(y0, y0 + dy * h, h)
                             xx, yy = np.meshgrid(xs, ys)
@@ -2625,64 +2609,50 @@ def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, user_loc=
                             mask = z_flat > 0
                             
                             if not np.any(mask):
-                                st.warning("El mapa se generó pero todos los píxeles son 0 (fuera de rango o máscara vacía).")
+                                st.warning("El mapa se generó pero está vacío (quizás la máscara no coincide con el área del DEM).")
                             else:
                                 lat_clean = lat_flat[mask]
                                 lon_clean = lon_flat[mask]
                                 z_clean = z_flat[mask]
+                                
                                 center_lat = np.mean(lat_clean)
                                 center_lon = np.mean(lon_clean)
 
-                                # Cálculo de Hectáreas
-                                meters_per_deg_lat = 111132.0
-                                meters_per_deg_lon = 111132.0 * cos(radians(center_lat))
-                                pixel_width_m = abs(dx) * meters_per_deg_lon
-                                pixel_height_m = abs(dy) * meters_per_deg_lat
-                                pixel_area_ha = (pixel_width_m * pixel_height_m) / 10000.0
+                                # Área
+                                meters_deg = 111132.0
+                                px_area_ha = (abs(dx * meters_deg * cos(radians(center_lat))) * abs(dy * meters_deg)) / 10000.0
                                 
                                 colors_hex = [color_map.get(v, "#808080") for v in z_clean]
-                                hover_text = [f"[ID: {v}] {dynamic_legend.get(v, 'Desconocido')}" for v in z_clean]
+                                hover_text = [f"{dynamic_legend.get(v, 'ID '+str(v))}" for v in z_clean]
                                 
-                                # Mapa Interactivo Plotly
                                 fig = go.Figure(go.Scattermapbox(
                                     lat=lat_clean, lon=lon_clean, mode='markers',
                                     marker=go.scattermapbox.Marker(size=8 if downscale > 4 else 5, color=colors_hex, opacity=0.75),
-                                    text=hover_text, hovertemplate="<b>%{text}</b><br>(%{lat:.3f}, %{lon:.3f})<extra></extra>"
+                                    text=hover_text, hovertemplate="%{text}<extra></extra>"
                                 ))
                                 
                                 if user_loc:
                                     fig.add_trace(go.Scattermapbox(
                                         lat=[user_loc[0]], lon=[user_loc[1]], mode='markers+text',
                                         marker=go.scattermapbox.Marker(size=15, color='black', symbol='star'),
-                                        text=["📍 TÚ ESTÁS AQUÍ"], textposition="top center", hoverinfo='text'
+                                        text=["📍 TÚ ESTÁS AQUÍ"], textposition="top center"
                                     ))
 
                                 fig.update_layout(
-                                    title="Zonas de Vida (Clasificación Holdridge)",
                                     mapbox_style="carto-positron",
                                     mapbox=dict(center=dict(lat=center_lat, lon=center_lon), zoom=9),
-                                    height=600, margin={"r":0,"t":30,"l":0,"b":0}, showlegend=False
+                                    height=600, margin={"r":0,"t":0,"l":0,"b":0}, showlegend=False
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
                                 
-                                # Tabla de Estadísticas
+                                # Tabla
                                 unique, counts = np.unique(z_clean, return_counts=True)
-                                data_table = []
-                                total_px = counts.sum()
-                                for v, c in zip(unique, counts):
-                                    name = dynamic_legend.get(v, f"Clase {v}")
-                                    area_ha = c * pixel_area_ha
-                                    data_table.append({"ID": v, "Zona de Vida": name, "Píxeles": c, "Área (ha)": area_ha, "%": (c/total_px)*100})
+                                data = [{"Zona": dynamic_legend.get(v, str(v)), "Ha": c * px_area_ha, "%": c/counts.sum()*100} for v, c in zip(unique, counts)]
+                                st.dataframe(pd.DataFrame(data).sort_values("%", ascending=False).style.format({"Ha": "{:,.1f}", "%": "{:.1f}%"}), use_container_width=True)
                                 
-                                df_areas = pd.DataFrame(data_table).sort_values("%", ascending=False)
-                                st.dataframe(df_areas.style.format({"%": "{:.1f}%", "Área (ha)": "{:,.2f}"}), use_container_width=True)
-                                
-                                # Botón Descarga TIFF (Agregado)
-                                tiff_bytes = lz.get_raster_bytes(lz_arr, profile)
-                                if tiff_bytes:
-                                    st.download_button("📥 Descargar GeoTIFF", tiff_bytes, "zonas_vida.tif", "image/tiff")
+                                tiff = lz.get_raster_bytes(lz_arr, profile)
+                                if tiff: st.download_button("📥 Descargar TIFF", tiff, "zonas_vida.tif", "image/tiff")
 
-                    except ImportError as ie: st.error(f"Error de Importación: {ie}.")
                     except Exception as e: st.error(f"Error visualizando: {e}")
 
     # --- PESTAÑA 2: PUNTOS (TU CÓDIGO ORIGINAL) ---
@@ -3422,6 +3392,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
