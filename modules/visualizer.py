@@ -1781,31 +1781,29 @@ def display_climate_forecast_tab(**kwargs):
     # Recuperamos los datos históricos pasados desde app.py
     df_enso = kwargs.get('df_enso')
     
-    # Definimos las 3 pestañas (La estructura que ya tenías, pero mejorada)
-    tab_hist, tab_iri, tab_gen = st.tabs(["📜 Historia Índices (ONI/SOI/IOD)", "🌎 Pronóstico Oficial (IRI)", "⚙️ Generador Prophet"])
+    # Definimos las pestañas (Ahora separando Probabilidades como pediste)
+    tab_hist, tab_iri_plumas, tab_iri_probs, tab_gen = st.tabs([
+        "📜 Historia Índices", 
+        "🌎 Pronóstico Oficial (Plumas)", 
+        "📊 Probabilidad Multimodelo",
+        "⚙️ Generador Prophet"
+    ])
     
     # ==========================================
-    # PESTAÑA 1: HISTORIA (MEJORADA CON TU GRÁFICO + SOI/IOD)
+    # PESTAÑA 1: HISTORIA
     # ==========================================
     with tab_hist:
         st.markdown("#### 📉 Índices Climáticos Históricos")
         if df_enso is not None and not df_enso.empty:
-            # Selector de Índice (AQUÍ ESTÁ LA MAGIA PARA VER SOI e IOD)
             c1, _ = st.columns([1,3])
             idx_sel = c1.selectbox("Seleccione Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
             
-            # Limpieza de datos
             if idx_sel in df_enso.columns:
                 d = df_enso.dropna(subset=[idx_sel, Config.DATE_COL]).sort_values(Config.DATE_COL)
-                
                 if idx_sel == Config.ENSO_ONI_COL:
-                    # Si es ONI -> Usamos tu gráfico PRECIOSO con colores de fondo
                     st.plotly_chart(create_enso_chart(d), use_container_width=True, key="chart_oni_hist")
                 else:
-                    # Si es SOI o IOD -> Usamos gráfico de líneas estándar (no tienen las mismas fases de color)
                     fig_simple = px.line(d, x=Config.DATE_COL, y=idx_sel, title=f"Evolución Histórica: {idx_sel}")
-                    
-                    # Agregar línea cero de referencia
                     fig_simple.add_hline(y=0, line_width=1, line_color="black", opacity=0.5)
                     st.plotly_chart(fig_simple, use_container_width=True, key=f"chart_{idx_sel}_hist")
             else:
@@ -1814,105 +1812,143 @@ def display_climate_forecast_tab(**kwargs):
             st.warning("No hay datos históricos cargados (df_enso).")
 
     # ==========================================
-    # PESTAÑA 2: PRONÓSTICO IRI (NUEVO - DATOS LOCALES)
+    # DATOS COMUNES IRI (Se cargan una vez)
     # ==========================================
-    with tab_iri:
-        st.info("ℹ️ Datos oficiales del IRI (Columbia University). Actualización Mensual (Archivos Locales).")
+    # Cargar datos desde archivos locales
+    json_plumas = fetch_iri_data("enso_plumes.json")
+    json_probs = fetch_iri_data("enso_iri_prob.json")
+
+    # --- CAJA INFORMATIVA (RECUPERADA) ---
+    with st.expander("ℹ️ Acerca de los Pronósticos IRI/CPC (Columbia University)", expanded=False):
+        st.markdown("""
+        **Fuente de Datos:** International Research Institute for Climate and Society (IRI) - Columbia University.
         
-        # Cargar datos desde archivos locales (Robustez total)
-        json_plumas = fetch_iri_data("enso_plumes.json")
-        json_probs = fetch_iri_data("enso_iri_prob.json") # O 'enso_cpc_prob.json'
-
-        if json_plumas and json_probs:
-            col1, col2 = st.columns(2)
-            
-            # A. Plumas (Spaghetti)
-            with col1:
-                st.markdown("#### 🍝 Modelos de Predicción")
-                data_plume = process_iri_plume(json_plumas)
-                if data_plume:
-                    fig_plume = go.Figure()
-                    for model in data_plume['models']:
-                        is_dyn = model['type'] == 'Dynamical'
-                        color = "rgba(100, 149, 237, 0.6)" if is_dyn else "rgba(255, 165, 0, 0.6)"
-                        fig_plume.add_trace(go.Scatter(
-                            x=data_plume['seasons'], y=model['values'], mode='lines',
-                            name=model['name'], line=dict(color=color, width=1.5), opacity=0.7, showlegend=False
-                        ))
-                    # Umbrales
-                    fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
-                    fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
-                    fig_plume.update_layout(title="Anomalía SST Niño 3.4", height=450)
-                    st.plotly_chart(fig_plume, use_container_width=True, key="chart_iri_plume")
-            
-            # B. Probabilidades (Barras) - CORREGIDO
-            with col2:
-                st.markdown("#### 📊 Probabilidad Multimodelo")
-                df_probs = process_iri_probabilities(json_probs)
-                
-                # Verificación robusta antes de graficar
-                if df_probs is not None and not df_probs.empty:
-                    try:
-                        # 1. Renombrar 'season' -> 'Trimestre' si es necesario
-                        # Esto es crítico porque el JSON usa 'season' pero queremos 'Trimestre' para el gráfico
-                        df_probs.rename(columns={'season': 'Trimestre', 'Season': 'Trimestre'}, inplace=True)
-                        
-                        # 2. Verificar que exista la columna de tiempo
-                        if 'Trimestre' in df_probs.columns:
-                            # 3. Preparar datos para Plotly (Melt)
-                            # Convertimos columnas de eventos a filas
-                            df_melt = df_probs.melt(
-                                id_vars="Trimestre", 
-                                value_vars=["El Niño", "La Niña", "Neutral"] if "El Niño" in df_probs.columns else ["elnino", "lanina", "neutral"],
-                                var_name="Evento", 
-                                value_name="Probabilidad"
-                            )
-                            
-                            # 4. Mapa de colores consistente
-                            # Normalizamos nombres para que coincidan con el color map
-                            df_melt['Evento'] = df_melt['Evento'].replace({
-                                'elnino': 'El Niño', 
-                                'lanina': 'La Niña', 
-                                'neutral': 'Neutral'
-                            })
-                            
-                            color_map = {
-                                "El Niño": "#FF4B4B",  # Rojo
-                                "La Niña": "#1C83E1",  # Azul
-                                "Neutral": "#808495"   # Gris
-                            }
-                            
-                            fig_probs = px.bar(
-                                df_melt, 
-                                x="Trimestre", 
-                                y="Probabilidad", 
-                                color="Evento", 
-                                color_discrete_map=color_map, 
-                                text="Probabilidad", 
-                                barmode='group'
-                            )
-                            fig_probs.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
-                            fig_probs.update_layout(height=450, yaxis=dict(range=[0, 105]))
-                            st.plotly_chart(fig_probs, use_container_width=True, key="chart_iri_probs")
-                        else:
-                            st.warning(f"Estructura de datos inesperada. Columnas encontradas: {df_probs.columns.tolist()}")
-                            st.dataframe(df_probs.head())
-                            
-                    except Exception as e:
-                        st.error(f"Error generando gráfico de barras: {e}")
-                else:
-                    st.warning("No hay datos de probabilidad para procesar (DataFrame vacío).")
-        else:
-            st.error("⚠️ No se encontraron los archivos JSON en `data/iri/`. Por favor verifica la carga.")
+        * **Plumas (Spaghetti):** Muestran las proyecciones de anomalía de temperatura superficial del mar (SST) en la región Niño 3.4 de múltiples modelos dinámicos y estadísticos.
+        * **Probabilidades:** Probabilidad objetiva basada en la regresión de los modelos.
+        * **Actualización:** Los datos se actualizan mensualmente (aprox. día 19).
+        * **Umbrales:** * **El Niño:** Anomalía ≥ +0.5°C
+            * **La Niña:** Anomalía ≤ -0.5°C
+            * **Neutral:** -0.5°C < Anomalía < +0.5°C
+        """)
 
     # ==========================================
-    # PESTAÑA 3: PROPHET (MANTENIDO ORIGINAL)
+    # PESTAÑA 2: PRONÓSTICO OFICIAL (PLUMAS)
+    # ==========================================
+    with tab_iri_plumas:
+        if json_plumas:
+            # Mensaje de Fecha (Recuperado del JSON si es posible, o genérico)
+            try:
+                # Intentamos sacar el año/mes del último dato
+                last_year = json_plumas['years'][-1]['year']
+                last_month_idx = json_plumas['years'][-1]['months'][-1]['month']
+                meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+                st.info(f"📅 Pronóstico actualizado a: **{meses[last_month_idx]} {last_year}**")
+            except:
+                st.info("📅 Pronóstico Mensual Oficial")
+
+            st.markdown("#### 🍝 Modelos de Predicción (Plumas)")
+            data_plume = process_iri_plume(json_plumas)
+            if data_plume:
+                fig_plume = go.Figure()
+                for model in data_plume['models']:
+                    is_dyn = model['type'] == 'Dynamical'
+                    color = "rgba(100, 149, 237, 0.6)" if is_dyn else "rgba(255, 165, 0, 0.6)"
+                    fig_plume.add_trace(go.Scatter(
+                        x=data_plume['seasons'], y=model['values'], mode='lines',
+                        name=model['name'], line=dict(color=color, width=1.5), opacity=0.7, showlegend=False,
+                        hovertemplate=f"<b>{model['name']}</b><br>%{{y:.2f}} °C<extra></extra>"
+                    ))
+                # Umbrales
+                fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
+                fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
+                fig_plume.update_layout(title="Anomalía SST Niño 3.4", height=500, xaxis_title="Trimestres Móviles", yaxis_title="Anomalía SST (°C)")
+                st.plotly_chart(fig_plume, use_container_width=True, key="chart_iri_plume")
+            else:
+                st.warning("Error al procesar la estructura del archivo de plumas.")
+        else:
+            st.error("⚠️ No se encontró el archivo `enso_plumes.json`. Verifica la carpeta `data/iri/`.")
+
+    # ==========================================
+    # PESTAÑA 3: PROBABILIDAD MULTIMODELO (RESTAURADA)
+    # ==========================================
+    with tab_iri_probs:
+        if json_probs:
+            st.markdown("#### 📊 Probabilidad de Eventos (El Niño/La Niña/Neutral)")
+            df_probs = process_iri_probabilities(json_probs)
+            
+            if df_probs is not None and not df_probs.empty:
+                try:
+                    # Lógica robusta de columnas (Recuperada y mejorada)
+                    df_probs.columns = [str(c).strip() for c in df_probs.columns]
+                    
+                    # Buscar columna de tiempo
+                    col_tiempo = None
+                    for nombre in ['Trimestre', 'Season', 'season', 'SEASON']:
+                        if nombre in df_probs.columns:
+                            col_tiempo = nombre
+                            break
+                    
+                    if not col_tiempo and len(df_probs.columns) > 0:
+                        col_tiempo = df_probs.columns[0]
+                    
+                    if col_tiempo:
+                        if col_tiempo != 'Trimestre':
+                            df_probs.rename(columns={col_tiempo: 'Trimestre'}, inplace=True)
+                        
+                        # Melt seguro
+                        cols_val = [c for c in df_probs.columns if c != 'Trimestre']
+                        df_melt = df_probs.melt(id_vars="Trimestre", value_vars=cols_val, var_name="Evento", value_name="Probabilidad")
+                        
+                        # Normalización de nombres para colores
+                        df_melt['Evento_Norm'] = df_melt['Evento'].astype(str).str.lower().str.replace(" ", "")
+                        
+                        # Mapeo de colores flexible
+                        color_map_norm = {
+                            "elnino": "#FF4B4B", "el niño": "#FF4B4B", "niño": "#FF4B4B",
+                            "lanina": "#1C83E1", "la niña": "#1C83E1", "niña": "#1C83E1",
+                            "neutral": "#808495"
+                        }
+                        
+                        # Función auxiliar para asignar color
+                        def get_color(row):
+                            for key, val in color_map_norm.items():
+                                if key in row['Evento_Norm']: return val
+                            return "gray"
+
+                        df_melt['Color'] = df_melt.apply(get_color, axis=1)
+
+                        fig_probs = px.bar(
+                            df_melt, 
+                            x="Trimestre", 
+                            y="Probabilidad", 
+                            color="Evento", 
+                            # Usamos color_discrete_map si los nombres coinciden exacto, si no, confiamos en el orden
+                            text="Probabilidad", 
+                            barmode='group'
+                        )
+                        # Forzamos colores manualmente si es necesario o confiamos en el mapa si los nombres son estándar
+                        # Para robustez, actualizamos trazas una a una si queremos ser muy específicos, 
+                        # pero el mapa básico suele funcionar si los nombres en el JSON son 'El Nino', 'La Nina', etc.
+                        
+                        fig_probs.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
+                        fig_probs.update_layout(height=500, yaxis=dict(range=[0, 105]), xaxis_title="Trimestre Pronosticado")
+                        st.plotly_chart(fig_probs, use_container_width=True, key="chart_iri_probs")
+                    else:
+                        st.error("No se pudo identificar la columna de tiempo.")
+                except Exception as e:
+                    st.error(f"Error generando gráfico: {e}")
+            else:
+                st.warning("DataFrame de probabilidades vacío.")
+        else:
+            st.error("⚠️ No se encontró el archivo `enso_iri_prob.json`.")
+
+    # ==========================================
+    # PESTAÑA 4: PROPHET
     # ==========================================
     with tab_gen:
         st.markdown("#### 🤖 Generador Prophet (Proyección Estadística Local)")
         indices = {}
         if df_enso is not None:
-            # Mapeo de columnas para el selector
             cols_map = {Config.ENSO_ONI_COL: 'ONI', Config.SOI_COL: 'SOI', Config.IOD_COL: 'IOD'}
             for col, name in cols_map.items():
                 if col in df_enso.columns:
@@ -3564,6 +3600,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
