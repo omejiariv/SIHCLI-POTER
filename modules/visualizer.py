@@ -2118,7 +2118,12 @@ def display_trends_and_forecast_tab(**kwargs):
         
         if avail_regs:
             # Preparamos un DF maestro de regresores indexado por fecha
-            regressors_df = df_enso.set_index(Config.DATE_COL)[avail_regs].resample('MS').mean().interpolate(method='time')
+            # Aseguramos que el índice sea DatetimeIndex y tenga nombre
+            temp_enso = df_enso.copy()
+            if temp_enso[Config.DATE_COL].dtype == 'object':
+                temp_enso[Config.DATE_COL] = pd.to_datetime(temp_enso[Config.DATE_COL])
+                
+            regressors_df = temp_enso.set_index(Config.DATE_COL)[avail_regs].resample('MS').mean().interpolate(method='time')
 
     # 2. PESTAÑAS
     tabs = st.tabs(["Tendencias", "Descomposición", "Autocorrelación", "SARIMA", "Prophet", "Comparación", "Mapa Riesgo"])
@@ -2205,7 +2210,7 @@ def display_trends_and_forecast_tab(**kwargs):
                 except Exception as e:
                     st.error(f"Error SARIMA: {e}")
 
-    # --- TAB 5: PROPHET (CON REGRESORES ACTIVOS) ---
+    # --- TAB 5: PROPHET (CORREGIDO ERROR 'DS') ---
     with tabs[4]:
         st.markdown("#### Pronóstico Prophet")
         
@@ -2213,22 +2218,40 @@ def display_trends_and_forecast_tab(**kwargs):
         
         # Preparar DF de regresores para Prophet
         final_reg_p = None
-        if sel_regs_p and regressors_df is not None:
-            # Prophet necesita que los regresores estén en el futuro también
-            # Aquí hacemos una proyección ingenua (ffill) o usamos datos si existen
-            # Para simplificar, reindexamos hasta el horizonte
-            future_dates = pd.date_range(start=ts_clean.index.min(), periods=len(ts_clean)+48, freq='MS')
-            final_reg_p = regressors_df[sel_regs_p].reindex(future_dates).fillna(method='ffill')
-            final_reg_p.index.name = 'ds' # Prophet requiere esto o merge por ds
-            final_reg_p = final_reg_p.reset_index()
-
         horizon_p = st.slider("Horizonte (Meses):", 12, 48, 12, key="h_prophet")
+
+        if sel_regs_p and regressors_df is not None:
+            try:
+                # Prophet necesita regresores futuros. Extendemos los datos.
+                last_date = ts_clean.index.max()
+                future_dates = pd.date_range(start=regressors_df.index.min(), periods=len(regressors_df) + horizon_p + 12, freq='MS')
+                
+                # Reindexamos el DF maestro de regresores para cubrir todo el futuro necesario
+                # Usamos ffill para proyectar el último valor conocido del índice hacia el futuro (método ingenuo pero funcional)
+                extended_regs = regressors_df[sel_regs_p].reindex(future_dates).fillna(method='ffill').fillna(method='bfill')
+                
+                # Reseteamos el índice para que 'ds' sea una columna explícita
+                final_reg_p = extended_regs.reset_index().rename(columns={'index': 'ds', Config.DATE_COL: 'ds'})
+                
+                # Aseguramos nombre correcto de columna de fecha si el rename falló
+                if 'ds' not in final_reg_p.columns and 'date' in final_reg_p.columns: 
+                     final_reg_p.rename(columns={'date': 'ds'}, inplace=True)
+                elif 'ds' not in final_reg_p.columns:
+                     # Si la primera columna es fecha
+                     final_reg_p.rename(columns={final_reg_p.columns[0]: 'ds'}, inplace=True)
+
+            except Exception as e:
+                st.warning(f"No se pudieron preparar los regresores para Prophet: {e}")
+                final_reg_p = None
         
         if st.button("Calcular Prophet"):
             from modules.forecasting import generate_prophet_forecast
             with st.spinner("Calculando Prophet..."):
                 try:
                     ts_in = ts_clean.reset_index()
+                    # Asegurar nombres correctos para Prophet en la serie principal
+                    ts_in.columns = ['ds', 'y'] 
+                    
                     t_size = max(1, min(12, int(len(ts_clean)*0.2)))
                     
                     _, fc, met = generate_prophet_forecast(ts_in, horizon_p, test_size=t_size, regressors=final_reg_p)
@@ -3690,6 +3713,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
