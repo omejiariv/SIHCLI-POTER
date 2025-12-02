@@ -124,7 +124,7 @@ def main():
         display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
 
     with tabs[2]: 
-        display_spatial_distribution_tab(**display_args)
+        display_spatial_distribution_tab(user_loc=None, gdf_region=None, interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", **display_args)
 
     with tabs[3]: 
         display_graphs_tab(**display_args)
@@ -192,3 +192,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
