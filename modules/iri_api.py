@@ -3,40 +3,37 @@ import os
 import pandas as pd
 import streamlit as st
 
-# Ruta donde guardaste los archivos descargados manualmente
-# Asegúrate de crear esta carpeta y poner los archivos ahí
-LOCAL_DATA_PATH = "data/iri" 
+# Ruta relativa donde guardaste los archivos descargados
+LOCAL_DATA_PATH = os.path.join("data", "iri")
 
 def fetch_iri_data(filename):
     """
-    Carga los datos del IRI desde archivos locales (GeoJSON/JSON)
-    previamente descargados, en lugar de conectar en vivo.
-    
-    Esto evita errores de conexión SSL/Firewall y es ideal dado que
-    el pronóstico solo cambia mensualmente.
+    Carga los datos del IRI desde archivos locales (JSON) previamente descargados.
+    Evita errores de conexión y SSL.
     """
+    # Construir ruta completa
     file_path = os.path.join(LOCAL_DATA_PATH, filename)
     
     try:
-        # Verificar si el archivo existe
+        # Verificar existencia
         if not os.path.exists(file_path):
-            # Intentar buscar en la raíz si no está en subcarpeta (por si acaso)
+            # Intento de fallback: buscar en la raíz del proyecto
             if os.path.exists(filename):
                 file_path = filename
             else:
-                st.warning(f"⚠️ Archivo de datos no encontrado: `{filename}`. Verifica que esté en `{LOCAL_DATA_PATH}`.")
+                st.error(f"⚠️ Archivo no encontrado: `{file_path}`. Por favor sube el archivo a `data/iri/`.")
                 return None
 
-        # Leer archivo local
+        # Leer archivo
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             return data
             
     except json.JSONDecodeError:
-        st.error(f"❌ Error: El archivo `{filename}` no tiene un formato JSON válido.")
+        st.error(f"❌ El archivo `{filename}` no es un JSON válido.")
         return None
     except Exception as e:
-        st.error(f"❌ Error leyendo archivo local `{filename}`: {e}")
+        st.error(f"❌ Error leyendo archivo `{filename}`: {e}")
         return None
 
 # --- FUNCIONES DE PROCESAMIENTO (SE MANTIENEN IGUAL) ---
