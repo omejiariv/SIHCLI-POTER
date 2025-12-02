@@ -370,6 +370,7 @@ def get_weather_forecast_detailed(lat, lon):
 def create_enso_chart(enso_data):
     """
     Genera el gráfico avanzado de ENSO con franjas de fondo para las fases.
+    MANTENIDO INTACTO para no perder la visualización histórica clave.
     """
     if enso_data is None or enso_data.empty or Config.ENSO_ONI_COL not in enso_data.columns:
         return go.Figure().update_layout(title="Datos ENSO no disponibles", height=300)
@@ -378,30 +379,26 @@ def create_enso_chart(enso_data):
     data = enso_data.copy().sort_values(Config.DATE_COL).dropna(subset=[Config.ENSO_ONI_COL])
     
     # Definir colores de fondo según el valor ONI
-    # El Niño >= 0.5 (Rojo), La Niña <= -0.5 (Azul), Neutral (Gris)
     conditions = [
         data[Config.ENSO_ONI_COL] >= 0.5,
         data[Config.ENSO_ONI_COL] <= -0.5
     ]
-    # Colores con transparencia (rgba) para el fondo
     colors = ['rgba(255, 0, 0, 0.2)', 'rgba(0, 0, 255, 0.2)'] 
     data['color'] = np.select(conditions, colors, default='rgba(200, 200, 200, 0.2)') # Gris transparente
 
-    # Calcular rangos para que las barras cubran todo el alto del gráfico
     y_min = data[Config.ENSO_ONI_COL].min() - 0.5
     y_max = data[Config.ENSO_ONI_COL].max() + 0.5
 
     fig = go.Figure()
 
     # 1. Barras de Fondo (Fases)
-    # Usamos un gráfico de barras ancho para simular las franjas de fondo
     fig.add_trace(go.Bar(
         x=data[Config.DATE_COL],
-        y=[y_max - y_min] * len(data), # Altura total
-        base=y_min, # Empezar desde abajo
+        y=[y_max - y_min] * len(data),
+        base=y_min,
         marker_color=data['color'],
-        width=86400000 * 30, # Ancho aprox de 1 mes en milisegundos para que se peguen
-        hoverinfo="skip", # No mostrar tooltip para el fondo
+        width=86400000 * 30, # Ancho aprox de 1 mes en ms
+        hoverinfo="skip",
         showlegend=False,
         name="Fase"
     ))
@@ -420,23 +417,19 @@ def create_enso_chart(enso_data):
     fig.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="Umbral La Niña (-0.5)")
     fig.add_hline(y=0, line_width=1, line_color="black")
 
-    # 4. Leyenda Personalizada (Ficticia para mostrar los colores de fase)
-    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', 
-                             marker=dict(symbol='square', size=10, color='rgba(255, 0, 0, 0.5)'), name='El Niño'))
-    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', 
-                             marker=dict(symbol='square', size=10, color='rgba(0, 0, 255, 0.5)'), name='La Niña'))
-    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', 
-                             marker=dict(symbol='square', size=10, color='rgba(200, 200, 200, 0.5)'), name='Neutral'))
+    # 4. Leyenda Personalizada
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(symbol='square', size=10, color='rgba(255, 0, 0, 0.5)'), name='El Niño'))
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(symbol='square', size=10, color='rgba(0, 0, 255, 0.5)'), name='La Niña'))
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(symbol='square', size=10, color='rgba(200, 200, 200, 0.5)'), name='Neutral'))
 
-    # Configuración del Layout
     fig.update_layout(
-        title="Fases del Fenómeno ENSO y Anomalía ONI",
+        title="Fases del Fenómeno ENSO y Anomalía ONI (Histórico)",
         yaxis_title="Anomalía ONI (°C)",
         xaxis_title="Fecha",
         height=500,
         hovermode="x unified",
-        yaxis_range=[y_min, y_max], # Fijar rango Y
-        barmode='overlay', # Superponer la línea a las barras
+        yaxis_range=[y_min, y_max],
+        barmode='overlay',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     
@@ -2490,25 +2483,114 @@ def display_correlation_tab(**kwargs):
             st.error(f"Error generando la matriz de correlación: {e}")
         
 def display_enso_tab(**kwargs):
-    st.subheader("🌊 Fenómeno ENSO")
-    df_enso = kwargs.get('df_enso')
+    st.subheader("🌊 Fenómeno ENSO (El Niño - Oscilación del Sur)")
     
-    if df_enso is not None and not df_enso.empty:
-        # Aplicar el mismo parseo seguro
-        data = df_enso.copy()
-        if data[Config.DATE_COL].dtype == 'object':
-            data[Config.DATE_COL] = data[Config.DATE_COL].astype(str).apply(parse_spanish_date)
-        else:
-            data[Config.DATE_COL] = pd.to_datetime(data[Config.DATE_COL], errors='coerce')
-            
-        data = data.dropna(subset=[Config.DATE_COL]).sort_values(Config.DATE_COL)
+    # Recuperamos el DataFrame histórico que viene de la base de datos
+    df_enso = kwargs.get('df_enso')
+
+    # CREAMOS LAS PESTAÑAS
+    # 1. Pronóstico Oficial (Nuevo, datos del IRI)
+    # 2. Histórico ONI (Tu gráfico original que funciona bien)
+    tab_iri, tab_historico = st.tabs(["🔮 Pronóstico Oficial (IRI/CPC)", "📜 Histórico ONI"])
+
+    # ---------------------------------------------------------
+    # PESTAÑA 1: PRONÓSTICO IRI (NUEVO - DATOS LOCALES)
+    # ---------------------------------------------------------
+    with tab_iri:
+        st.info("ℹ️ Datos oficiales del IRI (International Research Institute for Climate and Society) - Columbia University. Actualización Mensual.")
         
-        if Config.ENSO_ONI_COL in data.columns:
-            st.plotly_chart(create_enso_chart(data), use_container_width=True)
+        # Cargar datos desde archivos locales
+        json_plumas = fetch_iri_data("enso_plumes.json")
+        json_probs = fetch_iri_data("enso_iri_prob.json")
+
+        if json_plumas and json_probs:
+            col1, col2 = st.columns(2)
+            
+            # A. Gráfico de Plumas
+            with col1:
+                st.markdown("#### 🍝 Modelos de Predicción (Plumas)")
+                data_plume = process_iri_plume(json_plumas)
+                
+                if data_plume:
+                    fig_plume = go.Figure()
+                    seasons = data_plume['seasons']
+                    
+                    for model in data_plume['models']:
+                        is_dynamic = model['type'] == 'Dynamical'
+                        color = "rgba(100, 149, 237, 0.6)" if is_dynamic else "rgba(255, 165, 0, 0.6)"
+                        name_prefix = "Dinámico" if is_dynamic else "Estadístico"
+                        
+                        fig_plume.add_trace(go.Scatter(
+                            x=seasons, y=model['values'], mode='lines', 
+                            name=f"{name_prefix}: {model['name']}",
+                            line=dict(color=color, width=1.5), opacity=0.7, showlegend=False,
+                            hovertemplate=f"<b>{model['name']}</b><br>%{{y:.2f}} °C<extra></extra>"
+                        ))
+
+                    fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
+                    fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
+                    fig_plume.add_hline(y=0, line_color="black", opacity=0.3)
+
+                    fig_plume.update_layout(
+                        yaxis_title="Anomalía SST (°C)", xaxis_title="Trimestres", height=450,
+                        margin=dict(l=40, r=40, t=40, b=40), hovermode="x unified"
+                    )
+                    st.plotly_chart(fig_plume, use_container_width=True)
+                else:
+                    st.warning("Error procesando plumas.")
+
+            # B. Gráfico de Probabilidades
+            with col2:
+                st.markdown("#### 📊 Probabilidad Multimodelo")
+                df_probs = process_iri_probabilities(json_probs)
+                
+                if df_probs is not None and not df_probs.empty:
+                    df_melt = df_probs.melt(id_vars="Trimestre", var_name="Evento", value_name="Probabilidad")
+                    color_map = {"El Niño": "#FF4B4B", "La Niña": "#1C83E1", "Neutral": "#808495"}
+                    
+                    fig_probs = px.bar(
+                        df_melt, x="Trimestre", y="Probabilidad", color="Evento",
+                        color_discrete_map=color_map, text="Probabilidad", barmode='group'
+                    )
+                    fig_probs.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
+                    fig_probs.update_layout(
+                        yaxis_title="Probabilidad (%)", yaxis=dict(range=[0, 105]), height=450,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    st.plotly_chart(fig_probs, use_container_width=True)
+                else:
+                    st.warning("Error procesando probabilidades.")
         else:
-            st.warning("Columna ONI no encontrada.")
-    else:
-        st.info("No hay datos ENSO cargados.")
+            st.error("⚠️ No se encontraron los archivos JSON en `data/iri/`. Verifica que los hayas subido.")
+
+    # ---------------------------------------------------------
+    # PESTAÑA 2: HISTÓRICO ONI (USANDO TU FUNCIÓN ORIGINAL)
+    # ---------------------------------------------------------
+    with tab_historico:
+        st.markdown("#### 📉 Índice Oceánico del Niño (ONI) - Histórico")
+        
+        if df_enso is not None and not df_enso.empty:
+            # Limpieza básica de fechas para asegurar que el gráfico funcione
+            data = df_enso.copy()
+            
+            # Intento de conversión de fechas seguro
+            if data[Config.DATE_COL].dtype == 'object':
+                try:
+                    # Intentamos usar pd.to_datetime directo primero
+                    data[Config.DATE_COL] = pd.to_datetime(data[Config.DATE_COL], errors='coerce')
+                except:
+                    pass
+            
+            data = data.dropna(subset=[Config.DATE_COL])
+            
+            if Config.ENSO_ONI_COL in data.columns:
+                # AQUÍ LLAMAMOS A TU FUNCIÓN PRESERVADA
+                fig_oni = create_enso_chart(data)
+                st.plotly_chart(fig_oni, use_container_width=True)
+            else:
+                st.warning(f"No se encontró la columna '{Config.ENSO_ONI_COL}' en los datos.")
+        else:
+            st.info("No hay datos históricos cargados.")
 
 def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, user_loc=None, **kwargs):
     user_loc = kwargs.get('user_loc', user_loc)
@@ -3394,6 +3476,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
