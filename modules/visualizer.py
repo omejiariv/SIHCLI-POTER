@@ -3248,13 +3248,12 @@ def display_climate_scenarios_tab(**kwargs):
                         
                 else: st.warning("Datos insuficientes para interpolar.")
 
-    # --- TAB 2: SIMULADOR CMIP6 (RESTAURADO COMPLETO - Solicitud B) ---
+    # --- TAB 2: SIMULADOR CMIP6 (RESTAURADO COMPLETO) ---
     with tab_cmip6:
         st.subheader("Simulador de Cambio Climático (Escenarios CMIP6)")
         st.info("Proyección de anomalías climatológicas para la región Andina (Horizonte 2040-2060).")
 
         # Datos Base (Valores típicos CMIP6 para Andes Colombianos)
-        # Fuente: Adaptado de proyecciones IDEAM / IPCC AR6
         scenarios_db = {
             'SSP1-2.6 (Sostenibilidad)': {
                 'temp': 1.6, 'ppt_anual': 5.2, 
@@ -3274,21 +3273,45 @@ def display_climate_scenarios_tab(**kwargs):
             }
         }
 
-        # Controles
+        # --- SIMULADOR INTERACTIVO ---
+        st.markdown("##### 🎛️ Ajuste Manual de Escenarios")
+        c_sim1, c_sim2 = st.columns(2)
+        
+        with c_sim1:
+            delta_temp = st.slider("Aumento de Temperatura (°C):", 0.0, 5.0, 1.5, 0.1, help="Simular aumento de temperatura media anual.")
+        with c_sim2:
+            delta_ppt = st.slider("Cambio en Precipitación (%):", -30, 30, -5, 1, help="Simular cambio porcentual en la lluvia anual.")
+
+        # Calcular impacto simple (Ejemplo: Déficit Hídrico aproximado)
+        # Asumiendo evapotranspiración aumenta ~3% por cada grado de calentamiento (Clausius-Clapeyron aprox)
+        et_increase = delta_temp * 3
+        water_balance_change = delta_ppt - et_increase
+        
+        st.metric(
+            "Impacto Estimado en Balance Hídrico", 
+            f"{water_balance_change:.1f}%", 
+            delta="Déficit Hídrico" if water_balance_change < 0 else "Excedente",
+            delta_color="inverse"
+        )
+
+        st.divider()
+
+        # --- COMPARATIVA ESCENARIOS ---
+        st.markdown("##### 📊 Comparativa de Escenarios Oficiales")
+        
         c_sel, c_sort = st.columns([2, 1])
         with c_sel:
             selected_scenarios = st.multiselect(
-                "Seleccionar Escenarios a Comparar:", 
+                "Seleccionar Escenarios:", 
                 list(scenarios_db.keys()), 
                 default=list(scenarios_db.keys())
             )
         
         with c_sort:
-            # Selector de ordenamiento (Tu solicitud anterior)
-            sort_order = st.selectbox("Ordenar por Anomalía Lluvia:", ["Ascendente ⬆️", "Descendente ⬇️", "Nombre Escenario"])
+            sort_order = st.selectbox("Ordenar Gráfico:", ["Ascendente ⬆️", "Descendente ⬇️", "Nombre Escenario"])
 
         if selected_scenarios:
-            # Preparar datos
+            # Incluir el escenario personalizado del usuario
             plot_data = []
             for sc in selected_scenarios:
                 row = scenarios_db[sc]
@@ -3296,8 +3319,16 @@ def display_climate_scenarios_tab(**kwargs):
                     'Escenario': sc,
                     'Anomalía Temperatura (°C)': row['temp'],
                     'Anomalía Precipitación (%)': row['ppt_anual'],
-                    'Descripción': row['desc']
+                    'Tipo': 'Oficial'
                 })
+            
+            # Agregar simulación manual
+            plot_data.append({
+                'Escenario': 'Mi Simulación (Manual)',
+                'Anomalía Temperatura (°C)': delta_temp,
+                'Anomalía Precipitación (%)': delta_ppt,
+                'Tipo': 'Usuario'
+            })
             
             df_sim = pd.DataFrame(plot_data)
             
@@ -3309,48 +3340,27 @@ def display_climate_scenarios_tab(**kwargs):
             else:
                 df_sim = df_sim.sort_values("Escenario")
 
-            # --- GRÁFICOS (RESTAURADOS) ---
             c_g1, c_g2 = st.columns(2)
             
             with c_g1:
-                # Gráfico Precipitación (Barras Divergentes)
                 fig_ppt = px.bar(
-                    df_sim, 
-                    y='Escenario', x='Anomalía Precipitación (%)', 
-                    color='Anomalía Precipitación (%)',
-                    title="Anomalía de Precipitación (%)",
-                    color_continuous_scale='RdBu',
-                    text_auto='.1f',
-                    orientation='h' # Barras horizontales para leer mejor los nombres largos
+                    df_sim, y='Escenario', x='Anomalía Precipitación (%)', 
+                    color='Anomalía Precipitación (%)', title="Anomalía de Precipitación (%)",
+                    color_continuous_scale='RdBu', text_auto='.1f', orientation='h'
                 )
                 fig_ppt.add_vline(x=0, line_width=1, line_color="black")
-                fig_ppt.update_layout(height=400)
                 st.plotly_chart(fig_ppt, use_container_width=True)
                 
             with c_g2:
-                # Gráfico Temperatura (Termómetro visual)
                 fig_temp = px.bar(
-                    df_sim, 
-                    x='Escenario', y='Anomalía Temperatura (°C)', 
-                    color='Anomalía Temperatura (°C)',
-                    title="Aumento de Temperatura (°C)",
-                    color_continuous_scale='YlOrRd', # Amarillo a Rojo
-                    text_auto='.1f'
+                    df_sim, y='Escenario', x='Anomalía Temperatura (°C)', 
+                    color='Anomalía Temperatura (°C)', title="Aumento de Temperatura (°C)",
+                    color_continuous_scale='YlOrRd', text_auto='.1f', orientation='h'
                 )
-                fig_temp.update_layout(height=400)
                 st.plotly_chart(fig_temp, use_container_width=True)
-
-            # Tabla Informativa
-            st.markdown("##### 📋 Detalles de Escenarios")
-            st.dataframe(
-                df_sim.set_index("Escenario")[['Anomalía Precipitación (%)', 'Anomalía Temperatura (°C)', 'Descripción']],
-                use_container_width=True
-            )
-            
-            st.caption("*Nota: Anomalías calculadas respecto a la línea base 1981-2010. Proyecciones promedio multi-modelo para Andes Tropicales.*")
         else:
-            st.warning("Seleccione al menos un escenario.")
-
+            st.warning("Seleccione escenarios para comparar.")
+            
 def display_station_table_tab(**kwargs):
     st.subheader("📋 Tabla Detallada de Datos")
     
@@ -3807,5 +3817,6 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
