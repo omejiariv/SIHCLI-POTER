@@ -191,21 +191,46 @@ def get_img_as_base64(url):
     
 # 0. DISTRIBUCIÓN ESPACIAL (TABLERO PRINCIPAL)
 # ==============================================================================
-def display_current_filters(gdf_filtered, df_monthly_filtered, *args, **kwargs):
-    """Muestra solo las métricas de resumen, sin mapa (Eliminado a petición)."""
-    # Esta función reemplaza al mapa superior para limpiar la interfaz.
-    st.subheader("📊 Resumen de Selección")
-    
-    c1, c2 = st.columns(2)
-    if gdf_filtered is not None:
-        try: c1.metric("Estaciones Filtradas", len(gdf_filtered))
-        except: pass
-    if df_monthly_filtered is not None:
-        try: c2.metric("Total Registros", len(df_monthly_filtered))
-        except: pass
-    
-    st.markdown("---") # Separador visual
-                
+def display_current_filters(stations_sel, regions_sel, munis_sel, year_range, interpolacion="No detectado"):
+    """
+    Muestra un resumen desplegable de los filtros activos en la aplicación.
+    """
+    # Lógica para formatear la lista de municipios
+    total_munis = len(munis_sel)
+    if total_munis > 3:
+        munis_str = ", ".join(munis_sel[:3]) + f", ... (y {total_munis - 3} más)"
+    elif total_munis == 0:
+        munis_str = "Todos / Ninguno específico"
+    else:
+        munis_str = ", ".join(munis_sel)
+
+    # Lógica para regiones
+    if not regions_sel:
+        region_str = "Todas las regiones"
+    else:
+        region_str = ", ".join(regions_sel)
+        
+    # Interpolación (buscamos en session_state si no se pasa explícito)
+    if interpolacion == "No detectado":
+        interpolacion = "Si" if st.session_state.get('apply_interpolation') else "No"
+
+    # Caja de Resumen Desplegable
+    with st.expander("📝 Resumen de Filtros y Configuración", expanded=False):
+        st.info(f"""
+        **Configuración Actual:**
+        * **🌍 Región:** {region_str}
+        * **🏙️ Municipios:** {munis_str}
+        * **📡 Estaciones:** {len(stations_sel)} seleccionadas
+        * **📅 Rango de Años:** {year_range[0]} - {year_range[1]}
+        * **📈 Interpolación de Datos:** {interpolacion}
+        """)
+        
+        # Métricas simples (Estaciones y Registros totales estimados)
+        c1, c2 = st.columns(2)
+        c1.metric("Estaciones Filtradas", len(stations_sel))
+        # Nota: 'Total Registros' es decorativo aquí, para el valor real se necesitaría el DF
+        c2.metric("Años de Análisis", f"{year_range[1] - year_range[0] + 1} años")
+             
 def analyze_point_data(lat, lon, df_long, gdf_stations, gdf_municipios, gdf_subcuencas):
     """
     Analiza un punto geográfico:
@@ -2441,7 +2466,9 @@ def display_enso_tab(**kwargs):
     else:
         st.info("No hay datos ENSO cargados.")
 
-def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, **kwargs):
+def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, user_loc=None, **kwargs):
+    user_loc = kwargs.get('user_loc', user_loc)
+
     st.subheader("🌱 Zonas de Vida (Sistema Holdridge)")
 
     # --- SECCIÓN EDUCATIVA ---
@@ -3351,6 +3378,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
