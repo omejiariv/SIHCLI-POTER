@@ -1845,53 +1845,43 @@ def display_climate_forecast_tab(**kwargs):
                     fig_plume.update_layout(title="Anomalía SST Niño 3.4", height=450)
                     st.plotly_chart(fig_plume, use_container_width=True, key="chart_iri_plume")
             
-            # B. Probabilidades (Barras)
+            # B. Probabilidades (Barras) - CORREGIDO
             with col2:
                 st.markdown("#### 📊 Probabilidad Multimodelo")
                 df_probs = process_iri_probabilities(json_probs)
                 
+                # Verificación robusta antes de graficar
                 if df_probs is not None and not df_probs.empty:
-                    # --- CORRECCIÓN ROBUSTA DE COLUMNAS (VERSIÓN 2.0) ---
-                    # Limpiamos nombres de columnas (espacios extra, etc.)
-                    df_probs.columns = [str(c).strip() for c in df_probs.columns]
-                    
-                    # Normalización agresiva: Buscamos 'Trimestre', 'Season', 'season', o usamos la 1ra columna
-                    col_tiempo = None
-                    posibles_nombres = ['Trimestre', 'Season', 'season', 'SEASON']
-                    
-                    # 1. Buscar por nombre exacto
-                    for nombre in posibles_nombres:
-                        if nombre in df_probs.columns:
-                            col_tiempo = nombre
-                            break
-                    
-                    # 2. Si no, usar la primera columna (asumiendo estructura estándar del IRI)
-                    if not col_tiempo and len(df_probs.columns) > 0:
-                        col_tiempo = df_probs.columns[0]
-                    
-                    # 3. Renombrar si encontramos algo
-                    if col_tiempo:
-                        if col_tiempo != 'Trimestre':
-                            df_probs.rename(columns={col_tiempo: 'Trimestre'}, inplace=True)
+                    try:
+                        # 1. Renombrar 'season' -> 'Trimestre' si es necesario
+                        # Esto es crítico porque el JSON usa 'season' pero queremos 'Trimestre' para el gráfico
+                        df_probs.rename(columns={'season': 'Trimestre', 'Season': 'Trimestre'}, inplace=True)
                         
-                        # MELT SEGURO
-                        try:
-                            # Aseguramos que solo hacemos melt de columnas numéricas relevantes
-                            # El Niño, La Niña, Neutral pueden venir con mayúsculas/minúsculas
-                            cols_val = [c for c in df_probs.columns if c != 'Trimestre']
+                        # 2. Verificar que exista la columna de tiempo
+                        if 'Trimestre' in df_probs.columns:
+                            # 3. Preparar datos para Plotly (Melt)
+                            # Convertimos columnas de eventos a filas
+                            df_melt = df_probs.melt(
+                                id_vars="Trimestre", 
+                                value_vars=["El Niño", "La Niña", "Neutral"] if "El Niño" in df_probs.columns else ["elnino", "lanina", "neutral"],
+                                var_name="Evento", 
+                                value_name="Probabilidad"
+                            )
                             
-                            df_melt = df_probs.melt(id_vars="Trimestre", value_vars=cols_val, var_name="Evento", value_name="Probabilidad")
+                            # 4. Mapa de colores consistente
+                            # Normalizamos nombres para que coincidan con el color map
+                            df_melt['Evento'] = df_melt['Evento'].replace({
+                                'elnino': 'El Niño', 
+                                'lanina': 'La Niña', 
+                                'neutral': 'Neutral'
+                            })
                             
-                            # Normalizamos nombres de eventos para el mapa de colores
-                            df_melt['Evento'] = df_melt['Evento'].astype(str).str.lower().str.replace(" ", "")
-                            # Mapeo flexible
                             color_map = {
-                                "elnino": "#FF4B4B", "el niño": "#FF4B4B",
-                                "lanina": "#1C83E1", "la niña": "#1C83E1",
-                                "neutral": "#808495"
+                                "El Niño": "#FF4B4B",  # Rojo
+                                "La Niña": "#1C83E1",  # Azul
+                                "Neutral": "#808495"   # Gris
                             }
                             
-                            # Asignar colores por defecto si no coinciden
                             fig_probs = px.bar(
                                 df_melt, 
                                 x="Trimestre", 
@@ -1904,14 +1894,14 @@ def display_climate_forecast_tab(**kwargs):
                             fig_probs.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
                             fig_probs.update_layout(height=450, yaxis=dict(range=[0, 105]))
                             st.plotly_chart(fig_probs, use_container_width=True, key="chart_iri_probs")
+                        else:
+                            st.warning(f"Estructura de datos inesperada. Columnas encontradas: {df_probs.columns.tolist()}")
+                            st.dataframe(df_probs.head())
                             
-                        except Exception as e:
-                            st.error(f"Error generando gráfico de barras: {e}")
-                            st.dataframe(df_probs.head()) # Mostrar datos para debug si falla
-                    else:
-                        st.error("No se pudo identificar la columna de tiempo en los datos de probabilidad.")
+                    except Exception as e:
+                        st.error(f"Error generando gráfico de barras: {e}")
                 else:
-                    st.warning("No hay datos de probabilidad para procesar.")
+                    st.warning("No hay datos de probabilidad para procesar (DataFrame vacío).")
         else:
             st.error("⚠️ No se encontraron los archivos JSON en `data/iri/`. Por favor verifica la carga.")
 
@@ -3574,6 +3564,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
