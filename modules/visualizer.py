@@ -809,9 +809,11 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
 
     st.info("👆 **Haga clic en el mapa** o ingrese coordenadas para analizar un punto específico.")
 
-    if 'selected_point' not in st.session_state: st.session_state.selected_point = None
+    if 'selected_point' not in st.session_state:
+        st.session_state.selected_point = None
 
-    # --- GEOLOCALIZACIÓN ---
+    # --- GEOLOCALIZACIÓN DEL USUARIO (SIDEBAR) ---
+    # Nota: Asegúrate de que esta función no retorne un widget que bloquee el flujo
     user_loc = _get_user_location_sidebar(key_suffix="SpatialMap")    
 
     tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
@@ -819,6 +821,8 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
     # --- PESTAÑA 1: MAPA ---
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
+        
+        # 1. CONTROLES (COLUMNA IZQUIERDA)
         with col_ctrl:
             st.markdown("#### Configuración")
             with st.expander("📍 Ingresar Coordenadas", expanded=False):
@@ -840,73 +844,82 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
             sel_tile = base_map_options[base_map_name]
         
+        # 2. CONSTRUCCIÓN DEL MAPA (COLUMNA DERECHA)
         with col_map:
-            # Centrar
+            # Centrar Mapa
             if st.session_state.selected_point:
                 lat_c, lon_c, z = st.session_state.selected_point['lat'], st.session_state.selected_point['lng'], 11
             elif gdf_filtered is not None and not gdf_filtered.empty:
                 v = gdf_filtered.dropna(subset=['latitude'])
                 lat_c, lon_c, z = (v.latitude.mean(), v.longitude.mean(), 9) if not v.empty else (6.2, -75.5, 9)
-            else: lat_c, lon_c, z = 6.2, -75.5, 9
+            else:
+                lat_c, lon_c, z = 6.2, -75.5, 9
             
+            # Inicializar objeto Mapa
             m = folium.Map(location=[lat_c, lon_c], zoom_start=z, tiles=sel_tile["tiles"], attr=sel_tile["attr"])
             
+            # Capas GeoJSON
             try:
                 if show_munis and not gdf_municipios.empty:
-                    g = gdf_municipios.copy(); g['geometry'] = g.geometry.simplify(0.001)
-                    folium.GeoJson(g, name="Municipios", style_function=lambda x:{'color':'gray','weight':1,'fillOpacity':0.05}, tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None).add_to(m)
+                    g = gdf_municipios.copy()
+                    g['geometry'] = g.geometry.simplify(0.001)
+                    folium.GeoJson(
+                        g, name="Municipios",
+                        style_function=lambda x: {'color':'gray', 'weight':1, 'fillOpacity':0.05},
+                        tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None
+                    ).add_to(m)
+                
                 if show_cuencas and not gdf_subcuencas.empty:
-                    g = gdf_subcuencas.copy(); g['geometry'] = g.geometry.simplify(0.001)
-                    folium.GeoJson(g, name="Subcuencas", style_function=lambda x:{'color':'blue','weight':2,'fillOpacity':0}, tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None).add_to(m)
+                    g = gdf_subcuencas.copy()
+                    g['geometry'] = g.geometry.simplify(0.001)
+                    folium.GeoJson(
+                        g, name="Subcuencas",
+                        style_function=lambda x: {'color':'blue', 'weight':2, 'fillOpacity':0},
+                        tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None
+                    ).add_to(m)
+                    
                 if show_predios and gdf_predios is not None:
-                    g = gdf_predios.copy(); g['geometry'] = g.geometry.simplify(0.0001)
-                    folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}, tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None).add_to(m)
-            except: pass
+                    g = gdf_predios.copy()
+                    g['geometry'] = g.geometry.simplify(0.0001)
+                    folium.GeoJson(
+                        g, name="Predios",
+                        style_function=lambda x: {'color':'orange', 'weight':2, 'fillOpacity':0.2},
+                        tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None
+                    ).add_to(m)
+            except Exception as e:
+                st.error(f"Error cargando capas: {e}")
 
-            # --- INICIO BLOQUE REEMPLAZO ---
-            # Estaciones (Puntos verdes con Popup Inteligente)
-            # --- BLOQUE DE ESTACIONES (CORREGIDO Y ALINEADO) ---
+            # Marcadores de Estaciones (Clustering)
             if gdf_filtered is not None:
                 marker_cluster = MarkerCluster().add_to(m)
                 
-                # Iterar sobre las estaciones
                 for _, r in gdf_filtered.dropna(subset=['latitude']).iterrows():
-                    
-                    # 1. Filtrar datos SOLO de esta estación
+                    # Cálculo de estadísticas por estación
                     df_st = df_long[df_long[Config.STATION_NAME_COL] == r[Config.STATION_NAME_COL]]
-                    
-                    # 2. Contar meses con datos REALES (>0)
-                    # (Esto evita contar meses vacíos o nulos como válidos)
                     df_valid = df_st[df_st[Config.PRECIPITATION_COL] > 0]
                     n_months_real = len(df_valid)
                     
-                    # 3. Promedio MENSUAL (Siempre confiable si hay datos)
                     if n_months_real > 0:
                         avg_ppt_mensual = df_valid[Config.PRECIPITATION_COL].mean()
-                    else:
-                        avg_ppt_mensual = 0
-                    
-                    # 4. Promedio ANUAL (Lógica Inteligente)
-                    if n_months_real > 0:
-                        # Intentar calcular años con al menos 6 meses de datos
+                        
+                        # Lógica de años válidos
                         counts = df_valid.groupby(Config.YEAR_COL).size()
                         years_ok = counts[counts >= 6].index
                         
                         if len(years_ok) > 0:
-                            # Si hay años decentes, usarlos para el promedio real
                             df_years = df_valid[df_valid[Config.YEAR_COL].isin(years_ok)]
                             avg_ppt_anual = df_years.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum().mean()
                             n_years_valid = len(years_ok)
                         else:
-                            # Si los datos son muy fragmentados, ESTIMAR (Mensual * 12)
-                            # Esto evita mostrar "0 mm" que confunde al usuario
+                            # Estimación si data fragmentada
                             avg_ppt_anual = avg_ppt_mensual * 12
-                            n_years_valid = 0 # 0 indica que es una estimación por falta de años completos
+                            n_years_valid = 0 
                     else:
+                        avg_ppt_mensual = 0
                         avg_ppt_anual = 0
                         n_years_valid = 0
 
-                    # 5. Construir Popup HTML
+                    # Popup HTML
                     html = f"""
                     <div style='font-family:sans-serif; font-size:12px; min-width:200px'>
                         <h5 style='margin:0; color:#2c3e50'>{r[Config.STATION_NAME_COL]}</h5>
@@ -918,34 +931,52 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     </div>
                     """
                     
-                    # 6. Añadir Marcador al Mapa
                     folium.Marker(
                         [r['latitude'], r['longitude']], 
                         tooltip=f"{r[Config.STATION_NAME_COL]} ({avg_ppt_anual:.0f} mm)", 
                         popup=folium.Popup(html, max_width=300),
                         icon=folium.Icon(color="green", icon="cloud")
                     ).add_to(marker_cluster)
-            # ---------------------------------------------------
-            
-            if st.session_state.selected_point:
-                folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Punto Seleccionado", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
 
+            # Marcador de Selección Actual (Punto Rojo)
+            if st.session_state.selected_point:
+                folium.Marker(
+                    [st.session_state.selected_point['lat'], st.session_state.selected_point['lng']],
+                    popup="Punto Seleccionado",
+                    icon=folium.Icon(color="red", icon="info-sign")
+                ).add_to(m)
+
+            # Marcador de Ubicación de Usuario (Si existe)
+            if user_loc:
+                folium.Marker(
+                    [user_loc[0], user_loc[1]], 
+                    icon=folium.Icon(color='black', icon='star'), 
+                    tooltip="Tu Ubicación (Manual)"
+                ).add_to(m)
+
+            # Controles de Mapa
+            LocateControl(auto_start=False, position="topleft").add_to(m)
             folium.LayerControl().add_to(m)
+            
+            # RENDERIZADO ÚNICO DEL MAPA
             map_data = st_folium(m, width="100%", height=600)
 
+            # Lógica de Click en Mapa
             if map_data and map_data.get("last_clicked"):
                 clicked = map_data["last_clicked"]
+                # Solo recargar si el punto es diferente al actual
                 if st.session_state.selected_point is None or abs(clicked['lat'] - st.session_state.selected_point['lat']) > 0.0001:
                     st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
                     st.rerun()
 
-    # --- RESULTADOS DEL PUNTO ---
+    # --- 3. ANÁLISIS DEL PUNTO SELECCIONADO (FUERA DE LA COLUMNA DEL MAPA) ---
     if st.session_state.selected_point:
         clat, clon = st.session_state.selected_point['lat'], st.session_state.selected_point['lng']
         st.markdown("---")
         st.subheader(f"📍 Análisis de Punto ({clat:.4f}, {clon:.4f})")
         
         with st.spinner("Consultando datos..."):
+            # Llamadas a tus funciones de análisis
             p_data = analyze_point_data(clat, clon, df_long, gdf_filtered, gdf_municipios, gdf_subcuencas)
             fc = get_weather_forecast_detailed(clat, clon)
             
@@ -962,7 +993,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             c5.metric("Zona de Vida", p_data['Zona_Vida'])
             c6.metric("Cobertura", p_data['Cobertura'])
             
-            # FILA 3: Meteorología
+            # FILA 3: Meteorología (Pronóstico)
             if not fc.empty:
                 st.markdown("##### 🌦️ Condiciones Actuales y Pronóstico")
                 today = fc.iloc[0]
@@ -975,7 +1006,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                 m5.metric("Radiación", f"{today['Radiación SW (MJ/m²)']} MJ/m²")
 
                 with st.expander("Ver Gráficos de Pronóstico (7 Días)", expanded=True):
-                    # 1. Climograma
+                    # Gráfico 1: Temperatura y Precipitación
                     st.markdown("**🌡️ Temperatura y Precipitación**")
                     fig = make_subplots(specs=[[{"secondary_y": True}]])
                     fig.add_trace(go.Scatter(x=fc['Fecha'], y=fc['T. Máx (°C)'], name='Max', line=dict(color='red')), secondary_y=False)
@@ -984,7 +1015,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     fig.update_layout(height=350, margin=dict(t=10,b=0,l=0,r=0), hovermode="x unified")
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # 2. Variables Adicionales (Tu Solicitud)
+                    # Gráficos Adicionales
                     c_g1, c_g2 = st.columns(2)
                     with c_g1:
                         st.markdown("**🍃 Atmósfera (Humedad y Presión)**")
@@ -1011,54 +1042,6 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
 
             else:
                 st.warning("No se pudieron obtener datos meteorológicos en tiempo real.")
-
-            # --- GEOLOCALIZACIÓN DEL USUARIO (TU SOLICITUD) ---
-            if user_loc:
-                folium.Marker(
-                    [user_loc[0], user_loc[1]], 
-                    icon=folium.Icon(color='black', icon='star'), 
-                    tooltip="Tu Ubicación (Manual)"
-                ).add_to(m)
-
-            # Botón GPS Nativo
-            LocateControl(auto_start=False, position="topleft").add_to(m)
-            # ------------------------------------------------
-
-            folium.LayerControl().add_to(m)
-            map_data = st_folium(m, width="100%", height=600)
-
-            if map_data and map_data.get("last_clicked"):
-                clicked = map_data["last_clicked"]
-                if st.session_state.selected_point is None or abs(clicked['lat'] - st.session_state.selected_point['lat']) > 0.0001:
-                    st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
-                    st.rerun()    
-                
-    # --- PESTAÑA 2: DISPONIBILIDAD ---
-    with tab_avail:
-        if df_long is not None and not gdf_filtered.empty:
-            target = gdf_filtered[Config.STATION_NAME_COL].unique()
-            sub = df_long[df_long[Config.STATION_NAME_COL].isin(target)]
-            if not sub.empty:
-                cnt = sub.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].count().reset_index()
-                cnt.columns = ["Estación", "Registros"]
-                sort_opt = st.radio("Ordenar:", ["Mayor a Menor", "Menor a Mayor", "Alfabético"], horizontal=True, key="sort_avail_unique")
-                if "Mayor" in sort_opt: cnt = cnt.sort_values("Registros", ascending=True)
-                elif "Menor" in sort_opt: cnt = cnt.sort_values("Registros", ascending=False)
-                else: cnt = cnt.sort_values("Estación", ascending=False)
-                
-                fig = px.bar(cnt, x="Registros", y="Estación", orientation='h', height=max(500, len(cnt)*25))
-                st.plotly_chart(fig, use_container_width=True)
-            else: st.warning("Sin datos.")
-    
-    # --- PESTAÑA 3: MATRIZ ---
-    with tab_matrix:
-        if df_long is not None and not gdf_filtered.empty:
-            target = gdf_filtered[Config.STATION_NAME_COL].unique()
-            sub = df_long[df_long[Config.STATION_NAME_COL].isin(target)]
-            if not sub.empty:
-                piv = sub.pivot_table(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values=Config.PRECIPITATION_COL, aggfunc='sum')
-                st.dataframe(piv.style.background_gradient(cmap='viridis', axis=None).format("{:.0f}", na_rep="-"), use_container_width=True, height=600)
-            else: st.warning("Sin datos.")
             
 def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analysis, **kwargs):
     st.subheader("📊 Análisis Gráfico Detallado")
@@ -3316,6 +3299,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
