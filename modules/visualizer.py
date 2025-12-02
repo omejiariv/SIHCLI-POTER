@@ -1778,37 +1778,49 @@ def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
 def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático & Fenómenos Globales")
     
-    # Recuperamos los datos históricos pasados desde app.py
+    # Recuperamos los datos históricos
     df_enso = kwargs.get('df_enso')
     
-    # Definimos las 4 pestañas solicitadas
+    # 1. CARGAR DATOS IRI (Usamos CPC Probabilities que es más seguro)
+    json_plumas = fetch_iri_data("enso_plumes.json")
+    # CAMBIO CRÍTICO: Usamos 'enso_cpc_prob.json' en vez de 'enso_iri_prob.json'
+    json_probs = fetch_iri_data("enso_cpc_prob.json") 
+    
+    # --- CAJA INFORMATIVA DESPLEGABLE (RECUPERADA) ---
+    with st.expander("📚 Conceptos, Metodología e Importancia (Pronóstico ENSO - IRI)", expanded=False):
+        st.markdown("""
+        Este módulo se alimenta de los datos oficiales del **International Research Institute for Climate and Society (IRI)**.
+        Los datos se actualizan mensualmente (aprox. el día 19) y representan el estándar global.
+
+        **1. Definición:**
+        El Pronóstico ENSO del IRI recopila y armoniza predicciones de más de 20 instituciones científicas (NASA, NOAA, JMA, ECMWF, etc.).
+
+        **2. Metodología:**
+        Se basa en la región **Niño 3.4** (Pacífico Ecuatorial Central) combinando:
+        * **🤖 Modelos Dinámicos:** Simulaciones físicas complejas.
+        * **📈 Modelos Estadísticos:** Proyecciones basadas en patrones históricos.
+
+        **3. Interpretación:**
+        * **📉 La "Pluma" (Spaghetti Plot):** Cada línea es un modelo distinto.
+            * **Línea Negra:** Promedio Multimodelo (Consenso).
+            * **Umbrales:** **El Niño** (≥ +0.5°C), **La Niña** (≤ -0.5°C).
+        * **📊 Probabilidades:** Certeza (%) de que ocurra cada evento por trimestre.
+
+        **4. Impacto en Colombia:**
+        * 🔥 **El Niño:** Sequías, altas temperaturas, menos lluvias.
+        * 💧 **La Niña:** Aumento de lluvias, inundaciones, deslizamientos.
+        
+        **Fuente:** [IRI / Columbia University Climate School](https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/)
+        """)
+
+    # Definimos las 4 Pestañas
     tab_hist, tab_iri_plumas, tab_iri_probs, tab_gen = st.tabs([
         "📜 Historia Índices (ONI/SOI/IOD)", 
-        "🌎 Pronóstico Oficial (IRI)", 
+        "🌎 Pronóstico Oficial (Plumas)", 
         "📊 Probabilidad Multimodelo",
         "⚙️ Generador Prophet"
     ])
     
-    # ==========================================
-    # CARGA DE DATOS IRI (Comunes para tabs 2 y 3)
-    # ==========================================
-    # Cargar datos desde archivos locales
-    json_plumas = fetch_iri_data("enso_plumes.json")
-    json_probs = fetch_iri_data("enso_iri_prob.json")
-
-    # --- CAJA INFORMATIVA (Global para la sección) ---
-    with st.expander("ℹ️ Acerca de los Pronósticos IRI/CPC (Columbia University)", expanded=False):
-        st.markdown("""
-        **Fuente de Datos:** International Research Institute for Climate and Society (IRI) - Columbia University.
-        
-        * **Plumas (Spaghetti):** Muestran las proyecciones de anomalía de temperatura superficial del mar (SST) en la región Niño 3.4 de múltiples modelos dinámicos y estadísticos.
-        * **Probabilidades:** Probabilidad objetiva basada en la regresión de los modelos.
-        * **Actualización:** Los datos se actualizan mensualmente (aprox. día 19).
-        * **Umbrales:** * **El Niño:** Anomalía ≥ +0.5°C
-            * **La Niña:** Anomalía ≤ -0.5°C
-            * **Neutral:** -0.5°C < Anomalía < +0.5°C
-        """)
-
     # ==========================================
     # PESTAÑA 1: HISTORIA
     # ==========================================
@@ -1836,7 +1848,7 @@ def display_climate_forecast_tab(**kwargs):
     # ==========================================
     with tab_iri_plumas:
         if json_plumas:
-            # Mensaje de Fecha
+            # Mensaje de Fecha (Recuperado)
             try:
                 last_year = json_plumas['years'][-1]['year']
                 last_month_idx = json_plumas['years'][-1]['months'][-1]['month']
@@ -1847,25 +1859,64 @@ def display_climate_forecast_tab(**kwargs):
 
             st.markdown("#### 🍝 Modelos de Predicción (Plumas)")
             data_plume = process_iri_plume(json_plumas)
+            
             if data_plume:
                 fig_plume = go.Figure()
+                
+                # Colección de valores para calcular promedio
+                all_values = []
+                
                 for model in data_plume['models']:
                     is_dyn = model['type'] == 'Dynamical'
-                    color = "rgba(100, 149, 237, 0.6)" if is_dyn else "rgba(255, 165, 0, 0.6)"
+                    color = "rgba(100, 149, 237, 0.4)" if is_dyn else "rgba(255, 165, 0, 0.4)" # Más transparencia
+                    
+                    # Guardar valores para promedio
+                    vals = model['values'][:len(data_plume['seasons'])]
+                    all_values.append(vals)
+
                     fig_plume.add_trace(go.Scatter(
                         x=data_plume['seasons'], y=model['values'], mode='lines',
-                        name=model['name'], line=dict(color=color, width=1.5), opacity=0.7, showlegend=False,
+                        name=model['name'], line=dict(color=color, width=1), opacity=0.6, showlegend=False,
                         hovertemplate=f"<b>{model['name']}</b><br>%{{y:.2f}} °C<extra></extra>"
                     ))
+                
+                # --- CÁLCULO DE PROMEDIO MULTIMODELO ---
+                try:
+                    max_len = len(data_plume['seasons'])
+                    clean_matrix = []
+                    for v in all_values:
+                        row = [float(x) if x is not None else np.nan for x in v]
+                        if len(row) < max_len:
+                            row += [np.nan] * (max_len - len(row))
+                        clean_matrix.append(row)
+                    
+                    avg_vals = np.nanmean(np.array(clean_matrix), axis=0)
+                    
+                    fig_plume.add_trace(go.Scatter(
+                        x=data_plume['seasons'], y=avg_vals,
+                        mode='lines+markers', name='PROMEDIO MULTIMODELO',
+                        line=dict(color="black", width=4), marker=dict(size=6),
+                        showlegend=True
+                    ))
+                except Exception as e:
+                    st.warning(f"Nota: No se pudo calcular el promedio ({e})")
+
                 # Umbrales
                 fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
                 fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
-                fig_plume.update_layout(title="Anomalía SST Niño 3.4", height=500, xaxis_title="Trimestres Móviles", yaxis_title="Anomalía SST (°C)")
+                
+                fig_plume.update_layout(
+                    title="Anomalía SST Niño 3.4", 
+                    height=550, 
+                    xaxis_title="Trimestres Móviles", 
+                    yaxis_title="Anomalía SST (°C)",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
                 st.plotly_chart(fig_plume, use_container_width=True, key="chart_iri_plume")
             else:
                 st.warning("Error al procesar la estructura del archivo de plumas.")
         else:
-            st.error("⚠️ No se encontró el archivo `enso_plumes.json` en `data/iri/`.")
+            st.error("⚠️ No se encontró `enso_plumes.json` en `data/iri/`.")
 
     # ==========================================
     # PESTAÑA 3: PROBABILIDAD MULTIMODELO
@@ -1877,7 +1928,7 @@ def display_climate_forecast_tab(**kwargs):
                 last_year = json_probs['years'][-1]['year']
                 last_month_idx = json_probs['years'][-1]['months'][-1]['month']
                 meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-                st.info(f"📅 Pronóstico de Probabilidades actualizado a: **{meses[last_month_idx]} {last_year}**")
+                st.info(f"📅 Pronóstico de Probabilidades (Consenso CPC/IRI) actualizado a: **{meses[last_month_idx]} {last_year}**")
             except:
                 pass
 
@@ -1886,7 +1937,7 @@ def display_climate_forecast_tab(**kwargs):
             
             if df_probs is not None and not df_probs.empty:
                 try:
-                    # Normalización de columnas
+                    # Limpieza de nombres de columnas
                     df_probs.columns = [str(c).strip() for c in df_probs.columns]
                     
                     # Identificar columna de tiempo
@@ -1897,17 +1948,19 @@ def display_climate_forecast_tab(**kwargs):
                             break
                     
                     if not col_tiempo and len(df_probs.columns) > 0:
-                        col_tiempo = df_probs.columns[0]
+                        col_tiempo = df_probs.columns[0] # Asumir primera columna si falla búsqueda
                     
                     if col_tiempo:
                         if col_tiempo != 'Trimestre':
                             df_probs.rename(columns={col_tiempo: 'Trimestre'}, inplace=True)
                         
-                        # Melt
+                        # Melt seguro
+                        # Buscamos columnas de eventos (ignorando mayúsculas/minúsculas)
                         cols_val = [c for c in df_probs.columns if c != 'Trimestre']
+                        
                         df_melt = df_probs.melt(id_vars="Trimestre", value_vars=cols_val, var_name="Evento", value_name="Probabilidad")
                         
-                        # Normalización de nombres de eventos para colores
+                        # Normalización para colores
                         df_melt['Evento_Norm'] = df_melt['Evento'].astype(str).str.lower().str.replace(" ", "")
                         
                         # Mapeo de colores
@@ -1943,7 +1996,7 @@ def display_climate_forecast_tab(**kwargs):
             else:
                 st.warning("DataFrame de probabilidades vacío.")
         else:
-            st.error("⚠️ No se encontró el archivo `enso_iri_prob.json` en `data/iri/`.")
+            st.error("⚠️ No se encontró `enso_cpc_prob.json` en `data/iri/`.")
 
     # ==========================================
     # PESTAÑA 4: PROPHET
@@ -3603,6 +3656,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
