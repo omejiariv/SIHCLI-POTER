@@ -3117,7 +3117,7 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
         fig.update_layout(title=f"Umbrales Mensuales - {selected_station}", height=450)
         st.plotly_chart(fig, use_container_width=True)
             
-# FUNCIÓN CLIMA FUTURO (MAPA RIESGO INTEGRADO + ORDENAMIENTO)
+# FUNCIÓN CLIMA FUTURO (MAPA RIESGO MEJORADO + SIMULADOR RESTAURADO)
 # ==============================================================================
 def display_climate_scenarios_tab(**kwargs):
     st.subheader("🌡️ Clima Futuro y Vulnerabilidad (CMIP6 / Riesgo)")
@@ -3151,7 +3151,8 @@ def display_climate_scenarios_tab(**kwargs):
         
         # Opciones de visualización
         c1, c2 = st.columns(2)
-        use_mask = c1.checkbox("Recortar por Cuenca Seleccionada", value=True)
+        # CORRECCIÓN AQUÍ: Agregamos key="risk_mask_cb"
+        use_mask = c1.checkbox("Recortar por Cuenca Seleccionada", value=True, key="risk_mask_cb")
         
         if st.button("Generar Mapa de Vulnerabilidad"):
             with st.spinner("Interpolando tendencias regionales (Buffer 50km)..."):
@@ -3806,4 +3807,5 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
