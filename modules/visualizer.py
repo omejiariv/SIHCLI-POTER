@@ -3119,6 +3119,8 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
             
 # FUNCIÓN CLIMA FUTURO (MAPA RIESGO MEJORADO + SIMULADOR RESTAURADO)
 # ==============================================================================
+# FUNCIÓN CLIMA FUTURO (MAPA RIESGO MEJORADO + SIMULADOR RESTAURADO)
+# ==============================================================================
 def display_climate_scenarios_tab(**kwargs):
     st.subheader("🌡️ Clima Futuro y Vulnerabilidad (CMIP6 / Riesgo)")
     
@@ -3253,6 +3255,24 @@ def display_climate_scenarios_tab(**kwargs):
         st.subheader("Simulador de Cambio Climático (Escenarios CMIP6)")
         st.info("Proyección de anomalías climatológicas para la región Andina (Horizonte 2040-2060).")
 
+        # --- 2. CAJA INFORMATIVA EDUCATIVA (SOLICITUD 2) ---
+        with st.expander("📚 Conceptos Clave: Escenarios SSP y Modelos CMIP6", expanded=False):
+            st.markdown("""
+            **¿Qué es CMIP6?**
+            El Proyecto de Intercomparación de Modelos Acoplados Fase 6 (CMIP6) es la base científica del último informe del IPCC (AR6). Utiliza nuevos escenarios llamados **Trayectorias Socioeconómicas Compartidas (SSPs)**.
+
+            **Definición de Escenarios (SSPs):**
+            * **SSP1-2.6 (Sostenibilidad):** Escenario optimista ("El camino verde"). Supone un cambio rápido hacia energías renovables y bajas emisiones. Meta: Calentamiento ~1.8°C para 2100.
+            * **SSP2-4.5 (Camino Medio):** Escenario intermedio ("Business as usual"). Las tendencias actuales continúan, con progreso lento en sostenibilidad. Meta: ~2.7°C.
+            * **SSP3-7.0 (Rivalidad Regional):** Escenario pesimista. Resurgimiento del nacionalismo, conflictos y bajo desarrollo tecnológico. Altas emisiones.
+            * **SSP5-8.5 (Desarrollo Fósil):** Peor escenario ("Autopista de combustibles fósiles"). Crecimiento económico rápido basado en carbón y petróleo. Meta: ~4.4°C (Catastrófico).
+
+            **Interpretación:**
+            Las anomalías muestran cuánto cambiaría la temperatura o la lluvia respecto a un periodo base (1981-2010).
+            
+            **Fuentes:** [IPCC AR6](https://www.ipcc.ch/assessment-report/ar6/), [Atlas Interactivo del IPCC](https://interactive-atlas.ipcc.ch/).
+            """)
+
         # Datos Base (Valores típicos CMIP6 para Andes Colombianos)
         scenarios_db = {
             'SSP1-2.6 (Sostenibilidad)': {
@@ -3274,7 +3294,7 @@ def display_climate_scenarios_tab(**kwargs):
         }
 
         # --- SIMULADOR INTERACTIVO ---
-        st.markdown("##### 🎛️ Ajuste Manual de Escenarios")
+        st.markdown("##### 🎛️ Ajuste Manual de Escenarios (Simulación)")
         c_sim1, c_sim2 = st.columns(2)
         
         with c_sim1:
@@ -3282,22 +3302,24 @@ def display_climate_scenarios_tab(**kwargs):
         with c_sim2:
             delta_ppt = st.slider("Cambio en Precipitación (%):", -30, 30, -5, 1, help="Simular cambio porcentual en la lluvia anual.")
 
-        # Calcular impacto simple (Ejemplo: Déficit Hídrico aproximado)
-        # Asumiendo evapotranspiración aumenta ~3% por cada grado de calentamiento (Clausius-Clapeyron aprox)
-        et_increase = delta_temp * 3
-        water_balance_change = delta_ppt - et_increase
-        
-        st.metric(
-            "Impacto Estimado en Balance Hídrico", 
-            f"{water_balance_change:.1f}%", 
-            delta="Déficit Hídrico" if water_balance_change < 0 else "Excedente",
-            delta_color="inverse"
-        )
+        # Botón para activar simulación (SOLICITUD 1 - Botón)
+        if st.button("🚀 Simular Escenario Futuro"):
+            # Calcular impacto simple (Ejemplo: Déficit Hídrico aproximado)
+            et_increase = delta_temp * 3 # Regla empírica: ET aumenta ~3% por cada °C
+            water_balance_change = delta_ppt - et_increase
+            
+            st.metric(
+                "Impacto Estimado en Balance Hídrico", 
+                f"{water_balance_change:.1f}%", 
+                delta="Déficit Hídrico (Sequía)" if water_balance_change < 0 else "Superávit Hídrico",
+                delta_color="inverse"
+            )
+            st.caption(f"Nota: Un aumento de {delta_temp}°C podría incrementar la evapotranspiración en aprox. {et_increase:.1f}%.")
 
         st.divider()
 
-        # --- COMPARATIVA ESCENARIOS ---
-        st.markdown("##### 📊 Comparativa de Escenarios Oficiales")
+        # --- COMPARATIVA ESCENARIOS (GRÁFICOS RESTAURADOS) ---
+        st.markdown("##### 📊 Comparativa de Escenarios Oficiales vs. Simulación")
         
         c_sel, c_sort = st.columns([2, 1])
         with c_sel:
@@ -3322,7 +3344,7 @@ def display_climate_scenarios_tab(**kwargs):
                     'Tipo': 'Oficial'
                 })
             
-            # Agregar simulación manual
+            # Agregar simulación manual al gráfico
             plot_data.append({
                 'Escenario': 'Mi Simulación (Manual)',
                 'Anomalía Temperatura (°C)': delta_temp,
@@ -3343,6 +3365,7 @@ def display_climate_scenarios_tab(**kwargs):
             c_g1, c_g2 = st.columns(2)
             
             with c_g1:
+                # Gráfico Precipitación (Solicitud 1 - Recuperado)
                 fig_ppt = px.bar(
                     df_sim, y='Escenario', x='Anomalía Precipitación (%)', 
                     color='Anomalía Precipitación (%)', title="Anomalía de Precipitación (%)",
@@ -3352,6 +3375,7 @@ def display_climate_scenarios_tab(**kwargs):
                 st.plotly_chart(fig_ppt, use_container_width=True)
                 
             with c_g2:
+                # Gráfico Temperatura
                 fig_temp = px.bar(
                     df_sim, y='Escenario', x='Anomalía Temperatura (°C)', 
                     color='Anomalía Temperatura (°C)', title="Aumento de Temperatura (°C)",
@@ -3817,6 +3841,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
