@@ -2475,10 +2475,6 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         </div>
         """, unsafe_allow_html=True)
 
-    # Obtener ubicación del usuario
-    user_loc = _get_user_location_sidebar(key_suffix="LZ")
-    tab_raster, tab_puntos = st.tabs(["🗺️ Mapa Raster (Continuo)", "📍 Estaciones (Puntos)"])
-        
     # --- PESTAÑA 1: MAPA RASTER ---
     with tab_raster:
         col1, col2 = st.columns(2)
@@ -3286,6 +3282,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
