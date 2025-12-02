@@ -2064,13 +2064,11 @@ def display_climate_forecast_tab(**kwargs):
 # -----------------------------------------------------------------------------
 
 def display_trends_and_forecast_tab(**kwargs):
-    st.subheader("📉 Tendencias, Pronósticos y Riesgo")
+    st.subheader("📉 Tendencias y Pronósticos (Series de Tiempo)")
     
     # Recuperar datos
     df_monthly = kwargs.get('df_monthly_filtered')
-    df_anual = kwargs.get('df_anual_melted')
     stations = kwargs.get('stations_for_analysis')
-    gdf_stations = kwargs.get('gdf_stations')
     df_enso = kwargs.get('df_enso')
 
     if not stations or df_monthly is None or df_monthly.empty:
@@ -2113,42 +2111,59 @@ def display_trends_and_forecast_tab(**kwargs):
     if df_enso is not None and not df_enso.empty:
         potential_regs = [c for c in df_enso.columns if c in [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL]]
         avail_regs = potential_regs
-        
         if avail_regs:
             temp_enso = df_enso.copy()
             if temp_enso[Config.DATE_COL].dtype == 'object':
                 temp_enso[Config.DATE_COL] = pd.to_datetime(temp_enso[Config.DATE_COL])
             regressors_df = temp_enso.set_index(Config.DATE_COL)[avail_regs].resample('MS').mean().interpolate(method='time')
 
-    # 2. PESTAÑAS
-    tabs = st.tabs(["Tendencias", "Descomposición", "Autocorrelación", "SARIMA", "Prophet", "Comparación", "Mapa Riesgo"])
+    # 2. PESTAÑAS (Mapa de Riesgo MOVIDO a Clima Futuro)
+    tabs = st.tabs(["📊 Tendencia Mann-Kendall", "🔍 Descomposición", "🔗 Autocorrelación", "🧠 SARIMA", "🔮 Prophet", "⚖️ Comparación Modelos"])
 
-    # --- TAB 1: TENDENCIAS (Restablecida y Mejorada) ---
+    # --- TAB 1: TENDENCIA MANN-KENDALL (INDEPENDIENTE Y RESTAURADA) ---
     with tabs[0]:
-        st.markdown(f"###### Análisis de Tendencia Mann-Kendall: {station_name_title}")
+        st.markdown(f"#### Análisis de Tendencia no Paramétrica (Mann-Kendall)")
+        st.caption(f"Evaluando serie: **{station_name_title}**")
+        
         try:
-            # Mann-Kendall Test
+            # Mann-Kendall Test Original
             res = mk.original_test(ts_clean)
             
-            # Métricas
+            # Métricas Clave
             c1, c2, c3 = st.columns(3)
-            trend_map = {"increasing": "Creciente 📈", "decreasing": "Decreciente 📉", "no trend": "Sin Tendencia ➖"}
-            c1.metric("Tendencia", trend_map.get(res.trend, res.trend))
+            
+            # Interpretación visual de la tendencia
+            trend_icon = "➖"
+            if res.trend == "increasing": trend_icon = "📈 (Aumento)"
+            elif res.trend == "decreasing": trend_icon = "📉 (Disminución)"
+            
+            c1.metric("Dirección Tendencia", trend_icon)
             c2.metric("Pendiente (Sen)", f"{res.slope:.3f} mm/mes")
-            c3.metric("Significancia (p-value)", f"{res.p:.4f}", delta="Significativo" if res.p < 0.05 else "No Signif.", delta_color="normal" if res.p < 0.05 else "off")
             
-            # Gráfico con línea de tendencia
+            # Interpretación de Significancia
+            is_significant = res.p < 0.05
+            sig_text = "Significativo (Confianza > 95%)" if is_significant else "No Significativo"
+            c3.metric("Significancia Estadística", sig_text, delta=f"p-value: {res.p:.4f}", delta_color="normal" if is_significant else "off")
+            
+            # Gráfico Visual
             df_plot = ts_clean.reset_index()
-            df_plot.columns = ['Fecha', 'Lluvia']
+            df_plot.columns = ['Fecha', 'Precipitación']
             
-            fig = px.scatter(df_plot, x='Fecha', y='Lluvia', title="Serie Histórica y Tendencia Lineal", opacity=0.6)
-            # Agregar línea de tendencia OLS para visualización rápida
-            fig.add_trace(go.Scatter(x=df_plot['Fecha'], y=res.slope * df_plot.index + res.intercept, mode='lines', name='Tendencia (Sen)', line=dict(color='red', width=2)))
+            # Línea de tendencia calculada (y = mx + b)
+            # Aproximación visual usando índices numéricos para la pendiente
+            x_nums = np.arange(len(df_plot))
+            y_trend = res.slope * x_nums + res.intercept
             
-            st.plotly_chart(fig) # use_container_width eliminado/default
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=df_plot['Fecha'], y=df_plot['Precipitación'], mode='lines', name='Serie Histórica', line=dict(color='gray', width=1)))
+            fig.add_trace(go.Scatter(x=df_plot['Fecha'], y=y_trend, mode='lines', name='Tendencia de Sen', line=dict(color='red', width=3, dash='dash')))
             
-            st.caption(f"**Interpretación:** La prueba de Mann-Kendall indica una tendencia **{res.trend}** con una tasa de cambio de **{res.slope*12:.1f} mm/año**.")
+            fig.update_layout(title="Ajuste de Tendencia (Theil-Sen)", hovermode="x unified")
+            st.plotly_chart(fig)
             
+            with st.expander("Ver detalles estadísticos completos"):
+                st.write(res)
+                
         except Exception as e: 
             st.error(f"No se pudo calcular la tendencia: {e}")
 
@@ -2157,7 +2172,7 @@ def display_trends_and_forecast_tab(**kwargs):
         try:
             decomp = seasonal_decompose(ts_clean, model='additive', period=12)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=ts_clean.index, y=decomp.trend, name='Tendencia'))
+            fig.add_trace(go.Scatter(x=ts_clean.index, y=decomp.trend, name='Tendencia (Ciclo)'))
             fig.add_trace(go.Scatter(x=ts_clean.index, y=decomp.seasonal, name='Estacionalidad'))
             fig.add_trace(go.Scatter(x=ts_clean.index, y=decomp.resid, name='Residuo', mode='markers'))
             fig.update_layout(title="Descomposición Estacional (Aditiva)", height=500)
@@ -2252,124 +2267,6 @@ def display_trends_and_forecast_tab(**kwargs):
             fig.update_layout(title="Comparativa de Modelos")
             st.plotly_chart(fig)
         else: st.info("Ejecute ambos modelos para comparar.")
-
-    # --- TAB 7: MAPA DE RIESGO (MEJORADO) ---
-    with tabs[6]:
-        st.markdown("#### Mapa de Vulnerabilidad (Tendencias de Lluvia)")
-        st.info("Muestra la tendencia espacial de la precipitación (Interpolación IDW con Buffer 50km).")
-        
-        if st.button("Generar Mapa de Riesgo"):
-            with st.spinner("Calculando tendencias regionales con buffer..."):
-                trend_data = []
-                
-                # 1. Obtener TODAS las estaciones disponibles en el dataset completo (buffer implícito)
-                # Esto asegura que usemos estaciones vecinas aunque no estén "seleccionadas"
-                if df_anual is not None:
-                    # Usamos el dataframe completo df_long para obtener datos de todas las estaciones disponibles
-                    # Pero df_anual ya viene filtrado. 
-                    # ESTRATEGIA: Si gdf_stations tiene todas, intentamos calcular tendencia para todas las que tengan datos en df_long original
-                    # Si no tenemos df_long original aquí, usamos df_anual que asumimos tiene el contexto necesario.
-                    # Si df_anual está filtrado, usamos estaciones_pool del dataset completo si es posible, 
-                    # pero aquí usaremos df_anual para consistencia con los filtros de tiempo.
-                    
-                    stations_pool = df_anual[Config.STATION_NAME_COL].unique()
-                    
-                    # Calcular Mann-Kendall para cada estación
-                    for stn in stations_pool:
-                        sub = df_anual[df_anual[Config.STATION_NAME_COL] == stn]
-                        # Filtro de calidad: Al menos 10 años de datos para una tendencia robusta
-                        if len(sub) > 10:
-                            try:
-                                res = mk.original_test(sub[Config.PRECIPITATION_COL])
-                                # Buscar coordenadas
-                                if gdf_stations is not None:
-                                    loc = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == stn]
-                                    if not loc.empty:
-                                        iloc = loc.iloc[0]
-                                        trend_data.append({
-                                            'lat': iloc['latitude'], 
-                                            'lon': iloc['longitude'], 
-                                            'slope': res.slope, # Pendiente Sen (mm/año)
-                                            'trend': res.trend,
-                                            'p': res.p,
-                                            'name': stn
-                                        })
-                            except: pass
-                
-                if len(trend_data) >= 4:
-                    df_trend = pd.DataFrame(trend_data)
-                    
-                    # 2. Interpolación Mejorada (Griddata Linear o Cubic)
-                    # Aumentamos resolución del grid
-                    grid_x, grid_y = np.mgrid[
-                        df_trend.lon.min()-0.1 : df_trend.lon.max()+0.1 : 200j, 
-                        df_trend.lat.min()-0.1 : df_trend.lat.max()+0.1 : 200j
-                    ]
-                    
-                    from scipy.interpolate import griddata
-                    grid_z = griddata(
-                        df_trend[['lon', 'lat']].values, 
-                        df_trend['slope'].values, 
-                        (grid_x, grid_y), 
-                        method='cubic' # Cubic para contornos más suaves
-                    )
-                    
-                    # 3. Visualización Mejorada
-                    fig = go.Figure()
-                    
-                    # A. Mapa de Calor (Contorno suave)
-                    fig.add_trace(go.Contour(
-                        z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:],
-                        colorscale='RdBu', # Rojo (Disminución) a Azul (Aumento)
-                        colorbar=dict(title='Tendencia (mm/año)', titleside='right'),
-                        zmid=0, # Centrar en 0 (Sin cambio)
-                        contours=dict(
-                            start=df_trend['slope'].min(),
-                            end=df_trend['slope'].max(),
-                            size=(df_trend['slope'].max() - df_trend['slope'].min()) / 15, # Pasos automáticos
-                            showlines=False # Sin líneas duras para mejor estética
-                        ),
-                        opacity=0.7,
-                        name='Tendencia Interpolada'
-                    ))
-                    
-                    # B. Puntos de Estaciones (Resaltados por significancia)
-                    # Significativo (p < 0.05) con borde grueso, No sig. transparente
-                    df_trend['border_width'] = df_trend['p'].apply(lambda x: 2 if x < 0.05 else 0.5)
-                    
-                    fig.add_trace(go.Scatter(
-                        x=df_trend.lon, y=df_trend.lat, 
-                        mode='markers', 
-                        text=df_trend.apply(lambda row: f"{row['name']}<br>Pendiente: {row['slope']:.2f}<br>Tendencia: {row['trend']}", axis=1),
-                        marker=dict(
-                            size=8,
-                            color='black',
-                            symbol='circle',
-                            line=dict(width=1, color='white')
-                        ),
-                        name='Estaciones'
-                    ))
-                    
-                    # Configuración de mapa base
-                    fig.update_layout(
-                        title="Mapa de Tendencias de Precipitación (Mann-Kendall)",
-                        xaxis_title="Longitud", yaxis_title="Latitud",
-                        height=600,
-                        margin=dict(l=20, r=20, t=40, b=20),
-                        # Truco para aspecto de mapa sin usar mapbox (más rápido para contornos)
-                        yaxis=dict(scaleanchor="x", scaleratio=1) 
-                    )
-                    st.plotly_chart(fig)
-                    
-                    # Mensaje de interpretación
-                    st.info("""
-                    **Interpretación:**
-                    * **Azul:** Zonas con tendencia al **aumento** de lluvias.
-                    * **Rojo:** Zonas con tendencia a la **disminución** (Vulnerabilidad a sequía).
-                    * **Puntos:** Estaciones analizadas (Círculos).
-                    """)
-                else:
-                    st.warning("No hay suficientes estaciones (>10 años datos) para interpolar.")
                     
 def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, **kwargs):
     st.subheader("⚠️ Análisis de Anomalías de Precipitación")
@@ -3220,80 +3117,114 @@ def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
         fig.update_layout(title=f"Umbrales Mensuales - {selected_station}", height=450)
         st.plotly_chart(fig, use_container_width=True)
             
+# FUNCIÓN CLIMA FUTURO (MAPA RIESGO INTEGRADO + ORDENAMIENTO)
+# ==============================================================================
 def display_climate_scenarios_tab(**kwargs):
-    st.subheader("🌡️ Simulador de Cambio Climático")
-    st.markdown("""
-    Este módulo simula cómo cambiaría el **Balance Hídrico (Oferta de Agua)** si aumentara la temperatura o cambiara la lluvia.
-    *Modelo utilizado: Fórmula de Turc.*
-    """)
+    st.subheader("🌡️ Clima Futuro y Vulnerabilidad (CMIP6 / Riesgo)")
     
-    # Datos
+    # Recuperamos datos para el mapa de riesgo (que viene de tendencias históricas)
     df_anual = kwargs.get('df_anual_melted')
     gdf_stations = kwargs.get('gdf_stations')
-    stations = kwargs.get('stations_for_analysis')
-    
-    if not stations:
-        st.warning("Seleccione estaciones.")
-        return
 
-    # 1. Controles de Escenario
-    c1, c2 = st.columns(2)
-    delta_temp = c1.slider("Aumento de Temperatura (°C):", 0.0, 5.0, 2.0, 0.1)
-    delta_ppt = c2.slider("Cambio en Precipitación (%):", -50, 50, -10, 5)
-    
-    # 2. Análisis
-    if st.button("Simular Escenario Futuro"):
-        results = []
+    tab_risk, tab_cmip6 = st.tabs(["🗺️ Mapa de Riesgo (Tendencias Históricas)", "🌍 Escenarios de Cambio Climático (CMIP6)"])
+
+    # --- TAB 1: MAPA DE RIESGO (MOVIDO Y MEJORADO) ---
+    with tab_risk:
+        st.markdown("#### Vulnerabilidad Hídrica: Tendencias de Precipitación")
+        st.info("""
+        Este mapa muestra la **tendencia espacial histórica** de la lluvia interpolando la pendiente de Sen.
+        * **Azul:** Zonas donde la lluvia está aumentando.
+        * **Rojo:** Zonas donde la lluvia está disminuyendo (Riesgo de Sequía).
+        * **Círculos:** Estaciones (Borde grueso = Tendencia significativa).
+        """)
         
-        # Filtrar datos de estaciones seleccionadas
-        station_info = gdf_stations[gdf_stations[Config.STATION_NAME_COL].isin(stations)]
+        if st.button("Generar Mapa de Vulnerabilidad"):
+            with st.spinner("Interpolando tendencias regionales (Buffer 50km)..."):
+                trend_data = []
+                if df_anual is not None:
+                    stations_pool = df_anual[Config.STATION_NAME_COL].unique()
+                    for stn in stations_pool:
+                        sub = df_anual[df_anual[Config.STATION_NAME_COL] == stn]
+                        if len(sub) > 10: # Mínimo 10 años
+                            try:
+                                res = mk.original_test(sub[Config.PRECIPITATION_COL])
+                                if gdf_stations is not None:
+                                    loc = gdf_stations[gdf_stations[Config.STATION_NAME_COL] == stn]
+                                    if not loc.empty:
+                                        iloc = loc.iloc[0]
+                                        trend_data.append({
+                                            'lat': iloc['latitude'], 'lon': iloc['longitude'], 
+                                            'slope': res.slope, 'trend': res.trend, 'p': res.p, 'name': stn
+                                        })
+                            except: pass
+                
+                if len(trend_data) >= 4:
+                    df_trend = pd.DataFrame(trend_data)
+                    # Interpolación mejorada
+                    grid_x, grid_y = np.mgrid[
+                        df_trend.lon.min()-0.1 : df_trend.lon.max()+0.1 : 200j, 
+                        df_trend.lat.min()-0.1 : df_trend.lat.max()+0.1 : 200j
+                    ]
+                    from scipy.interpolate import griddata
+                    grid_z = griddata(df_trend[['lon', 'lat']].values, df_trend['slope'].values, (grid_x, grid_y), method='cubic')
+                    
+                    fig = go.Figure(data=go.Contour(
+                        z=grid_z.T, x=grid_x[:,0], y=grid_y[0,:],
+                        colorscale='RdBu', colorbar=dict(title='Tendencia (mm/año)'),
+                        zmid=0, opacity=0.8, contours=dict(showlines=False)
+                    ))
+                    # Puntos con borde según significancia
+                    df_trend['line_width'] = df_trend['p'].apply(lambda x: 2 if x < 0.05 else 0)
+                    df_trend['line_color'] = df_trend['p'].apply(lambda x: 'black' if x < 0.05 else 'rgba(0,0,0,0)')
+                    
+                    fig.add_trace(go.Scatter(
+                        x=df_trend.lon, y=df_trend.lat, mode='markers', 
+                        text=df_trend.apply(lambda r: f"{r['name']}<br>Pendiente: {r['slope']:.2f}<br>Sig: {'Sí' if r['p']<0.05 else 'No'}", axis=1),
+                        marker=dict(size=8, color='white', line=dict(width=df_trend['line_width'], color=df_trend['line_color']))
+                    ))
+                    fig.update_layout(height=600, title="Interpolación Espacial de Tendencias (Mann-Kendall)", yaxis=dict(scaleanchor="x", scaleratio=1))
+                    st.plotly_chart(fig)
+                else: st.warning("Datos insuficientes para interpolar.")
+
+    # --- TAB 2: CMIP6 (SIMULADOR) ---
+    with tab_cmip6:
+        st.markdown("#### Simulador de Anomalías (2040-2060)")
         
-        for _, row in station_info.iterrows():
-            name = row[Config.STATION_NAME_COL]
-            alt = row[Config.ALTITUDE_COL]
-            
-            # Obtener lluvia actual promedio
-            ppt_actual = df_anual[df_anual[Config.STATION_NAME_COL] == name][Config.PRECIPITATION_COL].mean()
-            
-            if pd.notna(ppt_actual):
-                # Escenario BASE (Actual)
-                temp_actual = estimate_temperature(alt)
-                etr_base, q_base = calculate_water_balance_turc(ppt_actual, temp_actual)
-                
-                # Escenario FUTURO
-                temp_futura = temp_actual + delta_temp
-                ppt_futura = ppt_actual * (1 + delta_ppt/100)
-                etr_futura, q_futura = calculate_water_balance_turc(ppt_futura, temp_futura)
-                
-                # Cambio porcentual en caudal (Q)
-                delta_q_perc = ((q_futura - q_base) / q_base * 100) if q_base > 0 else 0
-                
-                results.append({
-                    "Estación": name,
-                    "Q Actual (mm)": round(q_base, 1),
-                    "Q Futuro (mm)": round(q_futura, 1),
-                    "Impacto (%)": round(delta_q_perc, 1)
-                })
+        # Datos simulados (Mockup) - Reemplazar con lógica real si la tienes
+        scenarios_data = {
+            'SSP1-2.6 (Sostenible)': {'temp': 1.5, 'ppt': 5},
+            'SSP2-4.5 (Intermedio)': {'temp': 2.2, 'ppt': -2},
+            'SSP5-8.5 (Pesimista)': {'temp': 3.8, 'ppt': -15}
+        }
         
-        if results:
-            res_df = pd.DataFrame(results)
+        # Selector de ordenamiento (SOLICITUD 2)
+        sort_order = st.selectbox("Ordenar Gráfico por:", ["Escenario (Default)", "Anomalía Ascendente ⬆️", "Anomalía Descendente ⬇️"])
+        
+        df_sim = pd.DataFrame([
+            {'Escenario': k, 'Anomalía PPT (%)': v['ppt'], 'Anomalía Temp (°C)': v['temp']} 
+            for k,v in scenarios_data.items()
+        ])
+        
+        # Lógica de Ordenamiento
+        if "Ascendente" in sort_order:
+            df_sim = df_sim.sort_values("Anomalía PPT (%)", ascending=True)
+        elif "Descendente" in sort_order:
+            df_sim = df_sim.sort_values("Anomalía PPT (%)", ascending=False)
             
-            # Métricas Globales
-            avg_impact = res_df["Impacto (%)"].mean()
-            st.metric("Impacto Promedio en Oferta Hídrica", f"{avg_impact:.1f}%", delta_color="normal" if avg_impact > 0 else "inverse")
-            
-            # Gráfico de Impacto
+        col_graf, col_info = st.columns([2,1])
+        
+        with col_graf:
             fig = px.bar(
-                res_df, y="Estación", x="Impacto (%)",
-                color="Impacto (%)",
-                title=f"Impacto en Escorrentía (Q) con +{delta_temp}°C y {delta_ppt}% Lluvia",
-                color_continuous_scale="RdYlGn",
-                orientation='h'
+                df_sim, x='Escenario', y='Anomalía PPT (%)', 
+                color='Anomalía PPT (%)', color_continuous_scale='RdBu',
+                title="Anomalía de Precipitación Proyectada (%)",
+                text_auto='.1f'
             )
-            fig.add_vline(x=0, line_color="black")
-            st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(height=400)
+            st.plotly_chart(fig)
             
-            st.dataframe(res_df, use_container_width=True)
+        with col_info:
+            st.dataframe(df_sim.set_index("Escenario"), use_container_width=True)
 
 def display_station_table_tab(**kwargs):
     st.subheader("📋 Tabla Detallada de Datos")
@@ -3751,81 +3682,3 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
