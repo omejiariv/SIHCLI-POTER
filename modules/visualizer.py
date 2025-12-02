@@ -1800,14 +1800,14 @@ def display_climate_forecast_tab(**kwargs):
                 
                 if idx_sel == Config.ENSO_ONI_COL:
                     # Si es ONI -> Usamos tu gráfico PRECIOSO con colores de fondo
-                    st.plotly_chart(create_enso_chart(d), use_container_width=True)
+                    st.plotly_chart(create_enso_chart(d), use_container_width=True, key="chart_oni_hist")
                 else:
                     # Si es SOI o IOD -> Usamos gráfico de líneas estándar (no tienen las mismas fases de color)
                     fig_simple = px.line(d, x=Config.DATE_COL, y=idx_sel, title=f"Evolución Histórica: {idx_sel}")
                     
                     # Agregar línea cero de referencia
                     fig_simple.add_hline(y=0, line_width=1, line_color="black", opacity=0.5)
-                    st.plotly_chart(fig_simple, use_container_width=True)
+                    st.plotly_chart(fig_simple, use_container_width=True, key=f"chart_{idx_sel}_hist")
             else:
                 st.warning(f"La columna '{idx_sel}' no se encuentra en la base de datos.")
         else:
@@ -1843,7 +1843,7 @@ def display_climate_forecast_tab(**kwargs):
                     fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
                     fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
                     fig_plume.update_layout(title="Anomalía SST Niño 3.4", height=450)
-                    st.plotly_chart(fig_plume, use_container_width=True)
+                    st.plotly_chart(fig_plume, use_container_width=True, key="chart_iri_plume")
             
             # B. Probabilidades (Barras)
             with col2:
@@ -1868,7 +1868,7 @@ def display_climate_forecast_tab(**kwargs):
                         fig_probs = px.bar(df_melt, x="Trimestre", y="Probabilidad", color="Evento", color_discrete_map=color_map, text="Probabilidad", barmode='group')
                         fig_probs.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
                         fig_probs.update_layout(height=450, yaxis=dict(range=[0, 105]))
-                        st.plotly_chart(fig_probs, use_container_width=True)
+                        st.plotly_chart(fig_probs, use_container_width=True, key="chart_iri_probs")
                     else:
                         st.error(f"Error de estructura: No se encontró la columna de tiempo. Columnas disponibles: {df_probs.columns.tolist()}")
                 else:
@@ -1906,7 +1906,7 @@ def display_climate_forecast_tab(**kwargs):
                         fig.add_trace(go.Scatter(x=fc['ds'], y=fc['yhat_upper'], mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip'))
                         fig.add_trace(go.Scatter(x=fc['ds'], y=fc['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(68, 68, 68, 0.1)', showlegend=False, hoverinfo='skip'))
                         
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key="chart_prophet")
                 except Exception as e:
                     st.error(f"Error en Prophet: {e}")
         else:
@@ -3535,6 +3535,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
