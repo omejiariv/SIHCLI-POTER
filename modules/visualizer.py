@@ -823,12 +823,16 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
             if not alts.empty: 
                 st.dataframe(alts.sort_values(Config.PRECIPITATION_COL, ascending=False).head(100), use_container_width=True)
         
-def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_region=None, user_loc=None, interpolacion="No", **kwargs):
+def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, user_loc=None, interpolacion="No", **kwargs):
 
-    # --- 1. LÓGICA DE RESUMEN DE FILTROS (NUEVO) ---
-    # Obtenemos datos para el resumen
-    region = kwargs.get('region', 'Región Central') # Valor por defecto o pasado por kwargs
-    interpolacion = kwargs.get('interpolacion', 'No detectado') # Valor por defecto
+    # --- 0. RECUPERACIÓN DE DATOS EXTRA (Protección contra errores) ---
+    # Recuperamos df_anual para la pestaña 3 y aseguramos user_loc
+    df_anual = kwargs.get('df_anual_melted', None)
+    user_loc = kwargs.get('user_loc', user_loc)
+    
+    # --- 1. LÓGICA DE RESUMEN DE FILTROS (TU CÓDIGO ORIGINAL) ---
+    region = kwargs.get('region', 'Región Central') 
+    interpolacion = kwargs.get('interpolacion', 'No detectado')
     
     # Lógica de Municipios
     if 'municipio' in gdf_filtered.columns:
@@ -844,11 +848,10 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
         munis_str = "No disponible"
 
     # Lógica de Años y Registros
-    if not df_long.empty:
+    if df_long is not None and not df_long.empty:
         min_year = df_long[Config.YEAR_COL].min()
         max_year = df_long[Config.YEAR_COL].max()
         years_str = f"{min_year} - {max_year}"
-        # Calculo simple de porcentaje (ajustar según tu lógica de negocio)
         total_rows = len(df_long)
         valid_rows = len(df_long[df_long[Config.PRECIPITATION_COL] > 0])
         pct_registros = (valid_rows / total_rows * 100) if total_rows > 0 else 0
@@ -858,7 +861,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
 
     st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
 
-    # --- CAJA DE RESUMEN DESPLEGABLE (RESTITUIDA) ---
+    # --- CAJA DE RESUMEN DESPLEGABLE (TU CÓDIGO ORIGINAL) ---
     with st.expander("📝 Resumen de Filtros Seleccionados", expanded=False):
         st.info(f"""
         **Configuración Actual:**
@@ -877,16 +880,18 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
     </style>
     """, unsafe_allow_html=True)
 
-    st.info("👆 **Haga clic en el mapa** o ingrese coordenadas para analizar un punto específico.")
-
     if 'selected_point' not in st.session_state:
         st.session_state.selected_point = None
 
-    # --- PESTAÑAS ---
+    # --- PESTAÑAS (TU ESTRUCTURA) ---
     tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
     
-    # --- PESTAÑA 1: MAPA ---
+    # ==========================================
+    # PESTAÑA 1: MAPA (TU CÓDIGO ORIGINAL)
+    # ==========================================
     with tab_map:
+        st.info("👆 **Haga clic en el mapa** o ingrese coordenadas para analizar un punto específico.")
+        
         col_ctrl, col_map = st.columns([1, 3])
         
         # 1. CONTROLES
@@ -962,7 +967,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             if st.session_state.selected_point:
                 folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Selección", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
 
-            # --- AQUÍ USAMOS LA UBICACIÓN PASADA COMO ARGUMENTO ---
+            # Ubicación Usuario
             if user_loc:
                 folium.Marker(
                     [user_loc[0], user_loc[1]], 
@@ -982,7 +987,46 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
                     st.rerun()
 
-    # --- 3. ANÁLISIS DEL PUNTO SELECCIONADO (FUERA DE LA COLUMNA DEL MAPA) ---
+    # ==========================================
+    # PESTAÑA 2: DISPONIBILIDAD (RESTITUIDA)
+    # ==========================================
+    # Aquí estaba el problema: esta pestaña estaba vacía en tu código actual.
+    with tab_avail:
+        st.markdown("#### 📊 Inventario de Datos")
+        if df_long is not None and not df_long.empty:
+            avail = df_long.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].count().reset_index()
+            avail.rename(columns={Config.PRECIPITATION_COL: 'Registros (Meses)'}, inplace=True)
+            
+            fig_avail = px.density_heatmap(
+                avail, x=Config.YEAR_COL, y=Config.STATION_NAME_COL, z='Registros (Meses)',
+                color_continuous_scale="Viridis", title="Cobertura Temporal de Datos", height=600
+            )
+            st.plotly_chart(fig_avail, use_container_width=True)
+        else:
+            st.warning("No hay datos cargados para generar la matriz de disponibilidad.")
+
+    # ==========================================
+    # PESTAÑA 3: SERIES ANUALES (RESTITUIDA)
+    # ==========================================
+    # Esta también estaba vacía. Se recupera el gráfico de líneas.
+    with tab_matrix:
+        st.markdown("#### 📅 Series de Precipitación Anual Acumulada")
+        if df_anual is not None and not df_anual.empty:
+            fig_lines = px.line(
+                df_anual, x=Config.YEAR_COL, y=Config.PRECIPITATION_COL, color=Config.STATION_NAME_COL, 
+                markers=True, title="Evolución Anual",
+                labels={Config.PRECIPITATION_COL: "Ppt Total (mm)", Config.YEAR_COL: "Año"}
+            )
+            fig_lines.update_layout(hovermode="x unified", legend=dict(orientation="h", y=-0.2))
+            st.plotly_chart(fig_lines, use_container_width=True)
+            
+            with st.expander("Ver Datos en Tabla"):
+                pivot_anual = df_anual.pivot(index=Config.YEAR_COL, columns=Config.STATION_NAME_COL, values=Config.PRECIPITATION_COL)
+                st.dataframe(pivot_anual.style.format("{:.0f}"), use_container_width=True)
+        else:
+            st.info("No hay datos anuales disponibles. Revisa los filtros.")
+
+    # --- 3. ANÁLISIS DEL PUNTO SELECCIONADO (TU CÓDIGO ORIGINAL) ---
     if st.session_state.selected_point:
         clat, clon = st.session_state.selected_point['lat'], st.session_state.selected_point['lng']
         st.markdown("---")
@@ -3378,6 +3422,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
