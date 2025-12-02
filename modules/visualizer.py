@@ -3302,9 +3302,21 @@ def display_climate_scenarios_tab(**kwargs):
         st.subheader("Simulador de Cambio Climático (Escenarios CMIP6)")
         st.info("Proyección de anomalías climatológicas para la región Andina (Horizonte 2040-2060).")
 
-        with st.expander("📚 Conceptos Clave: Escenarios SSP y Modelos CMIP6", expanded=False):
+# 1. Caja Informativa
+        with st.expander("📚 Conceptos Clave: Escenarios SSP y Modelos CMIP6 (IPCC AR6)", expanded=False):
             st.markdown("""
-            **¿Qué es CMIP6?** El Proyecto de Intercomparación de Modelos Acoplados Fase 6 (CMIP6)...
+            **🔍 Anatomía del Código: {Escenario} = {SSP(X)} - {Y.Y}**
+            Combina la **Trayectoria Social (SSP 1-5)** con el **Forzamiento Radiativo (W/m²)** al 2100.
+
+            **📉 Escenarios "Tier 1" (Proyecciones):**
+            * **SSP1-2.6 (Sostenibilidad):** "Ruta Verde". Emisiones cero neto a 2050. Escenario optimista (<2°C).
+            * **SSP2-4.5 (Camino Medio):** Tendencias actuales. Progreso desigual. Escenario de planificación "realista" (~2.7°C).
+            * **SSP3-7.0 (Rivalidad Regional):** Nacionalismo y baja cooperación. Muy peligroso (~3.6°C a 4°C).
+            * **SSP5-8.5 (Desarrollo Fósil):** "La Autopista". Crecimiento rápido basado en carbón/petróleo. El peor caso (>4.4°C).
+
+            ---
+            **🛠️ Nota para Ingeniería:**
+            Use **SSP2-4.5** para planificación estándar. Use **SSP5-8.5** solo para **pruebas de estrés** en infraestructura crítica (validar resiliencia ante eventos extremos inéditos).
             """)
 
         scenarios_db = {
@@ -3821,6 +3833,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
