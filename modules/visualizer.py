@@ -14,6 +14,7 @@ from shapely.geometry import Point, LineString
 from shapely.ops import unary_union
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import modules.life_zones as lz
 from math import cos, radians
 import requests
 from io import BytesIO
@@ -2440,7 +2441,7 @@ def display_enso_tab(**kwargs):
     else:
         st.info("No hay datos ENSO cargados.")
 
-def display_life_zones_tab(df_long, gdf_stations, **kwargs):
+def display_life_zones_tab(df_long, gdf_stations, gdf_subcuencas=None, **kwargs):
     st.subheader("🌱 Zonas de Vida (Sistema Holdridge)")
 
     # --- SECCIÓN EDUCATIVA ---
@@ -2475,7 +2476,18 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
         </div>
         """, unsafe_allow_html=True)
 
-    # --- PESTAÑA 1: MAPA RASTER ---
+    # --- 2. GESTIÓN DE ESTADO ---
+    if 'lz_raster_result' not in st.session_state:
+        st.session_state.lz_raster_result = None
+        st.session_state.lz_profile = None
+        st.session_state.lz_names = None
+        st.session_state.lz_colors = None
+
+    # --- 3. DEFINICIÓN DE PESTAÑAS (CORRECCIÓN DEL ERROR) ---
+    # Aquí definimos las 3 variables antes de usarlas
+    tab_raster, tab_puntos, tab_vector = st.tabs(["🗺️ Mapa Raster", "📍 Puntos (Estaciones)", "📐 Descarga Vectorial"])
+
+    # --- PESTAÑA 1: MAPA RASTER (TU LÓGICA + BACKEND OPTIMIZADO) ---
     with tab_raster:
         col1, col2 = st.columns(2)
         with col1:
@@ -2487,44 +2499,62 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
             
         basin_geom = None
         if use_mask:
-            res_basin = st.session_state.get('basin_res') 
-            if res_basin and res_basin.get('ready'):
-                basin_geom = res_basin.get('gdf_cuenca', res_basin.get('gdf_union'))
-                if basin_geom is not None:
-                    st.success(f"Máscara activa: {res_basin.get('names', 'Cuenca')}")
+            # Intentamos obtener la cuenca de varias fuentes posibles
+            if gdf_subcuencas is not None and not gdf_subcuencas.empty:
+                basin_geom = gdf_subcuencas
+                st.success("✅ Máscara activa: Subcuencas cargadas.")
             else:
-                st.warning("⚠️ No hay cuenca en memoria. Ve a 'Mapas Avanzados'.")
+                # Fallback a la sesión si existe
+                res_basin = st.session_state.get('basin_res') 
+                if res_basin and res_basin.get('ready'):
+                    basin_geom = res_basin.get('gdf_cuenca', res_basin.get('gdf_union'))
+                    st.success(f"✅ Máscara activa: {res_basin.get('names', 'Cuenca')}")
+                else:
+                    st.warning("⚠️ No se detectó geometría de cuenca. Se usará el mapa completo.")
 
         if st.button("Generar Mapa de Zonas de Vida"):
-            if not os.path.exists(Config.DEM_FILE_PATH) or not os.path.exists(Config.PRECIP_RASTER_PATH):
-                st.error("Faltan archivos raster en 'data/'.")
+            # Usamos getattr para evitar error si Config no tiene la variable definida
+            dem_path = getattr(Config, 'DEM_FILE_PATH', 'data/static/dem_antioquia.tif')
+            ppt_path = getattr(Config, 'PRECIP_RASTER_PATH', 'data/static/ppt_anual_media.tif')
+
+            if not os.path.exists(dem_path) or not os.path.exists(ppt_path):
+                st.error(f"❌ Faltan archivos raster en: {dem_path} o {ppt_path}")
             else:
                 with st.spinner("Generando mapa clasificado..."):
                     try:
-                        from modules.life_zones import generate_life_zone_map
-                        
-                        lz_arr, profile, dynamic_legend, color_map = generate_life_zone_map(
-                            Config.DEM_FILE_PATH, 
-                            Config.PRECIP_RASTER_PATH, 
+                        # LLAMADA AL NUEVO BACKEND OPTIMIZADO
+                        lz_arr, profile, dynamic_legend, color_map = lz.generate_life_zone_map(
+                            dem_path, 
+                            ppt_path, 
                             mask_geometry=basin_geom, 
                             downscale_factor=downscale
                         )
                         
                         if lz_arr is not None:
+                            # Guardamos en sesión para usar en la pestaña de vectores
+                            st.session_state.lz_raster_result = lz_arr
+                            st.session_state.lz_profile = profile
+                            st.session_state.lz_names = dynamic_legend
+                            st.session_state.lz_colors = color_map
+                            
+                            # --- TU VISUALIZACIÓN ORIGINAL (SCATTER MAPBOX) ---
                             h, w = lz_arr.shape
                             transform = profile['transform']
                             x0, y0 = transform.c, transform.f
                             dx, dy = transform.a, transform.e
+                            
+                            # Creamos malla de coordenadas
                             xs = np.linspace(x0, x0 + dx * w, w)
                             ys = np.linspace(y0, y0 + dy * h, h)
                             xx, yy = np.meshgrid(xs, ys)
+                            
                             lat_flat = yy.flatten()
                             lon_flat = xx.flatten()
                             z_flat = lz_arr.flatten()
                             mask = z_flat > 0
                             
                             if not np.any(mask):
-                                st.warning("El mapa se generó pero todos los píxeles son 0.")
+                                st.warning("El mapa se generó pero todos los píxeles son 0 (fuera de rango o máscara vacía).")
                             else:
                                 lat_clean = lat_flat[mask]
                                 lon_clean = lon_flat[mask]
@@ -2542,6 +2572,7 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 colors_hex = [color_map.get(v, "#808080") for v in z_clean]
                                 hover_text = [f"[ID: {v}] {dynamic_legend.get(v, 'Desconocido')}" for v in z_clean]
                                 
+                                # Mapa Interactivo Plotly
                                 fig = go.Figure(go.Scattermapbox(
                                     lat=lat_clean, lon=lon_clean, mode='markers',
                                     marker=go.scattermapbox.Marker(size=8 if downscale > 4 else 5, color=colors_hex, opacity=0.75),
@@ -2563,6 +2594,7 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
                                 
+                                # Tabla de Estadísticas
                                 unique, counts = np.unique(z_clean, return_counts=True)
                                 data_table = []
                                 total_px = counts.sum()
@@ -2573,26 +2605,34 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                                 
                                 df_areas = pd.DataFrame(data_table).sort_values("%", ascending=False)
                                 st.dataframe(df_areas.style.format({"%": "{:.1f}%", "Área (ha)": "{:,.2f}"}), use_container_width=True)
+                                
+                                # Botón Descarga TIFF (Agregado)
+                                tiff_bytes = lz.get_raster_bytes(lz_arr, profile)
+                                if tiff_bytes:
+                                    st.download_button("📥 Descargar GeoTIFF", tiff_bytes, "zonas_vida.tif", "image/tiff")
 
                     except ImportError as ie: st.error(f"Error de Importación: {ie}.")
                     except Exception as e: st.error(f"Error visualizando: {e}")
 
+    # --- PESTAÑA 2: PUNTOS (TU CÓDIGO ORIGINAL) ---
     with tab_puntos:
         df_anual = kwargs.get('df_anual_melted')
         if df_anual is None or gdf_stations is None:
-            st.warning("Datos insuficientes.")
+            st.warning("Datos insuficientes para el análisis de estaciones.")
         else:
             try:
-                from modules.life_zones import classify_life_zone_alt_ppt, holdridge_int_to_name_simplified, holdridge_colors
+                # Usamos las funciones del backend para consistencia
                 ppt_media = df_anual.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].mean().reset_index()
                 if Config.STATION_NAME_COL not in ppt_media.columns: ppt_media = ppt_media.reset_index()
+                
                 merged = pd.merge(ppt_media, gdf_stations[[Config.STATION_NAME_COL, Config.ALTITUDE_COL, 'latitude', 'longitude']], on=Config.STATION_NAME_COL)
                 
                 def get_zone_data(row):
-                    z_id = classify_life_zone_alt_ppt(row[Config.ALTITUDE_COL], row[Config.PRECIPITATION_COL])
-                    return pd.Series([holdridge_int_to_name_simplified.get(z_id, "Desconocido"), holdridge_colors.get(z_id, "#808080")])
+                    z_id = lz.classify_life_zone_alt_ppt(row[Config.ALTITUDE_COL], row[Config.PRECIPITATION_COL])
+                    return pd.Series([lz.holdridge_int_to_name_simplified.get(z_id, "Desconocido"), lz.holdridge_colors.get(z_id, "#808080")])
 
                 merged[['Zona de Vida', 'Color']] = merged.apply(get_zone_data, axis=1)
+                
                 fig_map = px.scatter_mapbox(
                     merged, lat="latitude", lon="longitude", color="Zona de Vida", size=Config.PRECIPITATION_COL,
                     hover_name=Config.STATION_NAME_COL, zoom=8, mapbox_style="carto-positron", title="Clasificación en Estaciones"
@@ -2603,6 +2643,35 @@ def display_life_zones_tab(df_long, gdf_stations, **kwargs):
                 st.plotly_chart(fig_map, use_container_width=True)
                 st.dataframe(merged[[Config.STATION_NAME_COL, 'Zona de Vida', Config.PRECIPITATION_COL, Config.ALTITUDE_COL]], use_container_width=True)
             except Exception as e: st.error(f"Error en puntos: {e}")
+
+    # --- PESTAÑA 3: VECTORIAL (NUEVA FUNCIONALIDAD) ---
+    with tab_vector:
+        st.info("🛠️ Herramienta para convertir el mapa raster generado a polígonos (GeoJSON) para uso en SIG.")
+        
+        if st.session_state.lz_raster_result is None:
+            st.warning("⚠️ Primero debes generar el mapa en la pestaña 'Mapa Raster'.")
+        else:
+            if st.button("Generar Polígonos (Vectorizar)"):
+                with st.spinner("Convirtiendo píxeles a vectores..."):
+                    gdf_vec = lz.vectorize_raster_to_gdf(
+                        st.session_state.lz_raster_result,
+                        st.session_state.lz_profile['transform'],
+                        st.session_state.lz_profile['crs']
+                    )
+                    
+                    if not gdf_vec.empty:
+                        st.success(f"Vectorización completada: {len(gdf_vec)} polígonos.")
+                        st.dataframe(gdf_vec.drop(columns='geometry').head())
+                        
+                        geojson_data = gdf_vec.to_json()
+                        st.download_button(
+                            label="📥 Descargar GeoJSON",
+                            data=geojson_data,
+                            file_name="zonas_vida_vectorial.geojson",
+                            mime="application/json"
+                        )
+                    else:
+                        st.error("No se generaron polígonos válidos.")
             
 def display_drought_analysis_tab(df_long, gdf_stations, **kwargs):
     st.subheader("🌊 Análisis de Extremos Hidrológicos")
@@ -3282,6 +3351,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
