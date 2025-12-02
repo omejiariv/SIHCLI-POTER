@@ -797,9 +797,53 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
             if not alts.empty: 
                 st.dataframe(alts.sort_values(Config.PRECIPITATION_COL, ascending=False).head(100), use_container_width=True)
         
-def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, **kwargs):
-    st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
+def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, user_loc=None, **kwargs):
     
+    # --- 1. LÓGICA DE RESUMEN DE FILTROS (NUEVO) ---
+    # Obtenemos datos para el resumen
+    region = kwargs.get('region', 'Región Central') # Valor por defecto o pasado por kwargs
+    interpolacion = kwargs.get('interpolacion', 'No detectado') # Valor por defecto
+    
+    # Lógica de Municipios
+    if 'municipio' in gdf_filtered.columns:
+        lista_munis = gdf_filtered['municipio'].unique()
+        total_munis_sel = len(lista_munis)
+        if total_munis_sel > 3:
+            munis_str = ", ".join(lista_munis[:3]) + f", ... (y {total_munis_sel - 3} más)"
+        elif total_munis_sel == 0:
+            munis_str = "Todos / Ninguno seleccionado"
+        else:
+            munis_str = ", ".join(lista_munis)
+    else:
+        munis_str = "No disponible"
+
+    # Lógica de Años y Registros
+    if not df_long.empty:
+        min_year = df_long[Config.YEAR_COL].min()
+        max_year = df_long[Config.YEAR_COL].max()
+        years_str = f"{min_year} - {max_year}"
+        # Calculo simple de porcentaje (ajustar según tu lógica de negocio)
+        total_rows = len(df_long)
+        valid_rows = len(df_long[df_long[Config.PRECIPITATION_COL] > 0])
+        pct_registros = (valid_rows / total_rows * 100) if total_rows > 0 else 0
+    else:
+        years_str = "N/A"
+        pct_registros = 0
+
+    st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
+
+    # --- CAJA DE RESUMEN DESPLEGABLE (RESTITUIDA) ---
+    with st.expander("📝 Resumen de Filtros Seleccionados", expanded=False):
+        st.info(f"""
+        **Configuración Actual:**
+        * **🌍 Región:** {region}
+        * **🏙️ Municipios:** {munis_str}
+        * **📡 Estaciones:** {len(gdf_filtered)} seleccionadas
+        * **📅 Años:** {years_str}
+        * **💾 Registros:** {pct_registros:.1f}% válidos
+        * **📈 Interpolación:** {interpolacion}
+        """)
+
     # CSS para métricas compactas
     st.markdown("""
     <style>
@@ -812,17 +856,14 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
     if 'selected_point' not in st.session_state:
         st.session_state.selected_point = None
 
-    # --- GEOLOCALIZACIÓN DEL USUARIO (SIDEBAR) ---
-    # Nota: Asegúrate de que esta función no retorne un widget que bloquee el flujo
-    user_loc = _get_user_location_sidebar(key_suffix="SpatialMap")    
-
+    # --- PESTAÑAS ---
     tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
     
     # --- PESTAÑA 1: MAPA ---
     with tab_map:
         col_ctrl, col_map = st.columns([1, 3])
         
-        # 1. CONTROLES (COLUMNA IZQUIERDA)
+        # 1. CONTROLES
         with col_ctrl:
             st.markdown("#### Configuración")
             with st.expander("📍 Ingresar Coordenadas", expanded=False):
@@ -844,7 +885,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
             sel_tile = base_map_options[base_map_name]
         
-        # 2. CONSTRUCCIÓN DEL MAPA (COLUMNA DERECHA)
+        # 2. MAPA
         with col_map:
             # Centrar Mapa
             if st.session_state.selected_point:
@@ -855,116 +896,62 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             else:
                 lat_c, lon_c, z = 6.2, -75.5, 9
             
-            # Inicializar objeto Mapa
             m = folium.Map(location=[lat_c, lon_c], zoom_start=z, tiles=sel_tile["tiles"], attr=sel_tile["attr"])
             
             # Capas GeoJSON
             try:
                 if show_munis and not gdf_municipios.empty:
-                    g = gdf_municipios.copy()
-                    g['geometry'] = g.geometry.simplify(0.001)
-                    folium.GeoJson(
-                        g, name="Municipios",
-                        style_function=lambda x: {'color':'gray', 'weight':1, 'fillOpacity':0.05},
-                        tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None
-                    ).add_to(m)
-                
+                    g = gdf_municipios.copy(); g['geometry'] = g.geometry.simplify(0.001)
+                    folium.GeoJson(g, name="Municipios", style_function=lambda x:{'color':'gray','weight':1,'fillOpacity':0.05}, tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None).add_to(m)
                 if show_cuencas and not gdf_subcuencas.empty:
-                    g = gdf_subcuencas.copy()
-                    g['geometry'] = g.geometry.simplify(0.001)
-                    folium.GeoJson(
-                        g, name="Subcuencas",
-                        style_function=lambda x: {'color':'blue', 'weight':2, 'fillOpacity':0},
-                        tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None
-                    ).add_to(m)
-                    
+                    g = gdf_subcuencas.copy(); g['geometry'] = g.geometry.simplify(0.001)
+                    folium.GeoJson(g, name="Subcuencas", style_function=lambda x:{'color':'blue','weight':2,'fillOpacity':0}, tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None).add_to(m)
                 if show_predios and gdf_predios is not None:
-                    g = gdf_predios.copy()
-                    g['geometry'] = g.geometry.simplify(0.0001)
-                    folium.GeoJson(
-                        g, name="Predios",
-                        style_function=lambda x: {'color':'orange', 'weight':2, 'fillOpacity':0.2},
-                        tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None
-                    ).add_to(m)
-            except Exception as e:
-                st.error(f"Error cargando capas: {e}")
+                    g = gdf_predios.copy(); g['geometry'] = g.geometry.simplify(0.0001)
+                    folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}, tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None).add_to(m)
+            except: pass
 
-            # Marcadores de Estaciones (Clustering)
+            # Estaciones
             if gdf_filtered is not None:
                 marker_cluster = MarkerCluster().add_to(m)
-                
                 for _, r in gdf_filtered.dropna(subset=['latitude']).iterrows():
-                    # Cálculo de estadísticas por estación
+                    # Cálculo simplificado para el marcador
                     df_st = df_long[df_long[Config.STATION_NAME_COL] == r[Config.STATION_NAME_COL]]
                     df_valid = df_st[df_st[Config.PRECIPITATION_COL] > 0]
-                    n_months_real = len(df_valid)
                     
-                    if n_months_real > 0:
-                        avg_ppt_mensual = df_valid[Config.PRECIPITATION_COL].mean()
-                        
-                        # Lógica de años válidos
-                        counts = df_valid.groupby(Config.YEAR_COL).size()
-                        years_ok = counts[counts >= 6].index
-                        
-                        if len(years_ok) > 0:
-                            df_years = df_valid[df_valid[Config.YEAR_COL].isin(years_ok)]
-                            avg_ppt_anual = df_years.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].sum().mean()
-                            n_years_valid = len(years_ok)
-                        else:
-                            # Estimación si data fragmentada
-                            avg_ppt_anual = avg_ppt_mensual * 12
-                            n_years_valid = 0 
+                    if not df_valid.empty:
+                        avg_ppt = df_valid[Config.PRECIPITATION_COL].mean() * 12 # Estimado anual
                     else:
-                        avg_ppt_mensual = 0
-                        avg_ppt_anual = 0
-                        n_years_valid = 0
+                        avg_ppt = 0
 
-                    # Popup HTML
-                    html = f"""
-                    <div style='font-family:sans-serif; font-size:12px; min-width:200px'>
-                        <h5 style='margin:0; color:#2c3e50'>{r[Config.STATION_NAME_COL]}</h5>
-                        <hr style='margin:5px 0'>
-                        <b>Años Completos:</b> {n_years_valid}<br>
-                        <b>Meses con Datos:</b> {n_months_real}<br>
-                        <b>Promedio Anual (Est):</b> {avg_ppt_anual:,.0f} mm<br>
-                        <b>Promedio Mensual:</b> {avg_ppt_mensual:.1f} mm
-                    </div>
-                    """
-                    
+                    html = f"<div style='font-size:12px'><b>{r[Config.STATION_NAME_COL]}</b><br>Ppt Est: {avg_ppt:.0f} mm</div>"
                     folium.Marker(
                         [r['latitude'], r['longitude']], 
-                        tooltip=f"{r[Config.STATION_NAME_COL]} ({avg_ppt_anual:.0f} mm)", 
-                        popup=folium.Popup(html, max_width=300),
+                        tooltip=f"{r[Config.STATION_NAME_COL]}", 
+                        popup=folium.Popup(html, max_width=200),
                         icon=folium.Icon(color="green", icon="cloud")
                     ).add_to(marker_cluster)
 
-            # Marcador de Selección Actual (Punto Rojo)
+            # Punto Seleccionado
             if st.session_state.selected_point:
-                folium.Marker(
-                    [st.session_state.selected_point['lat'], st.session_state.selected_point['lng']],
-                    popup="Punto Seleccionado",
-                    icon=folium.Icon(color="red", icon="info-sign")
-                ).add_to(m)
+                folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Selección", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
 
-            # Marcador de Ubicación de Usuario (Si existe)
+            # --- AQUÍ USAMOS LA UBICACIÓN PASADA COMO ARGUMENTO ---
             if user_loc:
                 folium.Marker(
                     [user_loc[0], user_loc[1]], 
                     icon=folium.Icon(color='black', icon='star'), 
-                    tooltip="Tu Ubicación (Manual)"
+                    tooltip="Tu Ubicación"
                 ).add_to(m)
-
-            # Controles de Mapa
-            LocateControl(auto_start=False, position="topleft").add_to(m)
+            
+            LocateControl(auto_start=False).add_to(m)
             folium.LayerControl().add_to(m)
             
-            # RENDERIZADO ÚNICO DEL MAPA
+            # Renderizar Mapa UNA SOLA VEZ
             map_data = st_folium(m, width="100%", height=600)
 
-            # Lógica de Click en Mapa
             if map_data and map_data.get("last_clicked"):
                 clicked = map_data["last_clicked"]
-                # Solo recargar si el punto es diferente al actual
                 if st.session_state.selected_point is None or abs(clicked['lat'] - st.session_state.selected_point['lat']) > 0.0001:
                     st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
                     st.rerun()
@@ -3299,6 +3286,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
