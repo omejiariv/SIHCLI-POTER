@@ -3277,12 +3277,23 @@ def display_climate_scenarios_tab(**kwargs):
         st.subheader("Simulador de Cambio Climático (Escenarios CMIP6)")
         st.info("Proyección de anomalías climatológicas para la región Andina (Horizonte 2040-2060).")
 
+        # 1. Caja Informativa
         with st.expander("📚 Conceptos Clave: Escenarios SSP y Modelos CMIP6", expanded=False):
             st.markdown("""
-            **¿Qué es CMIP6?** El Proyecto de Intercomparación de Modelos Acoplados Fase 6 (CMIP6)...
-            (Texto educativo mantenido)...
+            **¿Qué es CMIP6?**
+            El Proyecto de Intercomparación de Modelos Acoplados Fase 6 (CMIP6) es la base científica del último informe del IPCC (AR6). Utiliza nuevos escenarios llamados **Trayectorias Socioeconómicas Compartidas (SSPs)**.
+
+            **Definición de Escenarios (SSPs):**
+            * **SSP1-2.6 (Sostenibilidad):** Escenario optimista ("El camino verde"). Supone un cambio rápido hacia energías renovables y bajas emisiones. Meta: Calentamiento ~1.8°C para 2100.
+            * **SSP2-4.5 (Camino Medio):** Escenario intermedio ("Business as usual"). Las tendencias actuales continúan, con progreso lento en sostenibilidad. Meta: ~2.7°C.
+            * **SSP3-7.0 (Rivalidad Regional):** Escenario pesimista. Resurgimiento del nacionalismo, conflictos y bajo desarrollo tecnológico. Altas emisiones.
+            * **SSP5-8.5 (Desarrollo Fósil):** Peor escenario ("Autopista de combustibles fósiles"). Crecimiento económico rápido basado en carbón y petróleo. Meta: ~4.4°C (Catastrófico).
+
+            **Interpretación:**
+            Las anomalías muestran cuánto cambiaría la temperatura o la lluvia respecto a un periodo base (1981-2010).
             """)
 
+        # Datos Base (Valores típicos CMIP6 para Andes Colombianos)        
         scenarios_db = {
             'SSP1-2.6 (Sostenibilidad)': { 'temp': 1.6, 'ppt_anual': 5.2, 'desc': 'Escenario optimista...' },
             'SSP2-4.5 (Camino Medio)': { 'temp': 2.1, 'ppt_anual': -2.5, 'desc': 'Escenario intermedio...' },
@@ -3797,6 +3808,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
