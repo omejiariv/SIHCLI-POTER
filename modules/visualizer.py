@@ -190,47 +190,61 @@ def get_img_as_base64(url):
         print(f"Error Base64: {e}")
     return None
     
-# 0. DISTRIBUCIÓN ESPACIAL (TABLERO PRINCIPAL)
+# 0. CAJA DE RESUMEN GLOBAL (MEJORADA Y UNIFICADA)
 # ==============================================================================
-def display_current_filters(stations_sel, regions_sel, munis_sel, year_range, interpolacion="No detectado"):
+def display_current_filters(stations_sel, regions_sel, munis_sel, year_range, interpolacion="No detectado", df_data=None):
     """
     Muestra un resumen desplegable de los filtros activos en la aplicación.
+    Fusiona la lógica de presentación general con las estadísticas detalladas.
     """
-    # Lógica para formatear la lista de municipios
-    total_munis = len(munis_sel)
-    if total_munis > 3:
-        munis_str = ", ".join(munis_sel[:3]) + f", ... (y {total_munis - 3} más)"
-    elif total_munis == 0:
+    # 1. Formateo de Listas (Municipios)
+    if not munis_sel:
         munis_str = "Todos / Ninguno específico"
     else:
-        munis_str = ", ".join(munis_sel)
+        total_munis = len(munis_sel)
+        if total_munis > 3:
+            munis_str = ", ".join(list(munis_sel)[:3]) + f", ... (y {total_munis - 3} más)"
+        else:
+            munis_str = ", ".join(munis_sel)
 
-    # Lógica para regiones
+    # 2. Formateo de Regiones
     if not regions_sel:
         region_str = "Todas las regiones"
     else:
         region_str = ", ".join(regions_sel)
         
-    # Interpolación (buscamos en session_state si no se pasa explícito)
+    # 3. Lógica de Interpolación (Auto-detección si no se pasa explícito)
     if interpolacion == "No detectado":
         interpolacion = "Si" if st.session_state.get('apply_interpolation') else "No"
 
-    # Caja de Resumen Desplegable
-    with st.expander("📝 Resumen de Filtros y Configuración", expanded=False):
+    # 4. Cálculo de Estadísticas (Si hay DataFrame)
+    stats_str = ""
+    total_records_metric = 0
+    if df_data is not None and not df_data.empty:
+        total_records_metric = len(df_data)
+        valid_rows = len(df_data[df_data[Config.PRECIPITATION_COL] > 0])
+        pct_registros = (valid_rows / total_records_metric * 100) if total_records_metric > 0 else 0
+        stats_str = f"* **💾 Calidad de Datos:** {pct_registros:.1f}% registros válidos (>0 mm)"
+    else:
+        stats_str = "* **💾 Calidad de Datos:** No disponible"
+
+    # 5. Renderizado de la Caja Unificada
+    with st.expander("📝 Resumen de Filtros, Configuración y Estadísticas", expanded=False):
         st.info(f"""
-        **Configuración Actual:**
+        **Configuración Actual del Tablero:**
         * **🌍 Región:** {region_str}
         * **🏙️ Municipios:** {munis_str}
-        * **📡 Estaciones:** {len(stations_sel)} seleccionadas
         * **📅 Rango de Años:** {year_range[0]} - {year_range[1]}
-        * **📈 Interpolación de Datos:** {interpolacion}
+        * **📈 Interpolación de Vacíos:** {interpolacion}
+        {stats_str}
         """)
         
-        # Métricas simples (Estaciones y Registros totales estimados)
-        c1, c2 = st.columns(2)
-        c1.metric("Estaciones Filtradas", len(stations_sel))
-        # Nota: 'Total Registros' es decorativo aquí, para el valor real se necesitaría el DF
-        c2.metric("Años de Análisis", f"{year_range[1] - year_range[0] + 1} años")
+        # Métricas visuales integradas
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Estaciones Seleccionadas", len(stations_sel))
+        c2.metric("Años de Análisis", f"{year_range[1] - year_range[0] + 1}")
+        if total_records_metric > 0:
+            c3.metric("Total Registros Procesados", f"{total_records_metric:,}")
              
 def analyze_point_data(lat, lon, df_long, gdf_stations, gdf_municipios, gdf_subcuencas):
     """
@@ -819,56 +833,12 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
 # ==============================================================================
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, user_loc=None, interpolacion="No", **kwargs):
 
-    # --- 0. RECUPERACIÓN DE DATOS EXTRA ---
+    # --- 0. Recuperación de datos extra ---
     df_anual = kwargs.get('df_anual_melted', None)
     user_loc = kwargs.get('user_loc', user_loc)
     
-    # --- 1. LÓGICA DE RESUMEN DE FILTROS (COMPLETA) ---
-    region = kwargs.get('region', 'Región Central') 
-    interpolacion = kwargs.get('interpolacion', 'No detectado')
+    # Nota: Ya NO mostramos la caja de resumen aquí porque se muestra globalmente arriba.
     
-    # Lógica de Municipios
-    if 'municipio' in gdf_filtered.columns:
-        lista_munis = gdf_filtered['municipio'].unique()
-        total_munis_sel = len(lista_munis)
-        if total_munis_sel > 3:
-            munis_str = ", ".join(lista_munis[:3]) + f", ... (y {total_munis_sel - 3} más)"
-        elif total_munis_sel == 0:
-            munis_str = "Todos / Ninguno seleccionado"
-        else:
-            munis_str = ", ".join(lista_munis)
-    else:
-        munis_str = "No disponible"
-
-    # Lógica de Años y Registros
-    if df_long is not None and not df_long.empty:
-        min_year = df_long[Config.YEAR_COL].min()
-        max_year = df_long[Config.YEAR_COL].max()
-        years_str = f"{min_year} - {max_year}"
-        total_rows = len(df_long)
-        valid_rows = len(df_long[df_long[Config.PRECIPITATION_COL] > 0])
-        pct_registros = (valid_rows / total_rows * 100) if total_rows > 0 else 0
-    else:
-        years_str = "N/A"
-        pct_registros = 0
-
-    # --- CAJA DE RESUMEN DESPLEGABLE UNIFICADA (LA QUE QUERÍAS CONSERVAR) ---
-    with st.expander("📝 Resumen de Filtros y Configuración", expanded=False):
-        st.info(f"""
-        **Configuración Actual:**
-        * **🌍 Región:** {region}
-        * **🏙️ Municipios:** {munis_str}
-        * **📡 Estaciones:** {len(gdf_filtered)} seleccionadas
-        * **📅 Años:** {years_str}
-        * **💾 Registros:** {pct_registros:.1f}% válidos
-        * **📈 Interpolación:** {interpolacion}
-        """)
-        
-        # Métricas simples integradas en el expander
-        c1, c2 = st.columns(2)
-        c1.metric("Estaciones Filtradas", len(gdf_filtered))
-        c2.metric("Total Registros", f"{len(df_long):,}")
-
     st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
 
     # CSS para métricas compactas
@@ -3849,6 +3819,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
