@@ -1851,39 +1851,47 @@ def display_climate_forecast_tab(**kwargs):
                 df_probs = process_iri_probabilities(json_probs)
                 
                 if df_probs is not None and not df_probs.empty:
-                    # --- CORRECCIÓN ROBUSTA DE COLUMNAS ---
-                    # 1. Normalizar nombres de columnas a minúsculas para búsqueda flexible
-                    df_probs.columns = [c.strip() for c in df_probs.columns]
+                    # --- CORRECCIÓN ROBUSTA DE COLUMNAS (VERSIÓN 2.0) ---
+                    # Limpiamos nombres de columnas (espacios extra, etc.)
+                    df_probs.columns = [str(c).strip() for c in df_probs.columns]
                     
-                    # 2. Identificar columna de tiempo (Trimestre/Season)
-                    time_col = None
-                    if 'Trimestre' in df_probs.columns:
-                        time_col = 'Trimestre'
-                    elif 'season' in df_probs.columns:
-                        time_col = 'season'
-                    elif 'Season' in df_probs.columns:
-                        time_col = 'Season'
-                    else:
-                        # Si no encuentra por nombre, asume que la primera columna es el tiempo
-                        # (Estructura típica: Season, La Niña, Neutral, El Niño)
-                        time_col = df_probs.columns[0]
-
-                    # 3. Renombrar para estandarizar
-                    if time_col and time_col != 'Trimestre':
-                        df_probs.rename(columns={time_col: 'Trimestre'}, inplace=True)
-
-                    # 4. Verificar existencia final antes de melt
-                    if 'Trimestre' in df_probs.columns:
+                    # Normalización agresiva: Buscamos 'Trimestre', 'Season', 'season', o usamos la 1ra columna
+                    col_tiempo = None
+                    posibles_nombres = ['Trimestre', 'Season', 'season', 'SEASON']
+                    
+                    # 1. Buscar por nombre exacto
+                    for nombre in posibles_nombres:
+                        if nombre in df_probs.columns:
+                            col_tiempo = nombre
+                            break
+                    
+                    # 2. Si no, usar la primera columna (asumiendo estructura estándar del IRI)
+                    if not col_tiempo and len(df_probs.columns) > 0:
+                        col_tiempo = df_probs.columns[0]
+                    
+                    # 3. Renombrar si encontramos algo
+                    if col_tiempo:
+                        if col_tiempo != 'Trimestre':
+                            df_probs.rename(columns={col_tiempo: 'Trimestre'}, inplace=True)
+                        
+                        # MELT SEGURO
                         try:
-                            # Melt seguro
-                            df_melt = df_probs.melt(id_vars="Trimestre", var_name="Evento", value_name="Probabilidad")
+                            # Aseguramos que solo hacemos melt de columnas numéricas relevantes
+                            # El Niño, La Niña, Neutral pueden venir con mayúsculas/minúsculas
+                            cols_val = [c for c in df_probs.columns if c != 'Trimestre']
                             
+                            df_melt = df_probs.melt(id_vars="Trimestre", value_vars=cols_val, var_name="Evento", value_name="Probabilidad")
+                            
+                            # Normalizamos nombres de eventos para el mapa de colores
+                            df_melt['Evento'] = df_melt['Evento'].astype(str).str.lower().str.replace(" ", "")
+                            # Mapeo flexible
                             color_map = {
-                                "El Niño": "#FF4B4B", "elnino": "#FF4B4B", 
-                                "La Niña": "#1C83E1", "lanina": "#1C83E1", 
-                                "Neutral": "#808495", "neutral": "#808495"
+                                "elnino": "#FF4B4B", "el niño": "#FF4B4B",
+                                "lanina": "#1C83E1", "la niña": "#1C83E1",
+                                "neutral": "#808495"
                             }
                             
+                            # Asignar colores por defecto si no coinciden
                             fig_probs = px.bar(
                                 df_melt, 
                                 x="Trimestre", 
@@ -1898,10 +1906,10 @@ def display_climate_forecast_tab(**kwargs):
                             st.plotly_chart(fig_probs, use_container_width=True, key="chart_iri_probs")
                             
                         except Exception as e:
-                            st.error(f"Error al generar gráfico de barras: {e}")
-                            st.write("Datos crudos:", df_probs.head())
+                            st.error(f"Error generando gráfico de barras: {e}")
+                            st.dataframe(df_probs.head()) # Mostrar datos para debug si falla
                     else:
-                        st.error(f"No se pudo identificar la columna de tiempo. Columnas: {df_probs.columns.tolist()}")
+                        st.error("No se pudo identificar la columna de tiempo en los datos de probabilidad.")
                 else:
                     st.warning("No hay datos de probabilidad para procesar.")
         else:
@@ -3566,6 +3574,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
