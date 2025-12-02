@@ -191,88 +191,19 @@ def get_img_as_base64(url):
 # 0. DISTRIBUCIÓN ESPACIAL (TABLERO PRINCIPAL)
 # ==============================================================================
 def display_current_filters(gdf_filtered, df_monthly_filtered, *args, **kwargs):
-    """Muestra el mapa inicial de estaciones seleccionadas."""
-    st.subheader("📍 Distribución Espacial y Análisis Puntual")
+    """Muestra solo las métricas de resumen, sin mapa (Eliminado a petición)."""
+    # Esta función reemplaza al mapa superior para limpiar la interfaz.
+    st.subheader("📊 Resumen de Selección")
     
-    col_map, col_stat = st.columns([3, 1])
+    c1, c2 = st.columns(2)
+    if gdf_filtered is not None:
+        try: c1.metric("Estaciones Filtradas", len(gdf_filtered))
+        except: pass
+    if df_monthly_filtered is not None:
+        try: c2.metric("Total Registros", len(df_monthly_filtered))
+        except: pass
     
-    # Obtener ubicación del usuario para centrar este mapa también
-    user_loc = _get_user_location_sidebar(key_suffix="MainMap")
-
-    with col_map:
-        # Validación robusta de datos
-        has_data = False
-        if gdf_filtered is not None:
-            try:
-                if not gdf_filtered.empty: has_data = True
-            except AttributeError:
-                if len(gdf_filtered) > 0: has_data = True
-
-        if has_data:
-            # Centro del mapa
-            if user_loc:
-                 center_lat, center_lon = user_loc
-                 zoom = 10
-            else:
-                 try:
-                     center_lat = gdf_filtered.geometry.y.mean()
-                     center_lon = gdf_filtered.geometry.x.mean()
-                 except:
-                     center_lat, center_lon = 6.2, -75.5
-                 zoom = 8
-            
-            m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles="CartoDB positron")
-            
-            # Cluster de marcadores
-            marker_cluster = MarkerCluster().add_to(m)
-            
-            # Iterar de forma segura
-            if isinstance(gdf_filtered, (pd.DataFrame, gpd.GeoDataFrame)):
-                iterator = gdf_filtered.iterrows()
-            else:
-                iterator = enumerate(gdf_filtered)
-            
-            for _, row in iterator:
-                if not isinstance(row, (pd.Series, dict)): continue
-                try:
-                    lat = row.geometry.y if hasattr(row, 'geometry') else row.get('latitude')
-                    lon = row.geometry.x if hasattr(row, 'geometry') else row.get('longitude')
-                    name = row[Config.STATION_NAME_COL]
-                    alt = row.get(Config.ALTITUDE_COL, '-')
-                except: continue
-
-                folium.Marker(
-                    location=[lat, lon],
-                    popup=f"<b>{name}</b><br>Alt: {alt} m",
-                    tooltip=name,
-                    icon=folium.Icon(color="blue", icon="info-sign")
-                ).add_to(marker_cluster)
-            
-            # --- CAPA USUARIO (Estrella manual si se ingresa en sidebar) ---
-            if user_loc:
-                folium.Marker(
-                    [user_loc[0], user_loc[1]], 
-                    icon=folium.Icon(color='black', icon='star'), 
-                    tooltip="Tu Ubicación (Manual)"
-                ).add_to(m)
-
-            # --- GEOLOCALIZADOR NATIVO (Botón GPS) ---
-            # Este es el botón que rastrea la ubicación real del dispositivo
-            LocateControl(auto_start=False, position="topleft").add_to(m)
-            
-            # Renderizado
-            st_folium(m, height=500, use_container_width=True)
-        else:
-            st.warning("No hay estaciones seleccionadas para mostrar en el mapa.")
-            
-    with col_stat:
-        st.markdown("#### Resumen")
-        if gdf_filtered is not None:
-            try: st.metric("Estaciones", len(gdf_filtered))
-            except: pass
-        if df_monthly_filtered is not None:
-            try: st.metric("Registros", len(df_monthly_filtered))
-            except: pass
+    st.markdown("---") # Separador visual
                 
 def analyze_point_data(lat, lon, df_long, gdf_stations, gdf_municipios, gdf_subcuencas):
     """
@@ -880,6 +811,9 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
 
     if 'selected_point' not in st.session_state: st.session_state.selected_point = None
 
+    # --- GEOLOCALIZACIÓN ---
+    user_loc = _get_user_location_sidebar(key_suffix="SpatialMap")    
+
     tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
     
     # --- PESTAÑA 1: MAPA ---
@@ -1077,6 +1011,27 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
 
             else:
                 st.warning("No se pudieron obtener datos meteorológicos en tiempo real.")
+
+            # --- GEOLOCALIZACIÓN DEL USUARIO (TU SOLICITUD) ---
+            if user_loc:
+                folium.Marker(
+                    [user_loc[0], user_loc[1]], 
+                    icon=folium.Icon(color='black', icon='star'), 
+                    tooltip="Tu Ubicación (Manual)"
+                ).add_to(m)
+
+            # Botón GPS Nativo
+            LocateControl(auto_start=False, position="topleft").add_to(m)
+            # ------------------------------------------------
+
+            folium.LayerControl().add_to(m)
+            map_data = st_folium(m, width="100%", height=600)
+
+            if map_data and map_data.get("last_clicked"):
+                clicked = map_data["last_clicked"]
+                if st.session_state.selected_point is None or abs(clicked['lat'] - st.session_state.selected_point['lat']) > 0.0001:
+                    st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
+                    st.rerun()    
                 
     # --- PESTAÑA 2: DISPONIBILIDAD ---
     with tab_avail:
@@ -3361,6 +3316,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
