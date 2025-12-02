@@ -369,8 +369,7 @@ def get_weather_forecast_detailed(lat, lon):
         
 def create_enso_chart(enso_data):
     """
-    Genera el gráfico avanzado de ENSO con franjas de fondo para las fases.
-    MANTENIDO INTACTO para no perder la visualización histórica clave.
+    Genera el gráfico avanzado de ENSO con franjas de fondo para las fases (El Niño/La Niña).
     """
     if enso_data is None or enso_data.empty or Config.ENSO_ONI_COL not in enso_data.columns:
         return go.Figure().update_layout(title="Datos ENSO no disponibles", height=300)
@@ -384,7 +383,7 @@ def create_enso_chart(enso_data):
         data[Config.ENSO_ONI_COL] <= -0.5
     ]
     colors = ['rgba(255, 0, 0, 0.2)', 'rgba(0, 0, 255, 0.2)'] 
-    data['color'] = np.select(conditions, colors, default='rgba(200, 200, 200, 0.2)') # Gris transparente
+    data['color'] = np.select(conditions, colors, default='rgba(200, 200, 200, 0.2)') 
 
     y_min = data[Config.ENSO_ONI_COL].min() - 0.5
     y_max = data[Config.ENSO_ONI_COL].max() + 0.5
@@ -432,7 +431,6 @@ def create_enso_chart(enso_data):
         barmode='overlay',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    
     return fig
     
 # 1. FUNCIONES AUXILIARES DE PARSEO Y DATOS
@@ -1780,72 +1778,116 @@ def display_advanced_maps_tab(df_long, gdf_stations, **kwargs):
 def display_climate_forecast_tab(**kwargs):
     st.subheader("🔮 Pronóstico Climático & Fenómenos Globales")
     
-    # Recuperamos los datos pasados desde app.py
+    # Recuperamos los datos históricos pasados desde app.py
     df_enso = kwargs.get('df_enso')
     
-    # Definimos las 3 pestañas originales
-    tab_hist, tab_iri, tab_gen = st.tabs(["📜 Historia Índices", "🌎 Pronóstico Oficial (IRI)", "⚙️ Generador Prophet"])
+    # Definimos las 3 pestañas (La estructura que ya tenías, pero mejorada)
+    tab_hist, tab_iri, tab_gen = st.tabs(["📜 Historia Índices (ONI/SOI/IOD)", "🌎 Pronóstico Oficial (IRI)", "⚙️ Generador Prophet"])
     
-    # --- TAB 1: HISTORIA (MANTENIDO ORIGINAL) ---
+    # ==========================================
+    # PESTAÑA 1: HISTORIA (MEJORADA CON TU GRÁFICO + SOI/IOD)
+    # ==========================================
     with tab_hist:
-        if df_enso is not None:
+        st.markdown("#### 📉 Índices Climáticos Históricos")
+        if df_enso is not None and not df_enso.empty:
+            # Selector de Índice (AQUÍ ESTÁ LA MAGIA PARA VER SOI e IOD)
             c1, _ = st.columns([1,3])
-            idx = c1.selectbox("Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
-            if idx in df_enso.columns:
-                d = df_enso.dropna(subset=[idx, Config.DATE_COL]).sort_values(Config.DATE_COL)
-                fig = px.line(d, x=Config.DATE_COL, y=idx, title=f"Evolución: {idx.upper()}")
+            idx_sel = c1.selectbox("Seleccione Índice:", [Config.ENSO_ONI_COL, Config.SOI_COL, Config.IOD_COL])
+            
+            # Limpieza de datos
+            if idx_sel in df_enso.columns:
+                d = df_enso.dropna(subset=[idx_sel, Config.DATE_COL]).sort_values(Config.DATE_COL)
                 
-                # Líneas de referencia para ONI (Niño/Niña)
-                if idx == Config.ENSO_ONI_COL:
-                    fig.add_hline(y=0.5, line_dash="dot", line_color="red", annotation_text="El Niño")
-                    fig.add_hline(y=-0.5, line_dash="dot", line_color="blue", annotation_text="La Niña")
-                
-                st.plotly_chart(fig, use_container_width=True)
+                if idx_sel == Config.ENSO_ONI_COL:
+                    # Si es ONI -> Usamos tu gráfico PRECIOSO con colores de fondo
+                    st.plotly_chart(create_enso_chart(d), use_container_width=True)
+                else:
+                    # Si es SOI o IOD -> Usamos gráfico de líneas estándar (no tienen las mismas fases de color)
+                    fig_simple = px.line(d, x=Config.DATE_COL, y=idx_sel, title=f"Evolución Histórica: {idx_sel}")
+                    
+                    # Agregar línea cero de referencia
+                    fig_simple.add_hline(y=0, line_width=1, line_color="black", opacity=0.5)
+                    st.plotly_chart(fig_simple, use_container_width=True)
+            else:
+                st.warning(f"La columna '{idx_sel}' no se encuentra en la base de datos.")
         else:
             st.warning("No hay datos históricos cargados (df_enso).")
 
-    # --- TAB 2: PRONÓSTICO IRI (ACTUALIZADO) ---
+    # ==========================================
+    # PESTAÑA 2: PRONÓSTICO IRI (NUEVO - DATOS LOCALES)
+    # ==========================================
     with tab_iri:
-        # Aquí es donde ocurre la magia nueva. 
-        # En lugar de usar el código viejo de scraping, llamamos a la función 
-        # robusta que definimos anteriormente en este mismo archivo.
-        display_iri_forecast_tab()
+        st.info("ℹ️ Datos oficiales del IRI (Columbia University). Actualización Mensual (Archivos Locales).")
+        
+        # Cargar datos desde archivos locales (Robustez total)
+        json_plumas = fetch_iri_data("enso_plumes.json")
+        json_probs = fetch_iri_data("enso_iri_prob.json") # O 'enso_cpc_prob.json'
 
-    # --- TAB 3: PROPHET (MANTENIDO ORIGINAL) ---
+        if json_plumas and json_probs:
+            col1, col2 = st.columns(2)
+            
+            # A. Plumas (Spaghetti)
+            with col1:
+                st.markdown("#### 🍝 Modelos de Predicción")
+                data_plume = process_iri_plume(json_plumas)
+                if data_plume:
+                    fig_plume = go.Figure()
+                    for model in data_plume['models']:
+                        is_dyn = model['type'] == 'Dynamical'
+                        color = "rgba(100, 149, 237, 0.6)" if is_dyn else "rgba(255, 165, 0, 0.6)"
+                        fig_plume.add_trace(go.Scatter(
+                            x=data_plume['seasons'], y=model['values'], mode='lines',
+                            name=model['name'], line=dict(color=color, width=1.5), opacity=0.7, showlegend=False
+                        ))
+                    # Umbrales
+                    fig_plume.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="El Niño")
+                    fig_plume.add_hline(y=-0.5, line_dash="dash", line_color="blue", annotation_text="La Niña")
+                    fig_plume.update_layout(title="Anomalía SST Niño 3.4", height=450)
+                    st.plotly_chart(fig_plume, use_container_width=True)
+            
+            # B. Probabilidades (Barras)
+            with col2:
+                st.markdown("#### 📊 Probabilidad Multimodelo")
+                df_probs = process_iri_probabilities(json_probs)
+                if df_probs is not None:
+                    df_melt = df_probs.melt(id_vars="Trimestre", var_name="Evento", value_name="Probabilidad")
+                    color_map = {"El Niño": "#FF4B4B", "La Niña": "#1C83E1", "Neutral": "#808495"}
+                    fig_probs = px.bar(df_melt, x="Trimestre", y="Probabilidad", color="Evento", color_discrete_map=color_map, text="Probabilidad", barmode='group')
+                    fig_probs.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
+                    fig_probs.update_layout(height=450, yaxis=dict(range=[0, 105]))
+                    st.plotly_chart(fig_probs, use_container_width=True)
+        else:
+            st.error("⚠️ No se encontraron los archivos JSON en `data/iri/`. Por favor verifica la carga.")
+
+    # ==========================================
+    # PESTAÑA 3: PROPHET (MANTENIDO ORIGINAL)
+    # ==========================================
     with tab_gen:
-        st.markdown("#### Generador Prophet")
+        st.markdown("#### 🤖 Generador Prophet (Proyección Estadística Local)")
         indices = {}
         if df_enso is not None:
+            # Mapeo de columnas para el selector
             cols_map = {Config.ENSO_ONI_COL: 'ONI', Config.SOI_COL: 'SOI', Config.IOD_COL: 'IOD'}
             for col, name in cols_map.items():
                 if col in df_enso.columns:
-                    # Preparamos el dataframe para Prophet (ds, y)
                     indices[name] = df_enso[[Config.DATE_COL, col]].rename(columns={Config.DATE_COL:'ds', col:'y'}).dropna()
         
         if indices:
-            sel_idx = st.selectbox("Índice a proyectar:", list(indices.keys()))
-            hor = st.slider("Meses a futuro:", 6, 60, 24)
+            c_sel, c_hor = st.columns(2)
+            sel_idx = c_sel.selectbox("Índice a proyectar:", list(indices.keys()))
+            hor = c_hor.slider("Meses a futuro:", 6, 60, 24)
             
-            if st.button("Generar Proyección"):
+            if st.button("Generar Proyección Prophet"):
                 try:
-                    with st.spinner(f"Entrenando modelo Prophet para {sel_idx}..."):
+                    with st.spinner(f"Entrenando modelo para {sel_idx}..."):
                         m = Prophet()
                         m.fit(indices[sel_idx])
                         fut = m.make_future_dataframe(periods=hor, freq='MS')
                         fc = m.predict(fut)
                         
-                        # Graficar
                         fig = px.line(fc, x='ds', y='yhat', title=f"Proyección {sel_idx} (Prophet)")
-                        # Intervalo de confianza (opcional, visualmente ayuda)
-                        fig.add_trace(go.Scatter(
-                            x=fc['ds'], y=fc['yhat_upper'], mode='lines', 
-                            line=dict(width=0), showlegend=False, hoverinfo='skip'
-                        ))
-                        fig.add_trace(go.Scatter(
-                            x=fc['ds'], y=fc['yhat_lower'], mode='lines', 
-                            line=dict(width=0), fill='tonexty', fillcolor='rgba(68, 68, 68, 0.1)', 
-                            showlegend=False, hoverinfo='skip'
-                        ))
+                        fig.add_trace(go.Scatter(x=fc['ds'], y=fc['yhat_upper'], mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip'))
+                        fig.add_trace(go.Scatter(x=fc['ds'], y=fc['yhat_lower'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(68, 68, 68, 0.1)', showlegend=False, hoverinfo='skip'))
                         
                         st.plotly_chart(fig, use_container_width=True)
                 except Exception as e:
@@ -3476,6 +3518,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
