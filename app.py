@@ -1,11 +1,25 @@
 import streamlit as st
 import pandas as pd
 import warnings
+
+# Configuración de página DEBE SER LA PRIMERA LÍNEA DE STREAMLIT
+st.set_page_config(page_title="SIHCLI-POTER", page_icon="🌧️", layout="wide")
+warnings.filterwarnings('ignore')
+
+# Importaciones de módulos
 from modules.config import Config
 from modules.data_processor import load_and_process_all_data, complete_series
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
-import modules.db_manager as db_manager
+
+# Importación segura de db_manager
+try:
+    import modules.db_manager as db_manager
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
+    print("Advertencia: db_manager no encontrado.")
+
 from modules.visualizer import (
     display_current_filters,
     display_welcome_tab,
@@ -27,53 +41,45 @@ from modules.visualizer import (
     display_climate_forecast_tab
 )
 
-# Configuración de página
-st.set_page_config(page_title="SIHCLI-POTER", page_icon="🌧️", layout="wide")
-warnings.filterwarnings('ignore')
-
 def main():
-    # --- INICIALIZACIÓN DE BASES DE DATOS Y ESTADO ---
-    try:
-        db_manager.init_db()
-    except Exception as e:
-        print(f"Advertencia DB: {e}")
+    # --- 1. INICIALIZACIÓN ---
+    if DB_AVAILABLE:
+        try:
+            db_manager.init_db()
+        except Exception as e:
+            print(f"Error iniciando DB (No crítico): {e}")
 
-    # Inicialización de estado para Zonas de Vida
-    if 'lz_raster_result' not in st.session_state:
-        st.session_state.lz_raster_result = None
-    if 'lz_profile' not in st.session_state:
-        st.session_state.lz_profile = None
-    if 'lz_names' not in st.session_state:
-        st.session_state.lz_names = None
-    if 'lz_colors' not in st.session_state:
-        st.session_state.lz_colors = None
+    # Inicialización de estado (Zonas de Vida)
+    for key in ['lz_raster_result', 'lz_profile', 'lz_names', 'lz_colors']:
+        if key not in st.session_state:
+            st.session_state[key] = None
 
-    # 1. Cargar Datos
-    with st.spinner("Cargando datos del sistema..."):
-        gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
+    # --- 2. CARGA DE DATOS ---
+    # Usamos st.cache_data indirectamente vía la función load_and_process_all_data
+    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
     
     if gdf_stations is None or df_long is None:
         st.error("⚠️ Error Fatal: No se pudieron cargar los datos. Verifica la conexión a BD.")
         st.stop()
 
-    # 2. Sidebar
+    # --- 3. SIDEBAR (FILTROS) ---
     (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_filtered, analysis_mode, 
      sel_regions, sel_munis, selected_months, year_range) = create_sidebar(gdf_stations, df_long)
 
-    # Lógica de interpolación
+    # Procesamiento de Interpolación
     if st.session_state.get('apply_interpolation', False):
         with st.spinner("Procesando interpolación..."):
             df_monthly_filtered = complete_series(df_monthly_filtered)
             df_anual_melted = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
 
-    # Calcular fechas
+    # Fechas
     try:
         start_date = pd.to_datetime(f"{year_range[0]}-01-01")
         end_date = pd.to_datetime(f"{year_range[1]}-12-31")
     except:
         start_date, end_date = None, None
 
-    # 3. Datos Completos
+    # Datos Completos para Pronósticos
     mask_base = (
         (df_long[Config.YEAR_COL] >= year_range[0]) & 
         (df_long[Config.YEAR_COL] <= year_range[1]) &
@@ -81,7 +87,7 @@ def main():
     )
     df_complete_filtered = df_long.loc[mask_base].copy()
 
-    # 4. Argumentos Unificados
+    # Argumentos Unificados
     display_args = {
         "df_long": df_monthly_filtered,
         "df_complete": df_complete_filtered,
@@ -103,35 +109,20 @@ def main():
         "end_date": end_date
     }
 
-    # 5. Pestañas Principales
+    # --- 4. RENDERIZADO PRINCIPAL ---
+    
+    # Pestañas
     tab_titles = [
-        "🏠 Inicio", 
-        "🚨 Monitoreo (Tiempo Real)", 
-        "🗺️ Distribución", 
-        "📈 Gráficos", 
-        "📊 Estadísticas",
-        "🔮 Pronóstico Climático", 
-        "📉 Tendencias",
-        "⚠️ Anomalías", 
-        "🔗 Correlación", 
-        "🌊 Extremos",
-        "🌍 Mapas Avanzados",
-        "🧪 Corrección de Sesgo",
-        "🌿 Cobertura", 
-        "🌱 Zonas Vida", 
-        "🌡️ Clima Futuro", 
-        "📄 Reporte"
+        "🏠 Inicio", "🚨 Monitoreo (Tiempo Real)", "🗺️ Distribución", "📈 Gráficos", 
+        "📊 Estadísticas", "🔮 Pronóstico Climático", "📉 Tendencias", "⚠️ Anomalías", 
+        "🔗 Correlación", "🌊 Extremos", "🌍 Mapas Avanzados", "🧪 Corrección de Sesgo",
+        "🌿 Cobertura", "🌱 Zonas Vida", "🌡️ Clima Futuro", "📄 Reporte"
     ]
     
-    # CREAMOS LAS PESTAÑAS PRIMERO (Esto es lo que "dibuja" el panel principal)
     tabs = st.tabs(tab_titles)
 
-    # --- CAJA DE INFORMACIÓN GLOBAL ---
-    # La mostramos AHORA, pero usamos un contenedor vacío al principio si queremos control total,
-    # o simplemente dejamos que Streamlit la pinte aquí.
-    # Para que aparezca "dentro" de las pestañas (excepto inicio), la llamamos en cada una.
-    
-    def show_filters_box():
+    # --- FUNCIÓN HELPER PARA MOSTRAR CAJA DE FILTROS ---
+    def show_summary():
         display_current_filters(
             stations_sel=stations_for_analysis, 
             regions_sel=sel_regions, 
@@ -141,103 +132,91 @@ def main():
             df_data=df_monthly_filtered
         )
 
-    # 6. RENDERIZADO DE CONTENIDO POR PESTAÑA
-    
-    # TAB 0: INICIO
-    with tabs[0]: 
+    # --- PESTAÑA 0: INICIO (LIMPIA) ---
+    with tabs[0]:
         display_welcome_tab()
-    
-    # TAB 1: MONITOREO
-    with tabs[1]: 
-        show_filters_box()
+
+    # --- PESTAÑA 1: MONITOREO ---
+    with tabs[1]:
+        show_summary()
         display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
 
-    # TAB 2: DISTRIBUCIÓN
-    with tabs[2]: 
-        show_filters_box()
+    # --- PESTAÑA 2: DISTRIBUCIÓN ---
+    with tabs[2]:
+        show_summary()
         display_spatial_distribution_tab(
             user_loc=None, 
             interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", 
             **display_args
         )
 
-    # TAB 3: GRÁFICOS
+    # --- RESTO DE PESTAÑAS ---
     with tabs[3]: 
-        show_filters_box()
+        show_summary()
         display_graphs_tab(**display_args)
 
-    # TAB 4: ESTADÍSTICAS
     with tabs[4]: 
-        show_filters_box()
+        show_summary()
         display_stats_tab(**display_args)
         st.markdown("---")
         display_station_table_tab(**display_args)
 
-    # TAB 5: PRONÓSTICO CLIMÁTICO
     with tabs[5]: 
-        show_filters_box()
+        show_summary()
         display_climate_forecast_tab(**display_args)
 
-    # TAB 6: TENDENCIAS
     with tabs[6]: 
-        show_filters_box()
+        show_summary()
         display_trends_and_forecast_tab(**display_args)
 
-    # TAB 7: ANOMALÍAS
     with tabs[7]: 
-        show_filters_box()
+        show_summary()
         display_anomalies_tab(**display_args)
 
-    # TAB 8: CORRELACIÓN
     with tabs[8]: 
-        show_filters_box()
+        show_summary()
         display_correlation_tab(**display_args)
 
-    # TAB 9: EXTREMOS
     with tabs[9]: 
-        show_filters_box()
+        show_summary()
         display_drought_analysis_tab(**display_args)
 
-    # TAB 10: MAPAS AVANZADOS
     with tabs[10]: 
-        show_filters_box()
+        show_summary()
         display_advanced_maps_tab(**display_args)
 
-    # TAB 11: CORRECCIÓN DE SESGO
     with tabs[11]: 
-        show_filters_box()
-        from modules.visualizer import display_bias_correction_tab
-        display_bias_correction_tab(**display_args)
+        show_summary()
+        # Importación local segura
+        try:
+            from modules.visualizer import display_bias_correction_tab
+            display_bias_correction_tab(**display_args)
+        except Exception as e:
+            st.error(f"Error cargando módulo de Sesgo: {e}")
 
-    # TAB 12: COBERTURA
     with tabs[12]: 
-        show_filters_box()
+        show_summary()
         display_land_cover_analysis_tab(**display_args)
 
-    # TAB 13: ZONAS DE VIDA
     with tabs[13]: 
-        show_filters_box()
+        show_summary()
         display_life_zones_tab(**display_args)
 
-    # TAB 14: CLIMA FUTURO
     with tabs[14]: 
-        show_filters_box()
+        show_summary()
         display_climate_scenarios_tab(**display_args)
 
-    # TAB 15: REPORTE
     with tabs[15]: 
-        show_filters_box()
+        show_summary()
         st.header("Generar Reporte PDF")
         if st.button("Generar Reporte Ejecutivo", type="primary"):
             with st.spinner("Generando..."):
                 res = {"n_estaciones": len(stations_for_analysis), "rango": f"{year_range}"}
                 pdf = generate_pdf_report(df_monthly_filtered, gdf_filtered, res)
-                if pdf: 
-                    st.download_button("📥 Descargar PDF", pdf, "reporte.pdf", "application/pdf")
-                else:
-                    st.error("Error al generar reporte.")
+                if pdf: st.download_button("📥 Descargar PDF", pdf, "reporte.pdf", "application/pdf")
+                else: st.error("Error al generar reporte.")
 
-    # CSS Estético (Sin márgenes negativos que oculten cosas)
+    # Estilos CSS finales
     st.markdown("""
     <style>
         div[data-baseweb="tab-list"] { gap: 5px; }
