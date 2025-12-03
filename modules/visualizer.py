@@ -482,7 +482,7 @@ def display_welcome_tab():
     """, unsafe_allow_html=True)
 
     st.title(f"Bienvenido a {Config.APP_TITLE}")
-    st.caption("Sistema de Información Hidroclimática Integrada para la Gestión del Territorio")
+    st.caption("SIHCLI-POTER: Sistema de Información Hidroclimática Integrada para la Gestión Integral del Agua y la Biodiversidad en el Norte de la Region Andina")
 
     # Definición de las 4 Pestañas de Inicio
     tab_intro, tab_clima, tab_modulos, tab_aleph = st.tabs([
@@ -3933,6 +3933,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
