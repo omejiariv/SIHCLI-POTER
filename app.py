@@ -102,17 +102,6 @@ def main():
         "end_date": end_date
     }
 
-    # --- MOSTRAR CAJA DE FILTROS SIEMPRE VISIBLE ---
-    # Esta es la forma más segura de garantizar que aparezca
-    display_current_filters(
-        stations_sel=stations_for_analysis, 
-        regions_sel=sel_regions, 
-        munis_sel=sel_munis, 
-        year_range=year_range,
-        interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
-        df_data=df_monthly_filtered
-    )
-
     # 5. Pestañas Principales
     tab_titles = [
         "🏠 Inicio", 
@@ -133,42 +122,108 @@ def main():
         "📄 Reporte"
     ]
     
+    # CREAMOS LAS PESTAÑAS PRIMERO
     tabs = st.tabs(tab_titles)
 
-    # 6. Renderizado
-    with tabs[0]: display_welcome_tab()
-    with tabs[1]: display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
+    # --- FUNCIÓN AUXILIAR PARA MOSTRAR FILTROS ---
+    # Esta función se llamará dentro de cada pestaña (excepto Inicio)
+    # para asegurar que la caja de resumen aparezca siempre arriba del contenido.
+    def show_filters_box():
+        display_current_filters(
+            stations_sel=stations_for_analysis, 
+            regions_sel=sel_regions, 
+            munis_sel=sel_munis, 
+            year_range=year_range,
+            interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+            df_data=df_monthly_filtered
+        )
+
+    # 6. RENDERIZADO DE CONTENIDO POR PESTAÑA
+
+    # TAB 0: INICIO (Solo Bienvenida, SIN filtros)
+    with tabs[0]: 
+        display_welcome_tab()
     
+    # TAB 1: MONITOREO
+    with tabs[1]: 
+        show_filters_box() # <--- CAJA DE FILTROS AQUÍ
+        display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
+    
+    # TAB 2: DISTRIBUCIÓN
     with tabs[2]: 
+        show_filters_box() # <--- CAJA DE FILTROS AQUÍ
         display_spatial_distribution_tab(
             user_loc=None, 
             interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", 
             **display_args
         )
 
-    with tabs[3]: display_graphs_tab(**display_args)
+    # TAB 3: GRÁFICOS
+    with tabs[3]: 
+        show_filters_box()
+        display_graphs_tab(**display_args)
     
+    # TAB 4: ESTADÍSTICAS
     with tabs[4]: 
+        show_filters_box()
         display_stats_tab(**display_args)
         st.markdown("---")
         display_station_table_tab(**display_args)
         
-    with tabs[5]: display_climate_forecast_tab(**display_args)
-    with tabs[6]: display_trends_and_forecast_tab(**display_args)
-    with tabs[7]: display_anomalies_tab(**display_args)
-    with tabs[8]: display_correlation_tab(**display_args)
-    with tabs[9]: display_drought_analysis_tab(**display_args)
-    with tabs[10]: display_advanced_maps_tab(**display_args)
+    # TAB 5: PRONÓSTICO CLIMÁTICO
+    with tabs[5]: 
+        show_filters_box()
+        display_climate_forecast_tab(**display_args)
+
+    # TAB 6: TENDENCIAS
+    with tabs[6]: 
+        show_filters_box()
+        display_trends_and_forecast_tab(**display_args)
+
+    # TAB 7: ANOMALÍAS
+    with tabs[7]: 
+        show_filters_box()
+        display_anomalies_tab(**display_args)
+
+    # TAB 8: CORRELACIÓN
+    with tabs[8]: 
+        show_filters_box()
+        display_correlation_tab(**display_args)
+
+    # TAB 9: EXTREMOS
+    with tabs[9]: 
+        show_filters_box()
+        display_drought_analysis_tab(**display_args)
+
+    # TAB 10: MAPAS AVANZADOS
+    with tabs[10]: 
+        show_filters_box()
+        display_advanced_maps_tab(**display_args)
     
+    # TAB 11: SESGO
     with tabs[11]: 
+        show_filters_box()
         from modules.visualizer import display_bias_correction_tab
         display_bias_correction_tab(**display_args)
         
-    with tabs[12]: display_land_cover_analysis_tab(**display_args)
-    with tabs[13]: display_life_zones_tab(**display_args)
-    with tabs[14]: display_climate_scenarios_tab(**display_args)
+    # TAB 12: COBERTURA
+    with tabs[12]: 
+        show_filters_box()
+        display_land_cover_analysis_tab(**display_args)
+
+    # TAB 13: ZONAS DE VIDA
+    with tabs[13]: 
+        show_filters_box()
+        display_life_zones_tab(**display_args)
+
+    # TAB 14: CLIMA FUTURO
+    with tabs[14]: 
+        show_filters_box()
+        display_climate_scenarios_tab(**display_args)
     
+    # TAB 15: REPORTE
     with tabs[15]: 
+        show_filters_box()
         st.header("Generar Reporte PDF")
         if st.button("Generar Reporte Ejecutivo", type="primary"):
             with st.spinner("Generando..."):
@@ -177,15 +232,16 @@ def main():
                 if pdf: st.download_button("📥 Descargar PDF", pdf, "reporte.pdf", "application/pdf")
                 else: st.error("Error al generar reporte.")
 
-    # CSS Suave (Sin márgenes negativos agresivos)
+    # CSS Suave (Asegura visibilidad)
     st.markdown("""
     <style>
         div[data-baseweb="tab-list"] { gap: 5px; }
         div[data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 4px 4px 0 0; padding: 0 16px; border: 1px solid #e0e0e0; border-bottom: none; }
         div[aria-selected="true"] { background-color: white; border-top: 3px solid #1f77b4; }
+        /* Asegura que el contenido de la pestaña tenga margen superior para no chocar */
+        .stTabs [data-baseweb="tab-panel"] { padding-top: 1rem; }
     </style>
     """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
-
