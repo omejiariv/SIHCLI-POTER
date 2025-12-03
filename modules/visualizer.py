@@ -482,7 +482,7 @@ def display_welcome_tab():
     """, unsafe_allow_html=True)
 
     st.title(f"Bienvenido a {Config.APP_TITLE}")
-    st.caption("Sistema de Información Hidroclimática Integrada para la Gestión del Territorio")
+    st.caption("Sistema de Información Hidroclimática Integrada para la Gestión Integral del Agua y la Biodiversidad en el Norte de la Region Andina")
 
     # Pestañas de Inicio
     tab_intro, tab_clima, tab_modulos, tab_aleph = st.tabs([
@@ -497,9 +497,11 @@ def display_welcome_tab():
         # Usamos el ancho completo ahora
         st.markdown("""
         ### Origen y Visión
-        **SIHCLI-POTER** nace de la necesidad imperativa de integrar datos, ciencia y tecnología para la toma de decisiones informadas en el territorio. En un contexto de variabilidad climática creciente, la gestión del recurso hídrico y el ordenamiento territorial requieren herramientas que transformen datos dispersos en conocimiento accionable.
+        **SIHCLI-POTER** nace de la necesidad imperativa de integrar datos, ciencia y tecnología para la toma de decisiones informadas en el territorio. 
+        En un contexto de variabilidad climática creciente, la gestión del recurso hídrico y el ordenamiento territorial requieren herramientas que transformen datos dispersos en conocimiento accionable.
 
-        Este sistema no es solo un repositorio de datos; es un **cerebro analítico** diseñado para procesar, modelar y visualizar la complejidad hidrometeorológica de la región Andina. Su arquitectura modular permite desde el monitoreo en tiempo real hasta la proyección de escenarios de cambio climático a largo plazo.
+        Este sistema no es solo un repositorio de datos; es un **cerebro analítico** diseñado para procesar, modelar y visualizar la complejidad hidrometeorológica de la región Andina. 
+        Su arquitectura modular permite desde el monitoreo en tiempo real hasta la proyección de escenarios de cambio climático a largo plazo.
 
         ### Aplicaciones Clave
         * **Gestión del Riesgo:** Alertas tempranas y mapas de vulnerabilidad ante eventos extremos (sequías e inundaciones).
@@ -515,13 +517,16 @@ def display_welcome_tab():
     with tab_clima:
         st.markdown("""
         ### La Danza del Clima en los Andes
-        La región Andina es un mosaico climático de una complejidad fascinante. Aquí, la geografía no es solo un escenario, sino un actor protagonista que esculpe el clima kilómetro a kilómetro.
+        La región Andina es un mosaico climático de una complejidad fascinante. 
+        Aquí, la geografía no es solo un escenario, sino un actor protagonista que esculpe el clima kilómetro a kilómetro.
 
         **La Verticalidad como Destino:**
-        En los Andes, viajar hacia arriba es como viajar hacia los polos. En pocos kilómetros lineales, pasamos del calor húmedo de los valles interandinos (bosque seco tropical) a la neblina perpetua de los bosques de niebla, y finalmente al gélido silencio de los páramos y las nieves perpetuas. Esta **zonificación altitudinal** (bien descrita por Holdridge) define la vocación del suelo y la biodiversidad.
+        En los Andes, viajar hacia arriba es como viajar hacia los polos. 
+        En pocos kilómetros lineales, pasamos del calor húmedo de los valles interandinos (bosque seco tropical) a la neblina perpetua de los bosques de niebla, y finalmente al gélido silencio de los páramos y las nieves perpetuas. Esta **zonificación altitudinal** (bien descrita por Holdridge) define la vocación del suelo y la biodiversidad.
 
         **El Pulso de Dos Océanos:**
-        Somos un país anfibio, respirando la humedad que llega tanto del Pacífico (Chocó Biogeográfico) como de la Amazonía. Los vientos alisios chocan contra nuestras cordilleras, descargando su humedad en las vertientes orientales y creando "fábricas de agua" que alimentan nuestros grandes ríos.
+        Somos un país anfibio, respirando la humedad que llega tanto del Pacífico (Chocó Biogeográfico) como de la Amazonía. 
+        Los vientos alisios chocan contra nuestras cordilleras, descargando su humedad en las vertientes orientales y creando "fábricas de agua" que alimentan nuestros grandes ríos.
 
         **La Variabilidad (ENSO):**
         Este sistema complejo no es estático. Está sometido al latido irregular del Pacífico Ecuatorial:
@@ -571,18 +576,25 @@ def display_welcome_tab():
 
             ### Fragmento de "El Aleph"
             
-            "...Arribo, ahora, al inefable centro de mi relato; empieza aquí mi desesperación de escritor. Todo lenguaje es un alfabeto de símbolos cuyo ejercicio presupone un pasado que los interlocutores comparten; ¿cómo transmitir a los otros el infinito Aleph, que mi temerosa memoria apenas abarca? (...)
+            "... Todo lenguaje es un alfabeto de símbolos cuyo ejercicio presupone un pasado que los interlocutores comparten; ¿cómo transmitir a los otros el infinito Aleph, que mi temerosa memoria apenas abarca? (...)
             
-            En la parte inferior del escalón, hacia la derecha, vi una pequeña esfera tornasolada, de casi intolerable fulgor. Al principio la creí giratoria; luego comprendí que ese movimiento era una ilusión producida por los vertiginosos espectáculos que encerraba. El diámetro del Aleph sería de dos o tres centímetros, pero el espacio cósmico estaba ahí, sin disminución de tamaño. Cada cosa (la luna del espejo, digamos) era infinitas cosas, porque yo la veía claramente desde todos los puntos del universo.
+            En la parte inferior del escalón, hacia la derecha, vi una pequeña esfera tornasolada, de casi intolerable fulgor. 
+            Al principio la creí giratoria; luego comprendí que ese movimiento era una ilusión producida por los vertiginosos espectáculos que encerraba. 
+            El diámetro del Aleph sería de dos o tres centímetros, pero el espacio cósmico estaba ahí, sin disminución de tamaño. 
+            Cada cosa (la luna del espejo, digamos) era infinitas cosas, porque yo la veía claramente desde todos los puntos del universo.
             
-            Vi el populoso mar, vi el alba y la tarde, vi las muchedumbres de América, vi una plateada telaraña en el centro de una negra pirámide, vi un laberinto roto (era Londres), vi interminables ojos inmediatos escrutándose en mí como en un espejo, vi todos los espejos del planeta y ninguno me reflejó...
+            Vi el populoso mar, vi el alba y la tarde, vi las muchedumbres de América, 
+            vi una plateada telaraña en el centro de una negra pirámide, vi un laberinto roto (era Londres), 
+            vi interminables ojos inmediatos escrutándose en mí como en un espejo, vi todos los espejos del planeta y ninguno me reflejó...
             
-            **Vi el engranaje del amor y la modificación de la muerte, vi el Aleph, desde todos los puntos, vi en el Aleph la tierra, y en la tierra otra vez el Aleph y en el Aleph la tierra, vi mi cara y mis vísceras, vi tu cara, y sentí vértigo y lloré, porque mis ojos habían visto ese objeto secreto y conjetural, cuyo nombre usurpan los hombres, pero que ningún hombre ha mirado: el inconcebible universo."**
+            **Vi el engranaje del amor y la modificación de la muerte, vi el Aleph, desde todos los puntos, 
+            vi en el Aleph la tierra, y en la tierra otra vez el Aleph y en el Aleph la tierra, vi mi cara y mis vísceras, vi tu cara, y sentí vértigo y lloré, 
+            porque mis ojos habían visto ese objeto secreto y conjetural, cuyo nombre usurpan los hombres, pero que ningún hombre ha mirado: el inconcebible universo."**
             
             — *Jorge Luis Borges (1945)*
             """)
         with c_img:
-            st.info("El Aleph representa el punto donde convergen todos los puntos. Así como este sistema aspira a ser el punto donde convergen todos los datos hidrometeorológicos para revelar la realidad del territorio.")
+            st.info("El Aleph del tiempo, el clima, el agua, la biodiversidad, ... el terri-torio.")
 # -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN: CONEXIÓN CON IRI (COLUMBIA UNIVERSITY)
 # -----------------------------------------------------------------------------
@@ -3926,6 +3938,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
