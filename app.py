@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import warnings
 
-# Configuración de página DEBE SER LA PRIMERA LÍNEA DE STREAMLIT
+# Configuración de página (DEBE SER LA PRIMERA LÍNEA)
 st.set_page_config(page_title="SIHCLI-POTER", page_icon="🌧️", layout="wide")
 warnings.filterwarnings('ignore')
 
@@ -55,8 +55,8 @@ def main():
             st.session_state[key] = None
 
     # --- 2. CARGA DE DATOS ---
-    # Usamos st.cache_data indirectamente vía la función load_and_process_all_data
-    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
+    with st.spinner("Cargando datos del sistema..."):
+        gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
     
     if gdf_stations is None or df_long is None:
         st.error("⚠️ Error Fatal: No se pudieron cargar los datos. Verifica la conexión a BD.")
