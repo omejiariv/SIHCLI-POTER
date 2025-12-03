@@ -48,6 +48,189 @@ except ImportError:
     def calculate_climatic_indices(ts, a): return {}
     def calculate_hypsometric_curve(g): return None
 
+# 0. CAJA DE RESUMEN GLOBAL (MEJORADA Y UNIFICADA)
+# ==============================================================================
+def display_current_filters(stations_sel, regions_sel, munis_sel, year_range, interpolacion="No detectado", df_data=None):
+    """
+    Muestra un resumen desplegable de los filtros activos en la aplicación.
+    Fusiona la lógica de presentación general con las estadísticas detalladas.
+    """
+    # 1. Formateo de Listas (Municipios)
+    if not munis_sel:
+        munis_str = "Todos / Ninguno específico"
+    else:
+        total_munis = len(munis_sel)
+        if total_munis > 3:
+            munis_str = ", ".join(list(munis_sel)[:3]) + f", ... (y {total_munis - 3} más)"
+        else:
+            munis_str = ", ".join(munis_sel)
+
+    # 2. Formateo de Regiones
+    if not regions_sel:
+        region_str = "Todas las regiones"
+    else:
+        region_str = ", ".join(regions_sel)
+        
+    # 3. Lógica de Interpolación (Auto-detección si no se pasa explícito)
+    if interpolacion == "No detectado":
+        interpolacion = "Si" if st.session_state.get('apply_interpolation') else "No"
+
+    # 4. Cálculo de Estadísticas (Si hay DataFrame)
+    stats_str = ""
+    total_records_metric = 0
+    if df_data is not None and not df_data.empty:
+        total_records_metric = len(df_data)
+        valid_rows = len(df_data[df_data[Config.PRECIPITATION_COL] > 0])
+        pct_registros = (valid_rows / total_records_metric * 100) if total_records_metric > 0 else 0
+        stats_str = f"* **💾 Calidad de Datos:** {pct_registros:.1f}% registros válidos (>0 mm)"
+    else:
+        stats_str = "* **💾 Calidad de Datos:** No disponible"
+
+    # 5. Renderizado de la Caja Unificada
+    with st.expander("📝 Resumen de Filtros, Configuración y Estadísticas", expanded=False):
+        st.info(f"""
+        **Configuración Actual del Tablero:**
+        * **🌍 Región:** {region_str}
+        * **🏙️ Municipios:** {munis_str}
+        * **📅 Rango de Años:** {year_range[0]} - {year_range[1]}
+        * **📈 Interpolación de Vacíos:** {interpolacion}
+        {stats_str}
+        """)
+        
+        # Métricas visuales integradas
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Estaciones Seleccionadas", len(stations_sel))
+        c2.metric("Años de Análisis", f"{year_range[1] - year_range[0] + 1}")
+        if total_records_metric > 0:
+            c3.metric("Total Registros Procesados", f"{total_records_metric:,}")
+
+# PESTAÑA DE BIENVENIDA (PÁGINA DE INICIO RENOVADA)
+# ==============================================================================
+def display_welcome_tab():
+    # CSS para ajustar márgenes
+    st.markdown("""
+        <style>
+        .block-container { padding-top: 1rem; }
+        h1 { margin-top: -3rem; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.title(f"Bienvenido a {Config.APP_TITLE}")
+    st.caption("Sistema de Información Hidroclimática Integrada para la Gestión Integral del Agua y la Biodiversidad en el Norte de la Region Andina")
+
+    # Pestañas de Inicio
+    tab_intro, tab_clima, tab_modulos, tab_aleph = st.tabs([
+        "📘 Presentación del Sistema", 
+        "🏔️ Climatología Andina", 
+        "🛠️ Módulos y Capacidades", 
+        "📖 El Aleph"
+    ])
+
+    # --- PESTAÑA 1: PRESENTACIÓN (SIN LOGO) ---
+    with tab_intro:
+        # Usamos el ancho completo ahora
+        st.markdown("""
+        ### Origen y Visión
+        **SIHCLI-POTER** nace de la necesidad imperativa de integrar datos, ciencia y tecnología para la toma de decisiones informadas en el territorio. 
+        En un contexto de variabilidad climática creciente, la gestión del recurso hídrico y el ordenamiento territorial requieren herramientas que transformen datos dispersos en conocimiento accionable.
+
+        Este sistema no es solo un repositorio de datos; es un **cerebro analítico** diseñado para procesar, modelar y visualizar la complejidad hidrometeorológica de la región Andina. 
+        Su arquitectura modular permite desde el monitoreo en tiempo real hasta la proyección de escenarios de cambio climático a largo plazo.
+
+        ### Aplicaciones Clave
+        * **Gestión del Riesgo:** Alertas tempranas y mapas de vulnerabilidad ante eventos extremos (sequías e inundaciones).
+        * **Planeación Territorial (POT):** Insumos técnicos para la zonificación ambiental y la gestión de cuencas.
+        * **Agricultura de Precisión:** Calendarios de siembra basados en pronósticos estacionales y zonas de vida.
+        * **Investigación:** Base de datos depurada y herramientas estadísticas para estudios académicos.
+        
+        ---
+        **Versión:** 2.0 (Cloud-Native) | **Desarrollado para:** omejia - POTER.
+        """)
+
+    # --- PESTAÑA 2: CLIMATOLOGÍA ANDINA ---
+    with tab_clima:
+        st.markdown("""
+        ### La Danza del Clima en los Andes
+        La región Andina es un mosaico climático de una complejidad fascinante. 
+        Aquí, la geografía no es solo un escenario, sino un actor protagonista que esculpe el clima kilómetro a kilómetro.
+
+        **La Verticalidad como Destino:**
+        En los Andes, viajar hacia arriba es como viajar hacia los polos. 
+        En pocos kilómetros lineales, pasamos del calor húmedo de los valles interandinos (bosque seco tropical) a la neblina perpetua de los bosques de niebla, y finalmente al gélido silencio de los páramos y las nieves perpetuas. Esta **zonificación altitudinal** (bien descrita por Holdridge) define la vocación del suelo y la biodiversidad.
+
+        **El Pulso de Dos Océanos:**
+        Somos un país anfibio, respirando la humedad que llega tanto del Pacífico (Chocó Biogeográfico) como de la Amazonía. 
+        Los vientos alisios chocan contra nuestras cordilleras, descargando su humedad en las vertientes orientales y creando "fábricas de agua" que alimentan nuestros grandes ríos.
+
+        **La Variabilidad (ENSO):**
+        Este sistema complejo no es estático. Está sometido al latido irregular del Pacífico Ecuatorial:
+        * **El Niño (Fase Cálida):** Cuando el océano se calienta, la atmósfera sobre nosotros se estabiliza, las nubes se disipan y la sequía amenaza, trayendo consigo el riesgo de incendios y desabastecimiento.
+        * **La Niña (Fase Fría):** Cuando el océano se enfría, los vientos se aceleran y la humedad se condensa con furia, desbordando ríos y saturando laderas.
+
+        Entender esta climatología no es solo leer termómetros; es comprender la interacción dinámica entre la montaña, el viento y el océano.
+        """)
+
+    # --- PESTAÑA 3: MÓDULOS ---
+    with tab_modulos:
+        st.markdown("""
+        ### Arquitectura del Sistema
+        SIHCLI-POTER está estructurado en módulos especializados interconectados:
+
+        1.  **🚨 Monitoreo (Tiempo Real):**
+            * Tablero de control con las últimas lecturas de estaciones telemétricas.
+            * Alertas inmediatas de umbrales críticos.
+
+        2.  **🗺️ Distribución Espacial:**
+            * Mapas interactivos para visualizar la red de monitoreo.
+            * Análisis de cobertura espacial y densidad de datos.
+
+        3.  **🔮 Pronóstico Climático & ENSO:**
+            * Integración directa con el **IRI (Columbia University)** para pronósticos oficiales de El Niño/La Niña.
+            * Modelos de predicción local (Prophet, SARIMA) y análisis de probabilidades.
+
+        4.  **📉 Tendencias y Riesgo:**
+            * Análisis estadístico de largo plazo (Mann-Kendall) para detectar si llueve más o menos que antes.
+            * Mapas de vulnerabilidad hídrica interpolados.
+
+        5.  **🛰️ Satélite y Sesgo:**
+            * Comparación de datos de tierra vs. reanálisis satelital (ERA5-Land).
+            * Herramientas para corregir y rellenar series históricas.
+
+        6.  **🌱 Zonas de Vida y Cobertura:**
+            * Cálculo automático de la clasificación de Holdridge.
+            * Análisis de uso del suelo y cobertura vegetal.
+        """)
+
+    # --- PESTAÑA 4: EL ALEPH ---
+    with tab_aleph:
+        c_text, c_img = st.columns([3, 1])
+        with c_text:
+            st.markdown("""
+            > *"Borges y el Aleph: La metáfora perfecta de la información total."*
+
+            ### Fragmento de "El Aleph"
+            
+            "... Todo lenguaje es un alfabeto de símbolos cuyo ejercicio presupone un pasado que los interlocutores comparten; 
+            ¿cómo transmitir a los otros el infinito Aleph, que mi temerosa memoria apenas abarca? (...)
+            
+            En la parte inferior del escalón, hacia la derecha, vi una pequeña esfera tornasolada, de casi intolerable fulgor. 
+            Al principio la creí giratoria; luego comprendí que ese movimiento era una ilusión producida por los vertiginosos espectáculos que encerraba. 
+            El diámetro del Aleph sería de dos o tres centímetros, pero el espacio cósmico estaba ahí, sin disminución de tamaño. 
+            Cada cosa (la luna del espejo, digamos) era infinitas cosas, porque yo la veía claramente desde todos los puntos del universo.
+            
+            Vi el populoso mar, vi el alba y la tarde, vi las muchedumbres de América, 
+            vi una plateada telaraña en el centro de una negra pirámide, vi un laberinto roto (era Londres), 
+            vi interminables ojos inmediatos escrutándose en mí como en un espejo, vi todos los espejos del planeta y ninguno me reflejó...
+            
+            **Vi el engranaje del amor y la modificación de la muerte, vi el Aleph, desde todos los puntos, 
+            vi en el Aleph la tierra, y en la tierra otra vez el Aleph y en el Aleph la tierra, vi mi cara y mis vísceras, vi tu cara, y sentí vértigo y lloré, 
+            porque mis ojos habían visto ese objeto secreto y conjetural, cuyo nombre usurpan los hombres, pero que ningún hombre ha mirado: el inconcebible universo."**
+            
+            — *Jorge Luis Borges (1945)*
+            """)
+        with c_img:
+            st.info("El Aleph del tiempo, del clima, del agua, de la biodiversidad, ... del terri-torio.")
+
 # -----------------------------------------------------------------------------
 # 1. FUNCIONES AUXILIARES
 # -----------------------------------------------------------------------------
@@ -190,62 +373,6 @@ def get_img_as_base64(url):
         print(f"Error Base64: {e}")
     return None
     
-# 0. CAJA DE RESUMEN GLOBAL (MEJORADA Y UNIFICADA)
-# ==============================================================================
-def display_current_filters(stations_sel, regions_sel, munis_sel, year_range, interpolacion="No detectado", df_data=None):
-    """
-    Muestra un resumen desplegable de los filtros activos en la aplicación.
-    Fusiona la lógica de presentación general con las estadísticas detalladas.
-    """
-    # 1. Formateo de Listas (Municipios)
-    if not munis_sel:
-        munis_str = "Todos / Ninguno específico"
-    else:
-        total_munis = len(munis_sel)
-        if total_munis > 3:
-            munis_str = ", ".join(list(munis_sel)[:3]) + f", ... (y {total_munis - 3} más)"
-        else:
-            munis_str = ", ".join(munis_sel)
-
-    # 2. Formateo de Regiones
-    if not regions_sel:
-        region_str = "Todas las regiones"
-    else:
-        region_str = ", ".join(regions_sel)
-        
-    # 3. Lógica de Interpolación (Auto-detección si no se pasa explícito)
-    if interpolacion == "No detectado":
-        interpolacion = "Si" if st.session_state.get('apply_interpolation') else "No"
-
-    # 4. Cálculo de Estadísticas (Si hay DataFrame)
-    stats_str = ""
-    total_records_metric = 0
-    if df_data is not None and not df_data.empty:
-        total_records_metric = len(df_data)
-        valid_rows = len(df_data[df_data[Config.PRECIPITATION_COL] > 0])
-        pct_registros = (valid_rows / total_records_metric * 100) if total_records_metric > 0 else 0
-        stats_str = f"* **💾 Calidad de Datos:** {pct_registros:.1f}% registros válidos (>0 mm)"
-    else:
-        stats_str = "* **💾 Calidad de Datos:** No disponible"
-
-    # 5. Renderizado de la Caja Unificada
-    with st.expander("📝 Resumen de Filtros, Configuración y Estadísticas", expanded=False):
-        st.info(f"""
-        **Configuración Actual del Tablero:**
-        * **🌍 Región:** {region_str}
-        * **🏙️ Municipios:** {munis_str}
-        * **📅 Rango de Años:** {year_range[0]} - {year_range[1]}
-        * **📈 Interpolación de Vacíos:** {interpolacion}
-        {stats_str}
-        """)
-        
-        # Métricas visuales integradas
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Estaciones Seleccionadas", len(stations_sel))
-        c2.metric("Años de Análisis", f"{year_range[1] - year_range[0] + 1}")
-        if total_records_metric > 0:
-            c3.metric("Total Registros Procesados", f"{total_records_metric:,}")
-             
 def analyze_point_data(lat, lon, df_long, gdf_stations, gdf_municipios, gdf_subcuencas):
     """
     Analiza un punto geográfico:
@@ -469,133 +596,6 @@ def parse_spanish_date(x):
     
 # 2. FUNCIONES PRINCIPALES DE VISUALIZACIÓN
 # -----------------------------------------------------------------------------
-
-# PESTAÑA DE BIENVENIDA (PÁGINA DE INICIO RENOVADA)
-# ==============================================================================
-def display_welcome_tab():
-    # CSS para ajustar márgenes
-    st.markdown("""
-        <style>
-        .block-container { padding-top: 1rem; }
-        h1 { margin-top: -3rem; }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.title(f"Bienvenido a {Config.APP_TITLE}")
-    st.caption("Sistema de Información Hidroclimática Integrada para la Gestión Integral del Agua y la Biodiversidad en el Norte de la Region Andina")
-
-    # Pestañas de Inicio
-    tab_intro, tab_clima, tab_modulos, tab_aleph = st.tabs([
-        "📘 Presentación del Sistema", 
-        "🏔️ Climatología Andina", 
-        "🛠️ Módulos y Capacidades", 
-        "📖 El Aleph"
-    ])
-
-    # --- PESTAÑA 1: PRESENTACIÓN (SIN LOGO) ---
-    with tab_intro:
-        # Usamos el ancho completo ahora
-        st.markdown("""
-        ### Origen y Visión
-        **SIHCLI-POTER** nace de la necesidad imperativa de integrar datos, ciencia y tecnología para la toma de decisiones informadas en el territorio. 
-        En un contexto de variabilidad climática creciente, la gestión del recurso hídrico y el ordenamiento territorial requieren herramientas que transformen datos dispersos en conocimiento accionable.
-
-        Este sistema no es solo un repositorio de datos; es un **cerebro analítico** diseñado para procesar, modelar y visualizar la complejidad hidrometeorológica de la región Andina. 
-        Su arquitectura modular permite desde el monitoreo en tiempo real hasta la proyección de escenarios de cambio climático a largo plazo.
-
-        ### Aplicaciones Clave
-        * **Gestión del Riesgo:** Alertas tempranas y mapas de vulnerabilidad ante eventos extremos (sequías e inundaciones).
-        * **Planeación Territorial (POT):** Insumos técnicos para la zonificación ambiental y la gestión de cuencas.
-        * **Agricultura de Precisión:** Calendarios de siembra basados en pronósticos estacionales y zonas de vida.
-        * **Investigación:** Base de datos depurada y herramientas estadísticas para estudios académicos.
-        
-        ---
-        **Versión:** 2.0 (Cloud-Native) | **Desarrollado para:** omejia - POTER.
-        """)
-
-    # --- PESTAÑA 2: CLIMATOLOGÍA ANDINA ---
-    with tab_clima:
-        st.markdown("""
-        ### La Danza del Clima en los Andes
-        La región Andina es un mosaico climático de una complejidad fascinante. 
-        Aquí, la geografía no es solo un escenario, sino un actor protagonista que esculpe el clima kilómetro a kilómetro.
-
-        **La Verticalidad como Destino:**
-        En los Andes, viajar hacia arriba es como viajar hacia los polos. 
-        En pocos kilómetros lineales, pasamos del calor húmedo de los valles interandinos (bosque seco tropical) a la neblina perpetua de los bosques de niebla, y finalmente al gélido silencio de los páramos y las nieves perpetuas. Esta **zonificación altitudinal** (bien descrita por Holdridge) define la vocación del suelo y la biodiversidad.
-
-        **El Pulso de Dos Océanos:**
-        Somos un país anfibio, respirando la humedad que llega tanto del Pacífico (Chocó Biogeográfico) como de la Amazonía. 
-        Los vientos alisios chocan contra nuestras cordilleras, descargando su humedad en las vertientes orientales y creando "fábricas de agua" que alimentan nuestros grandes ríos.
-
-        **La Variabilidad (ENSO):**
-        Este sistema complejo no es estático. Está sometido al latido irregular del Pacífico Ecuatorial:
-        * **El Niño (Fase Cálida):** Cuando el océano se calienta, la atmósfera sobre nosotros se estabiliza, las nubes se disipan y la sequía amenaza, trayendo consigo el riesgo de incendios y desabastecimiento.
-        * **La Niña (Fase Fría):** Cuando el océano se enfría, los vientos se aceleran y la humedad se condensa con furia, desbordando ríos y saturando laderas.
-
-        Entender esta climatología no es solo leer termómetros; es comprender la interacción dinámica entre la montaña, el viento y el océano.
-        """)
-
-    # --- PESTAÑA 3: MÓDULOS ---
-    with tab_modulos:
-        st.markdown("""
-        ### Arquitectura del Sistema
-        SIHCLI-POTER está estructurado en módulos especializados interconectados:
-
-        1.  **🚨 Monitoreo (Tiempo Real):**
-            * Tablero de control con las últimas lecturas de estaciones telemétricas.
-            * Alertas inmediatas de umbrales críticos.
-
-        2.  **🗺️ Distribución Espacial:**
-            * Mapas interactivos para visualizar la red de monitoreo.
-            * Análisis de cobertura espacial y densidad de datos.
-
-        3.  **🔮 Pronóstico Climático & ENSO:**
-            * Integración directa con el **IRI (Columbia University)** para pronósticos oficiales de El Niño/La Niña.
-            * Modelos de predicción local (Prophet, SARIMA) y análisis de probabilidades.
-
-        4.  **📉 Tendencias y Riesgo:**
-            * Análisis estadístico de largo plazo (Mann-Kendall) para detectar si llueve más o menos que antes.
-            * Mapas de vulnerabilidad hídrica interpolados.
-
-        5.  **🛰️ Satélite y Sesgo:**
-            * Comparación de datos de tierra vs. reanálisis satelital (ERA5-Land).
-            * Herramientas para corregir y rellenar series históricas.
-
-        6.  **🌱 Zonas de Vida y Cobertura:**
-            * Cálculo automático de la clasificación de Holdridge.
-            * Análisis de uso del suelo y cobertura vegetal.
-        """)
-
-    # --- PESTAÑA 4: EL ALEPH ---
-    with tab_aleph:
-        c_text, c_img = st.columns([3, 1])
-        with c_text:
-            st.markdown("""
-            > *"Borges y el Aleph: La metáfora perfecta de la información total."*
-
-            ### Fragmento de "El Aleph"
-            
-            "... Todo lenguaje es un alfabeto de símbolos cuyo ejercicio presupone un pasado que los interlocutores comparten; 
-            ¿cómo transmitir a los otros el infinito Aleph, que mi temerosa memoria apenas abarca? (...)
-            
-            En la parte inferior del escalón, hacia la derecha, vi una pequeña esfera tornasolada, de casi intolerable fulgor. 
-            Al principio la creí giratoria; luego comprendí que ese movimiento era una ilusión producida por los vertiginosos espectáculos que encerraba. 
-            El diámetro del Aleph sería de dos o tres centímetros, pero el espacio cósmico estaba ahí, sin disminución de tamaño. 
-            Cada cosa (la luna del espejo, digamos) era infinitas cosas, porque yo la veía claramente desde todos los puntos del universo.
-            
-            Vi el populoso mar, vi el alba y la tarde, vi las muchedumbres de América, 
-            vi una plateada telaraña en el centro de una negra pirámide, vi un laberinto roto (era Londres), 
-            vi interminables ojos inmediatos escrutándose en mí como en un espejo, vi todos los espejos del planeta y ninguno me reflejó...
-            
-            **Vi el engranaje del amor y la modificación de la muerte, vi el Aleph, desde todos los puntos, 
-            vi en el Aleph la tierra, y en la tierra otra vez el Aleph y en el Aleph la tierra, vi mi cara y mis vísceras, vi tu cara, y sentí vértigo y lloré, 
-            porque mis ojos habían visto ese objeto secreto y conjetural, cuyo nombre usurpan los hombres, pero que ningún hombre ha mirado: el inconcebible universo."**
-            
-            — *Jorge Luis Borges (1945)*
-            """)
-        with c_img:
-            st.info("El Aleph del tiempo, del clima, del agua, de la biodiversidad, ... del terri-torio.")
 # -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN: CONEXIÓN CON IRI (COLUMBIA UNIVERSITY)
 # -----------------------------------------------------------------------------
@@ -3939,6 +3939,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
