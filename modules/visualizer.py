@@ -510,7 +510,7 @@ def display_welcome_tab():
         * **Investigación:** Base de datos depurada y herramientas estadísticas para estudios académicos.
         
         ---
-        **Versión:** 2.0 (Cloud-Native) | **Desarrollado para:** Gestión Integral del Recurso Hídrico.
+        **Versión:** 2.0 (Cloud-Native) | **Desarrollado para:** omejia - POTER.
         """)
 
     # --- PESTAÑA 2: CLIMATOLOGÍA ANDINA ---
@@ -3939,6 +3939,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
