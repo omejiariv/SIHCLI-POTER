@@ -473,7 +473,7 @@ def parse_spanish_date(x):
 # PESTAÑA DE BIENVENIDA (PÁGINA DE INICIO RENOVADA)
 # ==============================================================================
 def display_welcome_tab():
-    # CSS para ajustar márgenes y subir el contenido
+    # CSS para ajustar márgenes
     st.markdown("""
         <style>
         .block-container { padding-top: 1rem; }
@@ -482,9 +482,9 @@ def display_welcome_tab():
     """, unsafe_allow_html=True)
 
     st.title(f"Bienvenido a {Config.APP_TITLE}")
-    st.caption("SIHCLI-POTER: Sistema de Información Hidroclimática Integrada para la Gestión Integral del Agua y la Biodiversidad en el Norte de la Region Andina")
+    st.caption("Sistema de Información Hidroclimática Integrada para la Gestión del Territorio")
 
-    # Definición de las 4 Pestañas de Inicio
+    # Pestañas de Inicio
     tab_intro, tab_clima, tab_modulos, tab_aleph = st.tabs([
         "📘 Presentación del Sistema", 
         "🏔️ Climatología Andina", 
@@ -492,31 +492,24 @@ def display_welcome_tab():
         "📖 El Aleph"
     ])
 
-    # --- PESTAÑA 1: PRESENTACIÓN GENERAL ---
+    # --- PESTAÑA 1: PRESENTACIÓN (SIN LOGO) ---
     with tab_intro:
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.markdown("""
-            ### Origen y Visión
-            **SIHCLI-POTER** nace de la necesidad imperativa de integrar datos, ciencia y tecnología para la toma de decisiones informadas en el territorio. En un contexto de variabilidad climática creciente, la gestión del recurso hídrico y el ordenamiento territorial requieren herramientas que transformen datos dispersos en conocimiento accionable.
+        # Usamos el ancho completo ahora
+        st.markdown("""
+        ### Origen y Visión
+        **SIHCLI-POTER** nace de la necesidad imperativa de integrar datos, ciencia y tecnología para la toma de decisiones informadas en el territorio. En un contexto de variabilidad climática creciente, la gestión del recurso hídrico y el ordenamiento territorial requieren herramientas que transformen datos dispersos en conocimiento accionable.
 
-            Este sistema no es solo un repositorio de datos; es un **cerebro analítico** diseñado para procesar, modelar y visualizar la complejidad hidrometeorológica de la región Andina. Su arquitectura modular permite desde el monitoreo en tiempo real hasta la proyección de escenarios de cambio climático a largo plazo.
+        Este sistema no es solo un repositorio de datos; es un **cerebro analítico** diseñado para procesar, modelar y visualizar la complejidad hidrometeorológica de la región Andina. Su arquitectura modular permite desde el monitoreo en tiempo real hasta la proyección de escenarios de cambio climático a largo plazo.
 
-            ### Aplicaciones Clave
-            * **Gestión del Riesgo:** Alertas tempranas y mapas de vulnerabilidad ante eventos extremos (sequías e inundaciones).
-            * **Planeación Territorial (POT):** Insumos técnicos para la zonificación ambiental y la gestión de cuencas.
-            * **Agricultura de Precisión:** Calendarios de siembra basados en pronósticos estacionales y zonas de vida.
-            * **Investigación:** Base de datos depurada y herramientas estadísticas para estudios académicos.
-            """)
-        with c2:
-            if hasattr(Config, 'LOGO_PATH'):
-                try: st.image(Config.LOGO_PATH, use_column_width=True)
-                except: st.info("Logo Institucional")
-            st.info("""
-            **Versión:** 2.0 (Cloud-Native)
-            **Desarrollado para:** Gestión Integral del Recurso Hídrico.
-            **Tecnología:** Python, Streamlit, Plotly, Earth Engine, Open-Meteo.
-            """)
+        ### Aplicaciones Clave
+        * **Gestión del Riesgo:** Alertas tempranas y mapas de vulnerabilidad ante eventos extremos (sequías e inundaciones).
+        * **Planeación Territorial (POT):** Insumos técnicos para la zonificación ambiental y la gestión de cuencas.
+        * **Agricultura de Precisión:** Calendarios de siembra basados en pronósticos estacionales y zonas de vida.
+        * **Investigación:** Base de datos depurada y herramientas estadísticas para estudios académicos.
+        
+        ---
+        **Versión:** 2.0 (Cloud-Native) | **Desarrollado para:** Gestión Integral del Recurso Hídrico.
+        """)
 
     # --- PESTAÑA 2: CLIMATOLOGÍA ANDINA ---
     with tab_clima:
@@ -3933,6 +3926,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
