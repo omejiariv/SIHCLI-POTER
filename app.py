@@ -32,7 +32,10 @@ from modules.visualizer import (
 st.set_page_config(page_title="SIHCLI-POTER", page_icon="🌧️", layout="wide")
 warnings.filterwarnings('ignore')
 
+```python
 def main():
+    # Inicializar base de datos de preferencias
+    db_manager.init_db()
     # --- INICIALIZACIÓN DE ESTADO (ZONAS DE VIDA) ---
     if 'lz_raster_result' not in st.session_state:
         st.session_state.lz_raster_result = None
@@ -220,5 +223,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
