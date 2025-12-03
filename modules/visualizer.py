@@ -576,7 +576,8 @@ def display_welcome_tab():
 
             ### Fragmento de "El Aleph"
             
-            "... Todo lenguaje es un alfabeto de símbolos cuyo ejercicio presupone un pasado que los interlocutores comparten; ¿cómo transmitir a los otros el infinito Aleph, que mi temerosa memoria apenas abarca? (...)
+            "... Todo lenguaje es un alfabeto de símbolos cuyo ejercicio presupone un pasado que los interlocutores comparten; 
+            ¿cómo transmitir a los otros el infinito Aleph, que mi temerosa memoria apenas abarca? (...)
             
             En la parte inferior del escalón, hacia la derecha, vi una pequeña esfera tornasolada, de casi intolerable fulgor. 
             Al principio la creí giratoria; luego comprendí que ese movimiento era una ilusión producida por los vertiginosos espectáculos que encerraba. 
@@ -594,7 +595,7 @@ def display_welcome_tab():
             — *Jorge Luis Borges (1945)*
             """)
         with c_img:
-            st.info("El Aleph del tiempo, el clima, el agua, la biodiversidad, ... el terri-torio.")
+            st.info("El Aleph del tiempo, del clima, del agua, de la biodiversidad, ... del terri-torio.")
 # -----------------------------------------------------------------------------
 # NUEVA FUNCIÓN: CONEXIÓN CON IRI (COLUMBIA UNIVERSITY)
 # -----------------------------------------------------------------------------
@@ -3938,6 +3939,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
