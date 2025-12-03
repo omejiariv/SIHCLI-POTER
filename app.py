@@ -105,16 +105,6 @@ def main():
         "end_date": end_date
     }
 
-    # --- CAJA DE INFORMACIÓN GLOBAL ---
-    display_current_filters(
-        stations_sel=stations_for_analysis, 
-        regions_sel=sel_regions, 
-        munis_sel=sel_munis, 
-        year_range=year_range,
-        interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
-        df_data=df_monthly_filtered
-    )      
-
     # 5. Pestañas (LISTA ACTUALIZADA)
     tab_titles = [
         "🏠 Inicio", 
@@ -139,16 +129,43 @@ def main():
 
     # 6. Renderizado (Usando siempre display_args)
     
-    # TAB 0: INICIO
+    # TAB 0: INICIO (Sin caja de filtros para limpieza visual)
     with tabs[0]: 
         display_welcome_tab()
     
+    # --- CAJA DE INFORMACIÓN GLOBAL (VISUALIZADA AQUÍ PARA EL RESTO DE PESTAÑAS) ---
+    # Mostramos la caja si NO estamos en la pestaña de inicio.
+    # Dado que Streamlit re-ejecuta todo el script, podemos usar un contenedor vacío al principio
+    # o colocarlo aquí. Si lo ponemos fuera de las pestañas, siempre se ve.
+    # Para lograr el efecto de "no verla en inicio", necesitaríamos saber qué pestaña está activa,
+    # lo cual es difícil en Streamlit nativo sin hacks.
+    # ESTRATEGIA: La mostramos siempre debajo del título en las pestañas de contenido.
+    # Como st.tabs ya renderizó el contenido, la mejor opción es llamar a display_current_filters
+    # DENTRO de cada bloque 'with tabs[i]:' al principio, O simplemente dejarla fija arriba
+    # (antes de st.tabs) si queremos consistencia total.
+    
+    # OPCIÓN ELEGIDA: Mostrarla fija arriba del todo (antes de st.tabs) EXCEPTO si estamos en modo bienvenida.
+    # Pero como no sabemos el estado del tab, la pondremos DENTRO de las pestañas funcionales.
+    # Para evitar repetir código, definimos una función lambda rápida o simplemente la llamamos en cada una.
+    
+    def show_filters():
+        display_current_filters(
+            stations_sel=stations_for_analysis, 
+            regions_sel=sel_regions, 
+            munis_sel=sel_munis, 
+            year_range=year_range,
+            interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+            df_data=df_monthly_filtered
+        )
+
     # TAB 1: MONITOREO
     with tabs[1]: 
+        show_filters()
         display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
 
     # TAB 2: DISTRIBUCIÓN
     with tabs[2]: 
+        show_filters()
         display_spatial_distribution_tab(
             user_loc=None, 
             interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", 
@@ -157,57 +174,70 @@ def main():
 
     # TAB 3: GRÁFICOS
     with tabs[3]: 
+        show_filters()
         display_graphs_tab(**display_args)
 
     # TAB 4: ESTADÍSTICAS
     with tabs[4]: 
+        show_filters()
         display_stats_tab(**display_args)
         st.markdown("---")
         display_station_table_tab(**display_args)
 
     # TAB 5: PRONÓSTICO CLIMÁTICO
     with tabs[5]: 
+        show_filters()
         display_climate_forecast_tab(**display_args)
 
     # TAB 6: TENDENCIAS
     with tabs[6]: 
+        show_filters()
         display_trends_and_forecast_tab(**display_args)
 
     # TAB 7: ANOMALÍAS
     with tabs[7]: 
+        show_filters()
         display_anomalies_tab(**display_args)
 
     # TAB 8: CORRELACIÓN
     with tabs[8]: 
+        show_filters()
         display_correlation_tab(**display_args)
 
     # TAB 9: EXTREMOS
     with tabs[9]: 
+        show_filters()
         display_drought_analysis_tab(**display_args)
 
     # TAB 10: MAPAS AVANZADOS
     with tabs[10]: 
+        show_filters()
         display_advanced_maps_tab(**display_args)
 
     # TAB 11: CORRECCIÓN DE SESGO
     with tabs[11]: 
+        show_filters()
         from modules.visualizer import display_bias_correction_tab
         display_bias_correction_tab(**display_args)
 
     # TAB 12: COBERTURA
     with tabs[12]: 
+        show_filters()
         display_land_cover_analysis_tab(**display_args)
 
     # TAB 13: ZONAS DE VIDA
     with tabs[13]: 
+        show_filters()
         display_life_zones_tab(**display_args)
 
     # TAB 14: CLIMA FUTURO
     with tabs[14]: 
+        show_filters()
         display_climate_scenarios_tab(**display_args)
 
     # TAB 15: REPORTE
     with tabs[15]: 
+        show_filters()
         st.header("Generar Reporte PDF")
         if st.button("Generar Reporte Ejecutivo", type="primary"):
             with st.spinner("Generando..."):
@@ -218,7 +248,7 @@ def main():
                 else:
                     st.error("Error al generar reporte.")
 
-    # CSS Estético
+    # CSS Estético Global
     st.markdown("""
     <style>
         div[data-baseweb="tab-list"] { gap: 5px; }
