@@ -5,6 +5,7 @@ from modules.config import Config
 from modules.data_processor import load_and_process_all_data, complete_series
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
+import modules.db_manager as db_manager
 from modules.visualizer import (
     display_current_filters,
     display_welcome_tab,
@@ -24,8 +25,7 @@ from modules.visualizer import (
     display_station_table_tab,
     display_weekly_forecast_tab,      
     display_satellite_imagery_tab,
-    display_climate_forecast_tab,
-    import modules.db_manager as db_manager
+    display_climate_forecast_tab
 )
 
 # Configuración de página
@@ -223,3 +223,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
