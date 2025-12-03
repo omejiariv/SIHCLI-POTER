@@ -134,20 +134,6 @@ def main():
         display_welcome_tab()
     
     # --- CAJA DE INFORMACIÓN GLOBAL (VISUALIZADA AQUÍ PARA EL RESTO DE PESTAÑAS) ---
-    # Mostramos la caja si NO estamos en la pestaña de inicio.
-    # Dado que Streamlit re-ejecuta todo el script, podemos usar un contenedor vacío al principio
-    # o colocarlo aquí. Si lo ponemos fuera de las pestañas, siempre se ve.
-    # Para lograr el efecto de "no verla en inicio", necesitaríamos saber qué pestaña está activa,
-    # lo cual es difícil en Streamlit nativo sin hacks.
-    # ESTRATEGIA: La mostramos siempre debajo del título en las pestañas de contenido.
-    # Como st.tabs ya renderizó el contenido, la mejor opción es llamar a display_current_filters
-    # DENTRO de cada bloque 'with tabs[i]:' al principio, O simplemente dejarla fija arriba
-    # (antes de st.tabs) si queremos consistencia total.
-    
-    # OPCIÓN ELEGIDA: Mostrarla fija arriba del todo (antes de st.tabs) EXCEPTO si estamos en modo bienvenida.
-    # Pero como no sabemos el estado del tab, la pondremos DENTRO de las pestañas funcionales.
-    # Para evitar repetir código, definimos una función lambda rápida o simplemente la llamamos en cada una.
-    
     def show_filters():
         display_current_filters(
             stations_sel=stations_for_analysis, 
