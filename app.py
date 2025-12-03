@@ -5,7 +5,7 @@ from modules.config import Config
 from modules.data_processor import load_and_process_all_data, complete_series
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
-import modules.db_manager as db_manager  # Importación del gestor de DB
+import modules.db_manager as db_manager
 from modules.visualizer import (
     display_current_filters,
     display_welcome_tab,
@@ -27,7 +27,7 @@ from modules.visualizer import (
     display_climate_forecast_tab
 )
 
-# Configuración de página (DEBE SER LO PRIMERO)
+# Configuración de página
 st.set_page_config(page_title="SIHCLI-POTER", page_icon="🌧️", layout="wide")
 warnings.filterwarnings('ignore')
 
@@ -49,17 +49,18 @@ def main():
         st.session_state.lz_colors = None
 
     # 1. Cargar Datos
-    gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
+    with st.spinner("Cargando datos del sistema..."):
+        gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
     
     if gdf_stations is None or df_long is None:
         st.error("⚠️ Error Fatal: No se pudieron cargar los datos. Verifica la conexión a BD.")
         st.stop()
 
-    # 2. Sidebar (AHORA RECIBE 9 VALORES DE RETORNO)
+    # 2. Sidebar
     (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_filtered, analysis_mode, 
      sel_regions, sel_munis, selected_months, year_range) = create_sidebar(gdf_stations, df_long)
 
-    # Lógica de interpolación (Aplica sobre el filtrado mensual)
+    # Lógica de interpolación
     if st.session_state.get('apply_interpolation', False):
         with st.spinner("Procesando interpolación..."):
             df_monthly_filtered = complete_series(df_monthly_filtered)
@@ -72,8 +73,7 @@ def main():
     except:
         start_date, end_date = None, None
 
-    # 3. PREPARAR DATAFRAME COMPLETO (CONTINUO) PARA PRONÓSTICOS
-    # Este DF se filtra por Años y Estaciones, pero MANTIENE todos los meses.
+    # 3. Datos Completos
     mask_base = (
         (df_long[Config.YEAR_COL] >= year_range[0]) & 
         (df_long[Config.YEAR_COL] <= year_range[1]) &
@@ -81,10 +81,10 @@ def main():
     )
     df_complete_filtered = df_long.loc[mask_base].copy()
 
-    # 4. Argumentos Unificados (display_args)
+    # 4. Argumentos Unificados
     display_args = {
-        "df_long": df_monthly_filtered,        # Por defecto: Filtrado (Mapas, Estadísticas)
-        "df_complete": df_complete_filtered,   # Para Pronósticos (Serie continua)
+        "df_long": df_monthly_filtered,
+        "df_complete": df_complete_filtered,
         "gdf_stations": gdf_stations, 
         "gdf_filtered": gdf_filtered,
         "gdf_municipios": gdf_municipios, 
@@ -97,13 +97,13 @@ def main():
         "analysis_mode": analysis_mode,
         "selected_regions": sel_regions,
         "selected_municipios": sel_munis,
-        "selected_months": selected_months,    # Nueva variable: Meses seleccionados (lista de int)
+        "selected_months": selected_months,
         "year_range": year_range,
         "start_date": start_date,
         "end_date": end_date
     }
 
-    # 5. Pestañas Principales (LISTA ACTUALIZADA)
+    # 5. Pestañas Principales
     tab_titles = [
         "🏠 Inicio", 
         "🚨 Monitoreo (Tiempo Real)", 
@@ -123,13 +123,14 @@ def main():
         "📄 Reporte"
     ]
     
-    # --- CREACIÓN DE LAS PESTAÑAS ---
-    # Es vital crear las pestañas ANTES de llenarlas
+    # CREAMOS LAS PESTAÑAS PRIMERO (Esto es lo que "dibuja" el panel principal)
     tabs = st.tabs(tab_titles)
 
-    # --- FUNCIÓN AUXILIAR PARA MOSTRAR FILTROS ---
-    # Esta función muestra la caja de resumen. La llamaremos dentro de cada pestaña
-    # excepto en la de Inicio, para que siempre esté visible al principio del contenido.
+    # --- CAJA DE INFORMACIÓN GLOBAL ---
+    # La mostramos AHORA, pero usamos un contenedor vacío al principio si queremos control total,
+    # o simplemente dejamos que Streamlit la pinte aquí.
+    # Para que aparezca "dentro" de las pestañas (excepto inicio), la llamamos en cada una.
+    
     def show_filters_box():
         display_current_filters(
             stations_sel=stations_for_analysis, 
@@ -142,18 +143,18 @@ def main():
 
     # 6. RENDERIZADO DE CONTENIDO POR PESTAÑA
     
-    # TAB 0: INICIO (Solo Bienvenida, SIN filtros)
+    # TAB 0: INICIO
     with tabs[0]: 
         display_welcome_tab()
     
     # TAB 1: MONITOREO
     with tabs[1]: 
-        show_filters_box() # Mostramos caja resumen
+        show_filters_box()
         display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
 
     # TAB 2: DISTRIBUCIÓN
     with tabs[2]: 
-        show_filters_box() # Mostramos caja resumen
+        show_filters_box()
         display_spatial_distribution_tab(
             user_loc=None, 
             interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", 
@@ -236,7 +237,7 @@ def main():
                 else:
                     st.error("Error al generar reporte.")
 
-    # CSS Estético Global (Sin márgenes negativos problemáticos)
+    # CSS Estético (Sin márgenes negativos que oculten cosas)
     st.markdown("""
     <style>
         div[data-baseweb="tab-list"] { gap: 5px; }
