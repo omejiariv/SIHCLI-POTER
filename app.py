@@ -10,7 +10,7 @@ import pandas as pd
 import warnings
 warnings.filterwarnings('ignore')
 
-# 2. IMPORTACIONES SEGURAS (Con manejo de errores visible)
+# 2. IMPORTACIONES SEGURAS
 try:
     from modules.config import Config
     from modules.data_processor import load_and_process_all_data, complete_series
@@ -56,7 +56,7 @@ def main():
         try:
             db_manager.init_db()
         except Exception:
-            pass # Fallo silencioso en DB no debe romper la app
+            pass 
 
     # Inicializar estado
     for k in ['lz_raster_result', 'lz_profile', 'lz_names', 'lz_colors']:
@@ -127,20 +127,11 @@ def main():
 
     # --- RENDERIZADO PRINCIPAL ---
     
-    # 1. CAJA RESUMEN (Visible siempre arriba)
-    try:
-        display_current_filters(
-            stations_sel=stations_for_analysis, 
-            regions_sel=sel_regions, 
-            munis_sel=sel_munis, 
-            year_range=year_range,
-            interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
-            df_data=df_monthly_filtered
-        )
-    except Exception as e:
-        st.warning(f"No se pudo mostrar resumen: {e}")
+    # 1. CONTENEDOR DE BIENVENIDA O RESUMEN (ESTRATEGIA CLAVE)
+    # Creamos un contenedor vacío al principio para tener control total de su posición
+    header_container = st.container()
 
-    # 2. PESTAÑAS
+    # 2. PESTAÑAS DE NAVEGACIÓN
     tab_titles = [
         "🏠 Inicio", "🚨 Monitoreo", "🗺️ Distribución", "📈 Gráficos", 
         "📊 Estadísticas", "🔮 Pronóstico Climático", "📉 Tendencias", "⚠️ Anomalías", 
@@ -150,37 +141,127 @@ def main():
     
     tabs = st.tabs(tab_titles)
 
-    # Contenido Pestañas (Llamadas directas y seguras)
-    with tabs[0]: display_welcome_tab()
-    with tabs[1]: display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
-    with tabs[2]: display_spatial_distribution_tab(user_loc=None, interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", **display_args)
-    with tabs[3]: display_graphs_tab(**display_args)
+    # --- FUNCIÓN PARA MOSTRAR RESUMEN EN EL CONTENEDOR SUPERIOR ---
+    def render_summary_if_needed(tab_index):
+        # Solo mostramos el resumen si NO estamos en la pestaña de Inicio (índice 0)
+        # Pero como Streamlit reruns todo el script, necesitamos saber qué pestaña "parece" activa.
+        # Truco: En Streamlit nativo no sabemos qué tab está activo fácilmente.
+        # La mejor estrategia es mostrar el resumen DENTRO del contenedor 'header_container' SIEMPRE,
+        # pero vaciarlo si decidimos que estamos en 'Inicio' (lo cual es difícil de saber).
+        
+        # ESTRATEGIA SIMPLIFICADA Y ROBUSTA:
+        # Mostraremos el resumen SIEMPRE arriba de las pestañas. 
+        # Es la forma más segura de que aparezca.
+        with header_container:
+            try:
+                display_current_filters(
+                    stations_sel=stations_for_analysis, 
+                    regions_sel=sel_regions, 
+                    munis_sel=sel_munis, 
+                    year_range=year_range,
+                    interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+                    df_data=df_monthly_filtered
+                )
+            except Exception:
+                pass
+
+    # Renderizamos el resumen siempre al principio (Descomenta si quieres que se vea en Inicio también)
+    # render_summary_if_needed(0) 
+
+    # Contenido Pestañas
+    with tabs[0]: 
+        # En la pestaña de Inicio NO llamamos al resumen para que se vea limpia la bienvenida
+        display_welcome_tab()
+        
+    with tabs[1]: 
+        # En las demás pestañas, llamamos a la función de resumen AL PRINCIPIO de su contenido
+        # Esto asegura que aparezca justo debajo de la barra de pestañas.
+        try:
+            display_current_filters(
+                stations_sel=stations_for_analysis, 
+                regions_sel=sel_regions, 
+                munis_sel=sel_munis, 
+                year_range=year_range,
+                interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+                df_data=df_monthly_filtered
+            )
+        except: pass
+        display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
+
+    with tabs[2]: 
+        try:
+            display_current_filters(
+                stations_sel=stations_for_analysis, 
+                regions_sel=sel_regions, 
+                munis_sel=sel_munis, 
+                year_range=year_range,
+                interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+                df_data=df_monthly_filtered
+            )
+        except: pass
+        display_spatial_distribution_tab(user_loc=None, interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", **display_args)
+
+    # Para el resto de pestañas, aplicamos la misma lógica: Resumen primero, luego contenido.
+    # Definimos una lambda para no repetir código
+    show_summary = lambda: display_current_filters(
+            stations_sel=stations_for_analysis, 
+            regions_sel=sel_regions, 
+            munis_sel=sel_munis, 
+            year_range=year_range,
+            interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+            df_data=df_monthly_filtered
+        )
+
+    with tabs[3]: 
+        show_summary()
+        display_graphs_tab(**display_args)
     with tabs[4]: 
+        show_summary()
         display_stats_tab(**display_args)
         st.markdown("---")
         display_station_table_tab(**display_args)
-    with tabs[5]: display_climate_forecast_tab(**display_args)
-    with tabs[6]: display_trends_and_forecast_tab(**display_args)
-    with tabs[7]: display_anomalies_tab(**display_args)
-    with tabs[8]: display_correlation_tab(**display_args)
-    with tabs[9]: display_drought_analysis_tab(**display_args)
-    with tabs[10]: display_advanced_maps_tab(**display_args)
+    with tabs[5]: 
+        show_summary()
+        display_climate_forecast_tab(**display_args)
+    with tabs[6]: 
+        show_summary()
+        display_trends_and_forecast_tab(**display_args)
+    with tabs[7]: 
+        show_summary()
+        display_anomalies_tab(**display_args)
+    with tabs[8]: 
+        show_summary()
+        display_correlation_tab(**display_args)
+    with tabs[9]: 
+        show_summary()
+        display_drought_analysis_tab(**display_args)
+    with tabs[10]: 
+        show_summary()
+        display_advanced_maps_tab(**display_args)
     with tabs[11]: 
+        show_summary()
         try:
             from modules.visualizer import display_bias_correction_tab
             display_bias_correction_tab(**display_args)
         except: st.info("Módulo Sesgo cargando...")
-    with tabs[12]: display_land_cover_analysis_tab(**display_args)
-    with tabs[13]: display_life_zones_tab(**display_args)
-    with tabs[14]: display_climate_scenarios_tab(**display_args)
+    with tabs[12]: 
+        show_summary()
+        display_land_cover_analysis_tab(**display_args)
+    with tabs[13]: 
+        show_summary()
+        display_life_zones_tab(**display_args)
+    with tabs[14]: 
+        show_summary()
+        display_climate_scenarios_tab(**display_args)
     with tabs[15]: 
+        show_summary()
         st.header("Reporte PDF")
         if st.button("Generar"):
             res = {"n_estaciones": len(stations_for_analysis), "rango": f"{year_range}"}
             pdf = generate_pdf_report(df_monthly_filtered, gdf_filtered, res)
             if pdf: st.download_button("Descargar", pdf, "reporte.pdf", "application/pdf")
 
-    # CSS
+    # CSS para limpiar espacios
     st.markdown("""<style>.stTabs [data-baseweb="tab-panel"] { padding-top: 1rem; }</style>""", unsafe_allow_html=True)
 
 if __name__ == "__main__":
