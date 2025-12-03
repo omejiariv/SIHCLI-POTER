@@ -5,7 +5,7 @@ from modules.config import Config
 from modules.data_processor import load_and_process_all_data, complete_series
 from modules.sidebar import create_sidebar
 from modules.reporter import generate_pdf_report
-import modules.db_manager as db_manager
+import modules.db_manager as db_manager  # Importación del gestor de DB
 from modules.visualizer import (
     display_current_filters,
     display_welcome_tab,
@@ -16,7 +16,6 @@ from modules.visualizer import (
     display_trends_and_forecast_tab,
     display_anomalies_tab,
     display_correlation_tab,
-    # display_enso_tab,  <-- ELIMINADO (Ya integrado en Pronóstico Climático)
     display_drought_analysis_tab,
     display_advanced_maps_tab,
     display_life_zones_tab,
@@ -107,9 +106,16 @@ def main():
     }
 
     # --- CAJA DE INFORMACIÓN GLOBAL ---
-    display_current_filters(stations_for_analysis, sel_regions, sel_munis, year_range)      
+    display_current_filters(
+        stations_sel=stations_for_analysis, 
+        regions_sel=sel_regions, 
+        munis_sel=sel_munis, 
+        year_range=year_range,
+        interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+        df_data=df_monthly_filtered
+    )      
 
-    # 5. Pestañas (LISTA ACTUALIZADA - SIN "ENSO")
+    # 5. Pestañas (LISTA ACTUALIZADA)
     tab_titles = [
         "🏠 Inicio", 
         "🚨 Monitoreo (Tiempo Real)", 
@@ -120,7 +126,6 @@ def main():
         "📉 Tendencias",
         "⚠️ Anomalías", 
         "🔗 Correlación", 
-        # "🌊 ENSO",  <-- ELIMINADO
         "🌊 Extremos",
         "🌍 Mapas Avanzados",
         "🧪 Corrección de Sesgo",
@@ -142,11 +147,10 @@ def main():
     with tabs[1]: 
         display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
 
-    # TAB 2: DISTRIBUCIÓN (Con argumentos corregidos)
+    # TAB 2: DISTRIBUCIÓN
     with tabs[2]: 
         display_spatial_distribution_tab(
             user_loc=None, 
-            gdf_region=None, 
             interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", 
             **display_args
         )
@@ -161,7 +165,7 @@ def main():
         st.markdown("---")
         display_station_table_tab(**display_args)
 
-    # TAB 5: PRONÓSTICO CLIMÁTICO (INTEGRADO: IRI + HISTORIA + PROPHET)
+    # TAB 5: PRONÓSTICO CLIMÁTICO
     with tabs[5]: 
         display_climate_forecast_tab(**display_args)
 
@@ -177,12 +181,9 @@ def main():
     with tabs[8]: 
         display_correlation_tab(**display_args)
 
-    # NOTA: TAB 9 ANTERIOR ERA ENSO. AHORA "EXTREMOS" TOMA SU LUGAR.
-    
     # TAB 9: EXTREMOS
     with tabs[9]: 
-        # display_enso_tab(**display_args) <-- ELIMINADO
-        display_drought_analysis_tab(**display_args) # Asumo que esta es la de extremos/sequía
+        display_drought_analysis_tab(**display_args)
 
     # TAB 10: MAPAS AVANZADOS
     with tabs[10]: 
@@ -228,5 +229,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
