@@ -12,7 +12,7 @@ def create_sidebar(gdf_stations, df_long):
         # --- LOGO Y TÍTULO ---
         if hasattr(Config, 'LOGO_PATH'):
             try: 
-                st.image(Config.LOGO_PATH, width=30) 
+                st.image(Config.LOGO_PATH, width=150) 
             except: 
                 pass
             
@@ -86,13 +86,16 @@ def create_sidebar(gdf_stations, df_long):
             saved_regions = db_manager.get_user_preference(CURRENT_USER, "selected_regions", [])
             
             # Validar que las regiones guardadas sigan existiendo en los datos actuales
-            valid_saved = [r for r in saved_regions if r in all_regions]
+            if isinstance(saved_regions, list):
+                valid_saved = [r for r in saved_regions if r in all_regions]
+            else:
+                valid_saved = []
             
             # Widget Multiselect con valor por defecto recuperado
             selected_regions = st.multiselect("Región:", all_regions, default=valid_saved)
             
             # Guardar si hay cambios (comparando conjuntos para ignorar orden)
-            if set(selected_regions) != set(saved_regions):
+            if set(selected_regions) != set(valid_saved):
                 db_manager.save_user_preference(CURRENT_USER, "selected_regions", selected_regions)
             
             if selected_regions:
