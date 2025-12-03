@@ -2,13 +2,17 @@ import streamlit as st
 from modules.config import Config
 import pandas as pd
 import numpy as np
+import modules.db_manager as db_manager  # Importar el gestor de base de datos
+
+# Identificador de usuario (temporalmente genérico, idealmente vendría de un login)
+CURRENT_USER = "default_user" 
 
 def create_sidebar(gdf_stations, df_long):
     with st.sidebar:
         # --- LOGO Y TÍTULO ---
         if hasattr(Config, 'LOGO_PATH'):
             try: 
-                st.image(Config.LOGO_PATH, width=150) 
+                st.image(Config.LOGO_PATH, width=30) 
             except: 
                 pass
             
@@ -73,11 +77,24 @@ def create_sidebar(gdf_stations, df_long):
                 except:
                     pass # Manejo de errores si el formato del string falla
 
-        # C. Región
+        # C. Región (CON PERSISTENCIA)
         selected_regions = []
         if Config.REGION_COL in gdf_filtered_base.columns:
             all_regions = sorted(gdf_filtered_base[Config.REGION_COL].astype(str).unique())
-            selected_regions = st.multiselect("Región:", all_regions)
+            
+            # Recuperar preferencia guardada
+            saved_regions = db_manager.get_user_preference(CURRENT_USER, "selected_regions", [])
+            
+            # Validar que las regiones guardadas sigan existiendo en los datos actuales
+            valid_saved = [r for r in saved_regions if r in all_regions]
+            
+            # Widget Multiselect con valor por defecto recuperado
+            selected_regions = st.multiselect("Región:", all_regions, default=valid_saved)
+            
+            # Guardar si hay cambios (comparando conjuntos para ignorar orden)
+            if set(selected_regions) != set(saved_regions):
+                db_manager.save_user_preference(CURRENT_USER, "selected_regions", selected_regions)
+            
             if selected_regions:
                 gdf_filtered_base = gdf_filtered_base[gdf_filtered_base[Config.REGION_COL].isin(selected_regions)]
 
@@ -189,6 +206,5 @@ def create_sidebar(gdf_stations, df_long):
         str_interpolacion = "Si" if run_complete_series else "No"
 
         # RETORNO
-        # Nota: Regresamos str_interpolacion en lugar de "Histórico" fijo, para que tu resumen sea dinámico
         return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
                 str_interpolacion, selected_regions, selected_municipios, selected_months_nums, year_range)
