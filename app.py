@@ -33,11 +33,9 @@ warnings.filterwarnings('ignore')
 
 def main():
     # --- INICIALIZACIÓN DE BASES DE DATOS Y ESTADO ---
-    # Inicializar tabla de preferencias de usuario en PostgreSQL
     try:
         db_manager.init_db()
     except Exception as e:
-        # Fallback silencioso si la DB no está configurada
         print(f"Advertencia DB: {e}")
 
     # Inicialización de estado para Zonas de Vida
@@ -57,11 +55,11 @@ def main():
         st.error("⚠️ Error Fatal: No se pudieron cargar los datos. Verifica la conexión a BD.")
         st.stop()
 
-    # 2. Sidebar (AHORA RECIBE 9 VALORES DE RETORNO)
+    # 2. Sidebar
     (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_filtered, analysis_mode, 
      sel_regions, sel_munis, selected_months, year_range) = create_sidebar(gdf_stations, df_long)
 
-    # Lógica de interpolación (Aplica sobre el filtrado mensual)
+    # Lógica de interpolación
     if st.session_state.get('apply_interpolation', False):
         with st.spinner("Procesando interpolación..."):
             df_monthly_filtered = complete_series(df_monthly_filtered)
@@ -74,8 +72,7 @@ def main():
     except:
         start_date, end_date = None, None
 
-    # 3. PREPARAR DATAFRAME COMPLETO (CONTINUO) PARA PRONÓSTICOS
-    # Este DF se filtra por Años y Estaciones, pero MANTIENE todos los meses.
+    # 3. Datos Completos
     mask_base = (
         (df_long[Config.YEAR_COL] >= year_range[0]) & 
         (df_long[Config.YEAR_COL] <= year_range[1]) &
@@ -83,10 +80,10 @@ def main():
     )
     df_complete_filtered = df_long.loc[mask_base].copy()
 
-    # 4. Argumentos Unificados (display_args)
+    # 4. Argumentos Unificados
     display_args = {
-        "df_long": df_monthly_filtered,        # Por defecto: Filtrado (Mapas, Estadísticas)
-        "df_complete": df_complete_filtered,   # Para Pronósticos (Serie continua)
+        "df_long": df_monthly_filtered,
+        "df_complete": df_complete_filtered,
         "gdf_stations": gdf_stations, 
         "gdf_filtered": gdf_filtered,
         "gdf_municipios": gdf_municipios, 
@@ -99,13 +96,24 @@ def main():
         "analysis_mode": analysis_mode,
         "selected_regions": sel_regions,
         "selected_municipios": sel_munis,
-        "selected_months": selected_months,    # Nueva variable: Meses seleccionados (lista de int)
+        "selected_months": selected_months,
         "year_range": year_range,
         "start_date": start_date,
         "end_date": end_date
     }
 
-    # 5. Pestañas (LISTA ACTUALIZADA)
+    # --- MOSTRAR CAJA DE FILTROS SIEMPRE VISIBLE ---
+    # Esta es la forma más segura de garantizar que aparezca
+    display_current_filters(
+        stations_sel=stations_for_analysis, 
+        regions_sel=sel_regions, 
+        munis_sel=sel_munis, 
+        year_range=year_range,
+        interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+        df_data=df_monthly_filtered
+    )
+
+    # 5. Pestañas Principales
     tab_titles = [
         "🏠 Inicio", 
         "🚨 Monitoreo (Tiempo Real)", 
@@ -127,114 +135,49 @@ def main():
     
     tabs = st.tabs(tab_titles)
 
-    # 6. Renderizado (Usando siempre display_args)
+    # 6. Renderizado
+    with tabs[0]: display_welcome_tab()
+    with tabs[1]: display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
     
-    # TAB 0: INICIO (Sin caja de filtros para limpieza visual)
-    with tabs[0]: 
-        display_welcome_tab()
-    
-    # --- CAJA DE INFORMACIÓN GLOBAL (VISUALIZADA AQUÍ PARA EL RESTO DE PESTAÑAS) ---
-    def show_filters():
-        display_current_filters(
-            stations_sel=stations_for_analysis, 
-            regions_sel=sel_regions, 
-            munis_sel=sel_munis, 
-            year_range=year_range,
-            interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
-            df_data=df_monthly_filtered
-        )
-
-    # TAB 1: MONITOREO
-    with tabs[1]: 
-        show_filters()
-        display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
-
-    # TAB 2: DISTRIBUCIÓN
     with tabs[2]: 
-        show_filters()
         display_spatial_distribution_tab(
             user_loc=None, 
             interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", 
             **display_args
         )
 
-    # TAB 3: GRÁFICOS
-    with tabs[3]: 
-        show_filters()
-        display_graphs_tab(**display_args)
-
-    # TAB 4: ESTADÍSTICAS
+    with tabs[3]: display_graphs_tab(**display_args)
+    
     with tabs[4]: 
-        show_filters()
         display_stats_tab(**display_args)
         st.markdown("---")
         display_station_table_tab(**display_args)
-
-    # TAB 5: PRONÓSTICO CLIMÁTICO
-    with tabs[5]: 
-        show_filters()
-        display_climate_forecast_tab(**display_args)
-
-    # TAB 6: TENDENCIAS
-    with tabs[6]: 
-        show_filters()
-        display_trends_and_forecast_tab(**display_args)
-
-    # TAB 7: ANOMALÍAS
-    with tabs[7]: 
-        show_filters()
-        display_anomalies_tab(**display_args)
-
-    # TAB 8: CORRELACIÓN
-    with tabs[8]: 
-        show_filters()
-        display_correlation_tab(**display_args)
-
-    # TAB 9: EXTREMOS
-    with tabs[9]: 
-        show_filters()
-        display_drought_analysis_tab(**display_args)
-
-    # TAB 10: MAPAS AVANZADOS
-    with tabs[10]: 
-        show_filters()
-        display_advanced_maps_tab(**display_args)
-
-    # TAB 11: CORRECCIÓN DE SESGO
+        
+    with tabs[5]: display_climate_forecast_tab(**display_args)
+    with tabs[6]: display_trends_and_forecast_tab(**display_args)
+    with tabs[7]: display_anomalies_tab(**display_args)
+    with tabs[8]: display_correlation_tab(**display_args)
+    with tabs[9]: display_drought_analysis_tab(**display_args)
+    with tabs[10]: display_advanced_maps_tab(**display_args)
+    
     with tabs[11]: 
-        show_filters()
         from modules.visualizer import display_bias_correction_tab
         display_bias_correction_tab(**display_args)
-
-    # TAB 12: COBERTURA
-    with tabs[12]: 
-        show_filters()
-        display_land_cover_analysis_tab(**display_args)
-
-    # TAB 13: ZONAS DE VIDA
-    with tabs[13]: 
-        show_filters()
-        display_life_zones_tab(**display_args)
-
-    # TAB 14: CLIMA FUTURO
-    with tabs[14]: 
-        show_filters()
-        display_climate_scenarios_tab(**display_args)
-
-    # TAB 15: REPORTE
+        
+    with tabs[12]: display_land_cover_analysis_tab(**display_args)
+    with tabs[13]: display_life_zones_tab(**display_args)
+    with tabs[14]: display_climate_scenarios_tab(**display_args)
+    
     with tabs[15]: 
-        show_filters()
         st.header("Generar Reporte PDF")
         if st.button("Generar Reporte Ejecutivo", type="primary"):
             with st.spinner("Generando..."):
                 res = {"n_estaciones": len(stations_for_analysis), "rango": f"{year_range}"}
                 pdf = generate_pdf_report(df_monthly_filtered, gdf_filtered, res)
-                if pdf: 
-                    st.download_button("📥 Descargar PDF", pdf, "reporte.pdf", "application/pdf")
-                else:
-                    st.error("Error al generar reporte.")
+                if pdf: st.download_button("📥 Descargar PDF", pdf, "reporte.pdf", "application/pdf")
+                else: st.error("Error al generar reporte.")
 
-    # CSS Estético Global
+    # CSS Suave (Sin márgenes negativos agresivos)
     st.markdown("""
     <style>
         div[data-baseweb="tab-list"] { gap: 5px; }
@@ -245,3 +188,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
