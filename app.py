@@ -24,7 +24,8 @@ from modules.visualizer import (
     display_station_table_tab,
     display_weekly_forecast_tab,      
     display_satellite_imagery_tab,
-    display_climate_forecast_tab
+    display_climate_forecast_tab,
+    import modules.db_manager as db_manager
 )
 
 # Configuración de página
@@ -219,4 +220,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
