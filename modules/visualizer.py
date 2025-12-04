@@ -1236,17 +1236,27 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
 def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analysis, **kwargs):
     st.subheader("📊 Análisis Gráfico Detallado")
     
+    # Validación de datos
     if df_monthly_filtered is None or df_monthly_filtered.empty:
-        st.warning("No hay datos para mostrar.")
+        st.warning("No hay datos para mostrar. Seleccione estaciones y rango de fechas.")
         return
     
-    # Definición de Pestañas
+    # --- PREPARACIÓN DE DATOS PARA NUEVOS GRÁFICOS ---
+    # Aseguramos columnas de tiempo para análisis estacional
+    df_monthly_filtered['Mes'] = df_monthly_filtered[Config.MONTH_COL]
+    df_monthly_filtered['Año'] = df_monthly_filtered[Config.YEAR_COL]
+    meses_orden = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 
+                   7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
+    df_monthly_filtered['Nombre_Mes'] = df_monthly_filtered['Mes'].map(meses_orden)
+
+    # Definición de Pestañas (Originales + Nueva)
     tab_names = [
         "1. Serie Anual", 
         "2. Ranking Multianual",
         "3. Serie Mensual", 
-        "4. Ciclo Anual",
-        "5. Distribución y Frecuencia"
+        "4. Ciclo Anual (Promedio)",
+        "5. Distribución y Frecuencia",
+        "6. Análisis Estacional Detallado (NUEVO)" # <--- AQUÍ ESTÁ LA MAGIA
     ]
     tabs = st.tabs(tab_names)
     
@@ -1393,6 +1403,93 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         
         # Guardar
         st.session_state['report_fig_dist'] = fig_dist
+
+    # -------------------------------------------------------------------------
+    with tabs[5]:
+        st.markdown("#### 📅 Ciclo Anual Comparativo (Spaghetti Plot)")
+        st.info("Este gráfico permite comparar el comportamiento de cada año individual frente al promedio histórico, facilitando la identificación de años secos o húmedos.")
+
+        # Selector de Estación Específica para este análisis detallado
+        # (Usamos una clave única para no chocar con otros selectores)
+        sel_st_detail = st.selectbox("Analizar Estación:", stations_for_analysis, key="st_detail_seasonal")
+        
+        if sel_st_detail:
+            # Filtrar datos para la estación
+            df_st = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] == sel_st_detail].copy()
+            
+            # Controles
+            c_hl, c_type = st.columns([1, 1])
+            with c_hl:
+                years = sorted(df_st['Año'].unique(), reverse=True)
+                hl_year = st.selectbox("Resaltar Año:", [None] + years, key="hl_year_seasonal")
+            
+            with c_type:
+                chart_mode = st.radio("Tipo de Visualización:", ["Líneas (Spaghetti)", "Cajas (Variabilidad)"], horizontal=True)
+
+            if chart_mode == "Líneas (Spaghetti)":
+                fig_multi = go.Figure()
+                
+                # 1. Dibujar todos los años (Fondo)
+                for yr in years:
+                    df_y = df_st[df_st['Año'] == yr].sort_values('Mes')
+                    
+                    # Estilo base (Gris tenue)
+                    color = "rgba(200, 200, 200, 0.4)"
+                    width = 1
+                    opacity = 0.5
+                    name = str(yr)
+                    show_leg = False # Ocultar leyenda para no saturar
+                    
+                    # Estilo Resaltado
+                    if hl_year and yr == hl_year:
+                        color = "red"
+                        width = 4
+                        opacity = 1.0
+                        show_leg = True
+                    
+                    fig_multi.add_trace(go.Scatter(
+                        x=df_y['Nombre_Mes'], y=df_y[Config.PRECIPITATION_COL],
+                        mode='lines', name=name,
+                        line=dict(color=color, width=width),
+                        opacity=opacity,
+                        showlegend=show_leg,
+                        hoverinfo='name+y'
+                    ))
+
+                # 2. Añadir Promedio Histórico (Climatología)
+                clim = df_st.groupby('Nombre_Mes')[Config.PRECIPITATION_COL].mean().reindex(list(meses_orden.values()))
+                fig_multi.add_trace(go.Scatter(
+                    x=clim.index, y=clim.values,
+                    mode='lines+markers', name='Promedio Histórico',
+                    line=dict(color='black', width=3, dash='dot'),
+                    marker=dict(size=8, color='black')
+                ))
+                
+                fig_multi.update_layout(
+                    title=f"Ciclo Anual Comparativo - {sel_st_detail}",
+                    xaxis_title="Mes", yaxis_title="Precipitación (mm)",
+                    hovermode="x unified", height=500
+                )
+                st.plotly_chart(fig_multi, use_container_width=True)
+                
+            else: # Gráfico de Cajas
+                fig_box = px.box(
+                    df_st, x='Nombre_Mes', y=Config.PRECIPITATION_COL,
+                    category_orders={"Nombre_Mes": list(meses_orden.values())},
+                    color='Nombre_Mes',
+                    points="all", # Mostrar puntos dispersos
+                    title=f"Variabilidad Mensual Histórica - {sel_st_detail}"
+                )
+                fig_box.update_layout(showlegend=False, height=500)
+                st.plotly_chart(fig_box, use_container_width=True)
+
+            # Datos Tabulares del Año Resaltado vs Promedio
+            if hl_year:
+                st.markdown(f"###### Detalle Año {hl_year} vs Promedio")
+                df_y_hl = df_st[df_st['Año'] == hl_year].set_index('Nombre_Mes')[Config.PRECIPITATION_COL]
+                comp_df = pd.DataFrame({'Año Seleccionado': df_y_hl, 'Promedio Histórico': clim})
+                comp_df['Diferencia (%)'] = ((comp_df['Año Seleccionado'] - comp_df['Promedio Histórico']) / comp_df['Promedio Histórico']) * 100
+                st.dataframe(comp_df.style.format("{:.1f}"), use_container_width=True)
         
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     """Muestra el pronóstico semanal para una estación seleccionada."""
@@ -3974,6 +4071,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
