@@ -953,11 +953,9 @@ def display_realtime_dashboard(df_long, gdf_stations, gdf_filtered, **kwargs):
 # ==============================================================================
 def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_subcuencas, gdf_predios=None, user_loc=None, interpolacion="No", **kwargs):
 
-    # --- 0. Recuperación de datos extra ---
+    # --- 0. RECUPERACIÓN DE DATOS EXTRA ---
     df_anual = kwargs.get('df_anual_melted', None)
     user_loc = kwargs.get('user_loc', user_loc)
-    
-    # Nota: Ya NO mostramos la caja de resumen aquí porque se muestra globalmente arriba.
     
     st.subheader("🗺️ Distribución Espacial y Análisis Puntual")
 
@@ -975,14 +973,14 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
     tab_map, tab_avail, tab_matrix = st.tabs(["📍 Mapa Interactivo", "📊 Disponibilidad", "📅 Series Anuales"])
     
     # ==========================================
-    # PESTAÑA 1: MAPA
+    # PESTAÑA 1: MAPA (SIN CAMBIOS)
     # ==========================================
     with tab_map:
+        # ... (Tu código de mapa existente se mantiene igual) ...
         st.info("👆 **Haga clic en el mapa** o ingrese coordenadas para analizar un punto específico.")
         
         col_ctrl, col_map = st.columns([1, 3])
         
-        # 1. CONTROLES
         with col_ctrl:
             st.markdown("#### Configuración")
             with st.expander("📍 Ingresar Coordenadas", expanded=False):
@@ -1004,9 +1002,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             base_map_name = st.selectbox("Mapa Base:", list(base_map_options.keys()))
             sel_tile = base_map_options[base_map_name]
         
-        # 2. MAPA
         with col_map:
-            # Centrar Mapa
             if st.session_state.selected_point:
                 lat_c, lon_c, z = st.session_state.selected_point['lat'], st.session_state.selected_point['lng'], 11
             elif gdf_filtered is not None and not gdf_filtered.empty:
@@ -1017,7 +1013,6 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             
             m = folium.Map(location=[lat_c, lon_c], zoom_start=z, tiles=sel_tile["tiles"], attr=sel_tile["attr"])
             
-            # Capas GeoJSON
             try:
                 if show_munis and not gdf_municipios.empty:
                     g = gdf_municipios.copy(); g['geometry'] = g.geometry.simplify(0.001)
@@ -1030,105 +1025,94 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     folium.GeoJson(g, name="Predios", style_function=lambda x:{'color':'orange','weight':2,'fillOpacity':0.2}, tooltip=folium.GeoJsonTooltip(['nombre']) if 'nombre' in g.columns else None).add_to(m)
             except: pass
 
-            # Estaciones
             if gdf_filtered is not None:
                 marker_cluster = MarkerCluster().add_to(m)
                 for _, r in gdf_filtered.dropna(subset=['latitude']).iterrows():
-                    # Cálculo simplificado para el marcador
                     df_st = df_long[df_long[Config.STATION_NAME_COL] == r[Config.STATION_NAME_COL]]
                     df_valid = df_st[df_st[Config.PRECIPITATION_COL] > 0]
-                    
-                    if not df_valid.empty:
-                        avg_ppt = df_valid[Config.PRECIPITATION_COL].mean() * 12 # Estimado anual
-                    else:
-                        avg_ppt = 0
-
+                    avg_ppt = df_valid[Config.PRECIPITATION_COL].mean() * 12 if not df_valid.empty else 0
                     html = f"<div style='font-size:12px'><b>{r[Config.STATION_NAME_COL]}</b><br>Ppt Est: {avg_ppt:.0f} mm</div>"
-                    folium.Marker(
-                        [r['latitude'], r['longitude']], 
-                        tooltip=f"{r[Config.STATION_NAME_COL]}", 
-                        popup=folium.Popup(html, max_width=200),
-                        icon=folium.Icon(color="green", icon="cloud")
-                    ).add_to(marker_cluster)
+                    folium.Marker([r['latitude'], r['longitude']], tooltip=f"{r[Config.STATION_NAME_COL]}", popup=folium.Popup(html, max_width=200), icon=folium.Icon(color="green", icon="cloud")).add_to(marker_cluster)
 
-            # Punto Seleccionado
             if st.session_state.selected_point:
                 folium.Marker([st.session_state.selected_point['lat'], st.session_state.selected_point['lng']], popup="Selección", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
-
-            # Ubicación Usuario
             if user_loc:
-                folium.Marker(
-                    [user_loc[0], user_loc[1]], 
-                    icon=folium.Icon(color='black', icon='star'), 
-                    tooltip="Tu Ubicación"
-                ).add_to(m)
+                folium.Marker([user_loc[0], user_loc[1]], icon=folium.Icon(color='black', icon='star'), tooltip="Tu Ubicación").add_to(m)
             
             LocateControl(auto_start=False).add_to(m)
             folium.LayerControl().add_to(m)
             
-            # Renderizar Mapa UNA SOLA VEZ
             map_data = st_folium(m, width="100%", height=600)
-
             if map_data and map_data.get("last_clicked"):
                 clicked = map_data["last_clicked"]
                 if st.session_state.selected_point is None or abs(clicked['lat'] - st.session_state.selected_point['lat']) > 0.0001:
                     st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
                     st.rerun()
 
-    # PESTAÑA 2: DISPONIBILIDAD (MEJORADA)
+    # ==========================================
+    # PESTAÑA 2: DISPONIBILIDAD (ACTUALIZADA CON SELECTOR)
     # ==========================================
     with tab_avail:
-        st.markdown("#### 📊 Inventario y Continuidad de Datos")
-        
+        c_title, c_sel = st.columns([2, 1])
+        with c_title:
+            st.markdown("#### 📊 Inventario y Continuidad de Datos")
+        with c_sel:
+            # SELECTOR NUEVO
+            data_view_mode = st.radio(
+                "Vista de Datos:", 
+                ["Observados (Con huecos)", "Interpolados (Simulación)"], 
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+
         if df_long is not None and not df_long.empty:
+            # Lógica de Datos según selección
+            df_to_plot = df_long.copy()
+            
+            if data_view_mode == "Interpolados (Simulación)":
+                # Verificamos si ya venían interpolados globalmente o si debemos hacerlo aquí
+                # Si interpolacion global es "Si", df_long ya está lleno. Si es "No", lo llenamos para la vista.
+                if interpolacion == "No":
+                    with st.spinner("Simulando relleno de datos (Interpolación IDW/Tiempo)..."):
+                        try:
+                            from modules.data_processor import complete_series
+                            df_to_plot = complete_series(df_to_plot)
+                        except ImportError:
+                            st.warning("Módulo de interpolación no disponible.")
+                else:
+                    st.info("Los datos ya están interpolados globalmente (Ver panel lateral).")
+
             # 1. Preparar datos para el Heatmap
-            # Agrupamos por Estación y Año, contando meses con datos > 0 (o válidos)
-            avail = df_long[df_long[Config.PRECIPITATION_COL].notna()].groupby(
+            avail = df_to_plot[df_to_plot[Config.PRECIPITATION_COL].notna()].groupby(
                 [Config.STATION_NAME_COL, Config.YEAR_COL]
             )[Config.PRECIPITATION_COL].count().reset_index()
             
             avail.rename(columns={Config.PRECIPITATION_COL: 'Meses con Datos'}, inplace=True)
             
-            # Asegurar rango completo de años para el gráfico (rellenar huecos con 0)
+            # Asegurar rango completo
             all_years = list(range(int(avail[Config.YEAR_COL].min()), int(avail[Config.YEAR_COL].max()) + 1))
             all_stations = avail[Config.STATION_NAME_COL].unique()
             
-            # Crear índice completo
             full_idx = pd.MultiIndex.from_product([all_stations, all_years], names=[Config.STATION_NAME_COL, Config.YEAR_COL])
             avail_full = avail.set_index([Config.STATION_NAME_COL, Config.YEAR_COL]).reindex(full_idx, fill_value=0).reset_index()
             
-            # 2. Gráfico Heatmap Interactivo (Plotly)
+            # 2. Gráfico Heatmap
+            title_chart = "Continuidad de Información (Observada)" if "Observados" in data_view_mode else "Continuidad de Información (Con Relleno)"
+            
             fig_avail = px.density_heatmap(
                 avail_full, 
-                x=Config.YEAR_COL, 
-                y=Config.STATION_NAME_COL, 
-                z='Meses con Datos',
-                nbinsx=len(all_years),
-                nbinsy=len(all_stations),
-                color_continuous_scale=[
-                    (0, "white"),     # 0 meses (Vacío)
-                    (0.01, "#ffcccc"), # 1-3 meses (Muy pobre)
-                    (0.5, "#ffaa00"), # 6 meses (Parcial)
-                    (1.0, "#006400")  # 12 meses (Completo - Verde oscuro)
-                ],
-                range_color=[0, 12], # Escala fija de 0 a 12 meses
-                title="Mapa de Calor: Continuidad de Información (0-12 meses/año)",
-                height=max(400, len(all_stations) * 20) # Altura dinámica según número de estaciones
+                x=Config.YEAR_COL, y=Config.STATION_NAME_COL, z='Meses con Datos',
+                nbinsx=len(all_years), nbinsy=len(all_stations),
+                color_continuous_scale=[(0, "white"), (0.01, "#ffcccc"), (0.5, "#ffaa00"), (1.0, "#006400")],
+                range_color=[0, 12], 
+                title=title_chart,
+                height=max(400, len(all_stations) * 20)
             )
-            
-            fig_avail.update_layout(
-                xaxis_title="Año",
-                yaxis_title="Estación",
-                coloraxis_colorbar=dict(title="Meses Reg."),
-                xaxis=dict(dtick=1), # Mostrar todos los años si es posible
-                yaxis=dict(dtick=1)
-            )
-            # Añadir bordes a las celdas para claridad
+            fig_avail.update_layout(xaxis_title="Año", yaxis_title="Estación", coloraxis_colorbar=dict(title="Meses"), xaxis=dict(dtick=1), yaxis=dict(dtick=1))
             fig_avail.update_traces(ygap=1, xgap=1) 
-            
             st.plotly_chart(fig_avail, use_container_width=True)
             
-            # 3. Métricas Resumen
+            # 3. Métricas
             c1, c2, c3 = st.columns(3)
             total_months = len(all_years) * 12
             actual_months = avail['Meses con Datos'].sum()
@@ -1138,24 +1122,14 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
             c2.metric("Rango de Años", f"{min(all_years)} - {max(all_years)}")
             c3.metric("Completitud Global", f"{completeness:.1f}%")
 
-            # 4. Tabla de Datos Detallada
+            # 4. Tabla
             with st.expander("Ver Tabla de Disponibilidad", expanded=False):
-                pivot_avail = avail_full.pivot(
-                    index=Config.STATION_NAME_COL, 
-                    columns=Config.YEAR_COL, 
-                    values='Meses con Datos'
-                )
-                # Estilo: Resaltar celdas completas (12)
-                st.dataframe(
-                    pivot_avail.style.background_gradient(cmap="Greens", vmin=0, vmax=12).format("{:.0f}"),
-                    use_container_width=True
-                )
+                pivot_avail = avail_full.pivot(index=Config.STATION_NAME_COL, columns=Config.YEAR_COL, values='Meses con Datos')
+                st.dataframe(pivot_avail.style.background_gradient(cmap="Greens", vmin=0, vmax=12).format("{:.0f}"), use_container_width=True)
         else:
-            st.warning("No hay datos cargados para generar la matriz de disponibilidad.")
-            
-    # ==========================================
-    # PESTAÑA 3: SERIES ANUALES
-    # ==========================================
+            st.warning("No hay datos cargados.")
+
+    # --- PESTAÑA 3: SERIES ANUALES ---
     with tab_matrix:
         st.markdown("#### 📅 Series de Precipitación Anual Acumulada")
         if df_anual is not None and not df_anual.empty:
@@ -1171,7 +1145,7 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                 pivot_anual = df_anual.pivot(index=Config.YEAR_COL, columns=Config.STATION_NAME_COL, values=Config.PRECIPITATION_COL)
                 st.dataframe(pivot_anual.style.format("{:.0f}"), use_container_width=True)
         else:
-            st.info("No hay datos anuales disponibles. Revisa los filtros.")
+            st.info("No hay datos anuales disponibles.")
 
     # --- 3. ANÁLISIS DEL PUNTO SELECCIONADO ---
     if st.session_state.selected_point:
@@ -4000,6 +3974,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
