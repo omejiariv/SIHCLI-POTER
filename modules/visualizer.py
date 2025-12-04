@@ -1256,7 +1256,7 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         "3. Serie Mensual", 
         "4. Ciclo Anual (Promedio)",
         "5. Distribución y Frecuencia",
-        "6. Análisis Estacional Detallado (NUEVO)" # <--- AQUÍ ESTÁ LA MAGIA
+        "6. Análisis Estacional Detallado" # <--- AQUÍ ESTÁ LA MAGIA
     ]
     tabs = st.tabs(tab_names)
     
@@ -4071,6 +4071,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
