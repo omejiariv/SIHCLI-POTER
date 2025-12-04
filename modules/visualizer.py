@@ -1255,9 +1255,12 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         "3. Serie Mensual", 
         "4. Ciclo Anual (Promedio)",
         "5. Análisis Estacional Detallado",
-        "6. Distribución de Frecuencias (NUEVO)" # <--- NUEVA PESTAÑA
+        "6. Distribución de Frecuencias (NUEVO)"
     ]
     tabs = st.tabs(tab_names)
+
+
+Serie Anual, Ranking Multianual, Serie Mensual, Ciclo Anual (Promedio), Análisis Estacional Detallado, Distribución de Frecuencias
     
     # -------------------------------------------------------------------------
     # 1. SERIE ANUAL
@@ -1371,15 +1374,15 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         st.download_button("📥 Descargar Ciclo", ciclo.to_csv(index=False).encode('utf-8'), "ciclo.csv", "text/csv")
 
     # -------------------------------------------------------------------------
-    # 5. DISTRIBUCIÓN
+    # 5. DISTRIBUCIÓN (TU CÓDIGO CORREGIDO)
     # -------------------------------------------------------------------------
     with tabs[4]:
-        st.markdown("##### Análisis Estadístico")
+        st.markdown("##### Análisis Estadístico de Distribución")
         
         c1, c2, c3 = st.columns(3)
-        with c1: data_src = st.radio("Datos:", ["Anual (Totales)", "Mensual (Detalle)"], horizontal=True)
-        with c2: chart_typ = st.radio("Gráfico:", ["Violín", "Histograma", "ECDF"], horizontal=True)
-        with c3: sort_ord = st.selectbox("Orden:", ["Alfabético", "Mayor a Menor"])
+        with c1: data_src = st.radio("Datos:", ["Anual (Totales)", "Mensual (Detalle)"], horizontal=True, key="dist_src")
+        with c2: chart_typ = st.radio("Gráfico:", ["Violín", "Histograma", "ECDF"], horizontal=True, key="dist_type")
+        with c3: sort_ord = st.selectbox("Orden:", ["Alfabético", "Mayor a Menor"], key="dist_sort")
 
         df_plot = df_anual_melted if "Anual" in data_src else df_monthly_filtered
         
@@ -1399,189 +1402,61 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
 
         fig_dist.update_layout(height=600, title=f"Distribución {data_src} - {chart_typ}")
         st.plotly_chart(fig_dist, use_container_width=True)
-        
-        # Guardar
         st.session_state['report_fig_dist'] = fig_dist
+        
+        # Tabla resumen rápida
+        with st.expander("Ver Resumen Estadístico"):
+            desc = df_plot.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].describe()
+            st.dataframe(desc, use_container_width=True)
 
+    # -------------------------------------------------------------------------
+    # 6. ANÁLISIS ESTACIONAL DETALLADO (TU CÓDIGO CORREGIDO)
     # -------------------------------------------------------------------------
     with tabs[5]:
         st.markdown("#### 📅 Ciclo Anual Comparativo (Spaghetti Plot)")
-        st.info("Este gráfico permite comparar el comportamiento de cada año individual frente al promedio histórico, facilitando la identificación de años secos o húmedos.")
+        st.info("Compara el comportamiento de cada año individual frente al promedio histórico.")
 
-        # Selector de Estación Específica para este análisis detallado
-        # (Usamos una clave única para no chocar con otros selectores)
         sel_st_detail = st.selectbox("Analizar Estación:", stations_for_analysis, key="st_detail_seasonal")
         
         if sel_st_detail:
-            # Filtrar datos para la estación
             df_st = df_monthly_filtered[df_monthly_filtered[Config.STATION_NAME_COL] == sel_st_detail].copy()
             
-            # Controles
             c_hl, c_type = st.columns([1, 1])
             with c_hl:
                 years = sorted(df_st['Año'].unique(), reverse=True)
                 hl_year = st.selectbox("Resaltar Año:", [None] + years, key="hl_year_seasonal")
-            
             with c_type:
-                chart_mode = st.radio("Tipo de Visualización:", ["Líneas (Spaghetti)", "Cajas (Variabilidad)"], horizontal=True)
+                chart_mode = st.radio("Tipo de Visualización:", ["Líneas (Spaghetti)", "Cajas (Variabilidad)"], horizontal=True, key="mode_seasonal")
 
             if chart_mode == "Líneas (Spaghetti)":
                 fig_multi = go.Figure()
-                
-                # 1. Dibujar todos los años (Fondo)
                 for yr in years:
                     df_y = df_st[df_st['Año'] == yr].sort_values('Mes')
-                    
-                    # Estilo base (Gris tenue)
                     color = "rgba(200, 200, 200, 0.4)"
                     width = 1
                     opacity = 0.5
                     name = str(yr)
-                    show_leg = False # Ocultar leyenda para no saturar
+                    show_leg = False
+                    if hl_year and yr == hl_year: 
+                        color = "red"; width = 4; opacity = 1.0; show_leg = True
                     
-                    # Estilo Resaltado
-                    if hl_year and yr == hl_year:
-                        color = "red"
-                        width = 4
-                        opacity = 1.0
-                        show_leg = True
-                    
-                    fig_multi.add_trace(go.Scatter(
-                        x=df_y['Nombre_Mes'], y=df_y[Config.PRECIPITATION_COL],
-                        mode='lines', name=name,
-                        line=dict(color=color, width=width),
-                        opacity=opacity,
-                        showlegend=show_leg,
-                        hoverinfo='name+y'
-                    ))
+                    fig_multi.add_trace(go.Scatter(x=df_y['Nombre_Mes'], y=df_y[Config.PRECIPITATION_COL], mode='lines', name=name, line=dict(color=color, width=width), opacity=opacity, showlegend=show_leg, hoverinfo='name+y'))
 
-                # 2. Añadir Promedio Histórico (Climatología)
                 clim = df_st.groupby('Nombre_Mes')[Config.PRECIPITATION_COL].mean().reindex(list(meses_orden.values()))
-                fig_multi.add_trace(go.Scatter(
-                    x=clim.index, y=clim.values,
-                    mode='lines+markers', name='Promedio Histórico',
-                    line=dict(color='black', width=3, dash='dot'),
-                    marker=dict(size=8, color='black')
-                ))
-                
-                fig_multi.update_layout(
-                    title=f"Ciclo Anual Comparativo - {sel_st_detail}",
-                    xaxis_title="Mes", yaxis_title="Precipitación (mm)",
-                    hovermode="x unified", height=500
-                )
+                fig_multi.add_trace(go.Scatter(x=clim.index, y=clim.values, mode='lines+markers', name='Promedio Histórico', line=dict(color='black', width=3, dash='dot'), marker=dict(size=8, color='black')))
+                fig_multi.update_layout(title=f"Ciclo Anual Comparativo - {sel_st_detail}", xaxis_title="Mes", yaxis_title="Precipitación (mm)", hovermode="x unified", height=500)
                 st.plotly_chart(fig_multi, use_container_width=True)
-                
-            else: # Gráfico de Cajas
-                fig_box = px.box(
-                    df_st, x='Nombre_Mes', y=Config.PRECIPITATION_COL,
-                    category_orders={"Nombre_Mes": list(meses_orden.values())},
-                    color='Nombre_Mes',
-                    points="all", # Mostrar puntos dispersos
-                    title=f"Variabilidad Mensual Histórica - {sel_st_detail}"
-                )
+            else:
+                fig_box = px.box(df_st, x='Nombre_Mes', y=Config.PRECIPITATION_COL, category_orders={"Nombre_Mes": list(meses_orden.values())}, color='Nombre_Mes', points="all", title=f"Variabilidad Mensual Histórica - {sel_st_detail}")
                 fig_box.update_layout(showlegend=False, height=500)
                 st.plotly_chart(fig_box, use_container_width=True)
 
-            # Datos Tabulares del Año Resaltado vs Promedio
             if hl_year:
                 st.markdown(f"###### Detalle Año {hl_year} vs Promedio")
                 df_y_hl = df_st[df_st['Año'] == hl_year].set_index('Nombre_Mes')[Config.PRECIPITATION_COL]
                 comp_df = pd.DataFrame({'Año Seleccionado': df_y_hl, 'Promedio Histórico': clim})
                 comp_df['Diferencia (%)'] = ((comp_df['Año Seleccionado'] - comp_df['Promedio Histórico']) / comp_df['Promedio Histórico']) * 100
                 st.dataframe(comp_df.style.format("{:.1f}"), use_container_width=True)
-
-    # 6. DISTRIBUCIÓN DE FRECUENCIAS (NUEVO - TU SOLICITUD)
-    # -------------------------------------------------------------------------
-    with tabs[6]:
-        st.markdown("#### 📉 Distribución Estadística de la Precipitación")
-        
-        # --- Controles ---
-        c_data, c_chart, c_st = st.columns(3)
-        with c_data:
-            data_src = st.radio("1. Datos a Analizar:", ["Mensual (Todos los registros)", "Anual (Totales acumulados)"], horizontal=True)
-        
-        with c_chart:
-            chart_type = st.selectbox("2. Tipo de Gráfico:", 
-                ["Histograma (Frecuencia)", "Curva de Frecuencia Acumulada (ECDF)", "Gráfico de Violín (Densidad)", "Boxplot (Cajas)"]
-            )
-            
-        with c_st:
-            scope = st.radio("3. Alcance:", ["Todas las Estaciones (Comparativo)", "Estación Específica"], horizontal=True)
-            sel_st_dist = None
-            if scope == "Estación Específica":
-                sel_st_dist = st.selectbox("Seleccione:", stations_for_analysis, key="st_dist_sel")
-
-        # --- Preparación de Datos ---
-        df_plot = df_anual_melted if "Anual" in data_src else df_monthly_filtered
-        
-        # Filtrar si es una estación específica
-        if sel_st_dist:
-            df_plot = df_plot[df_plot[Config.STATION_NAME_COL] == sel_st_dist]
-            title_suffix = f"- {sel_st_dist}"
-        else:
-            title_suffix = "- Todas las Estaciones"
-
-        # --- Generación de Gráficos ---
-        fig_dist = go.Figure()
-
-        if "Histograma" in chart_type:
-            # Histograma con opción de densidad o conteo
-            fig_dist = px.histogram(
-                df_plot, 
-                x=Config.PRECIPITATION_COL, 
-                color=Config.STATION_NAME_COL if not sel_st_dist else None, # Colores por estación si son todas
-                marginal="box", # Añade un boxplot pequeño arriba
-                nbins=30,
-                opacity=0.7,
-                title=f"Histograma de Precipitación {data_src} {title_suffix}",
-                labels={Config.PRECIPITATION_COL: "Precipitación (mm)"}
-            )
-            fig_dist.update_layout(barmode='overlay')
-
-        elif "Curva de Frecuencia Acumulada" in chart_type:
-            # ECDF (Empirical Cumulative Distribution Function)
-            fig_dist = px.ecdf(
-                df_plot, 
-                x=Config.PRECIPITATION_COL, 
-                color=Config.STATION_NAME_COL if not sel_st_dist else None,
-                title=f"Probabilidad Acumulada (ECDF) {data_src} {title_suffix}",
-                labels={Config.PRECIPITATION_COL: "Precipitación (mm)"}
-            )
-            fig_dist.update_yaxes(title="Probabilidad Acumulada")
-
-        elif "Violín" in chart_type:
-            # Gráfico de Violín (Muestra la densidad de la distribución)
-            fig_dist = px.violin(
-                df_plot, 
-                y=Config.PRECIPITATION_COL, 
-                x=Config.STATION_NAME_COL if not sel_st_dist else None, # X es la estación para comparar
-                color=Config.STATION_NAME_COL if not sel_st_dist else None,
-                box=True, # Muestra la caja adentro
-                points="all", # Muestra todos los puntos
-                title=f"Distribución de Densidad (Violín) {data_src} {title_suffix}"
-            )
-            fig_dist.update_layout(showlegend=False)
-
-        elif "Boxplot" in chart_type:
-             # Boxplot clásico
-            fig_dist = px.box(
-                df_plot, 
-                y=Config.PRECIPITATION_COL, 
-                x=Config.STATION_NAME_COL if not sel_st_dist else None,
-                color=Config.STATION_NAME_COL if not sel_st_dist else None,
-                points="outliers", # Solo outliers para no saturar
-                title=f"Diagrama de Caja y Bigotes {data_src} {title_suffix}"
-            )
-            fig_dist.update_layout(showlegend=False)
-
-        # Ajustes finales
-        fig_dist.update_layout(height=600)
-        st.plotly_chart(fig_dist, use_container_width=True)
-
-        # Estadísticas Descriptivas Rápidas
-        with st.expander("Ver Estadísticas Descriptivas"):
-            desc = df_plot[Config.PRECIPITATION_COL].describe()
-            st.dataframe(desc.to_frame().T, use_container_width=True)
         
 def display_weekly_forecast_tab(stations_for_analysis, gdf_filtered):
     """Muestra el pronóstico semanal para una estación seleccionada."""
@@ -4163,6 +4038,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
