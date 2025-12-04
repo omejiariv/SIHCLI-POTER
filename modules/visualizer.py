@@ -1075,23 +1075,84 @@ def display_spatial_distribution_tab(gdf_filtered, df_long, gdf_municipios, gdf_
                     st.session_state.selected_point = {'lat': clicked['lat'], 'lng': clicked['lng']}
                     st.rerun()
 
-    # ==========================================
-    # PESTAÑA 2: DISPONIBILIDAD
+    # PESTAÑA 2: DISPONIBILIDAD (MEJORADA)
     # ==========================================
     with tab_avail:
-        st.markdown("#### 📊 Inventario de Datos")
+        st.markdown("#### 📊 Inventario y Continuidad de Datos")
+        
         if df_long is not None and not df_long.empty:
-            avail = df_long.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].count().reset_index()
-            avail.rename(columns={Config.PRECIPITATION_COL: 'Registros (Meses)'}, inplace=True)
+            # 1. Preparar datos para el Heatmap
+            # Agrupamos por Estación y Año, contando meses con datos > 0 (o válidos)
+            avail = df_long[df_long[Config.PRECIPITATION_COL].notna()].groupby(
+                [Config.STATION_NAME_COL, Config.YEAR_COL]
+            )[Config.PRECIPITATION_COL].count().reset_index()
             
+            avail.rename(columns={Config.PRECIPITATION_COL: 'Meses con Datos'}, inplace=True)
+            
+            # Asegurar rango completo de años para el gráfico (rellenar huecos con 0)
+            all_years = list(range(int(avail[Config.YEAR_COL].min()), int(avail[Config.YEAR_COL].max()) + 1))
+            all_stations = avail[Config.STATION_NAME_COL].unique()
+            
+            # Crear índice completo
+            full_idx = pd.MultiIndex.from_product([all_stations, all_years], names=[Config.STATION_NAME_COL, Config.YEAR_COL])
+            avail_full = avail.set_index([Config.STATION_NAME_COL, Config.YEAR_COL]).reindex(full_idx, fill_value=0).reset_index()
+            
+            # 2. Gráfico Heatmap Interactivo (Plotly)
             fig_avail = px.density_heatmap(
-                avail, x=Config.YEAR_COL, y=Config.STATION_NAME_COL, z='Registros (Meses)',
-                color_continuous_scale="Viridis", title="Cobertura Temporal de Datos", height=600
+                avail_full, 
+                x=Config.YEAR_COL, 
+                y=Config.STATION_NAME_COL, 
+                z='Meses con Datos',
+                nbinsx=len(all_years),
+                nbinsy=len(all_stations),
+                color_continuous_scale=[
+                    (0, "white"),     # 0 meses (Vacío)
+                    (0.01, "#ffcccc"), # 1-3 meses (Muy pobre)
+                    (0.5, "#ffaa00"), # 6 meses (Parcial)
+                    (1.0, "#006400")  # 12 meses (Completo - Verde oscuro)
+                ],
+                range_color=[0, 12], # Escala fija de 0 a 12 meses
+                title="Mapa de Calor: Continuidad de Información (0-12 meses/año)",
+                height=max(400, len(all_stations) * 20) # Altura dinámica según número de estaciones
             )
+            
+            fig_avail.update_layout(
+                xaxis_title="Año",
+                yaxis_title="Estación",
+                coloraxis_colorbar=dict(title="Meses Reg."),
+                xaxis=dict(dtick=1), # Mostrar todos los años si es posible
+                yaxis=dict(dtick=1)
+            )
+            # Añadir bordes a las celdas para claridad
+            fig_avail.update_traces(ygap=1, xgap=1) 
+            
             st.plotly_chart(fig_avail, use_container_width=True)
+            
+            # 3. Métricas Resumen
+            c1, c2, c3 = st.columns(3)
+            total_months = len(all_years) * 12
+            actual_months = avail['Meses con Datos'].sum()
+            completeness = (actual_months / (len(all_stations) * total_months)) * 100 if len(all_stations) > 0 else 0
+            
+            c1.metric("Total Estaciones", len(all_stations))
+            c2.metric("Rango de Años", f"{min(all_years)} - {max(all_years)}")
+            c3.metric("Completitud Global", f"{completeness:.1f}%")
+
+            # 4. Tabla de Datos Detallada
+            with st.expander("Ver Tabla de Disponibilidad", expanded=False):
+                pivot_avail = avail_full.pivot(
+                    index=Config.STATION_NAME_COL, 
+                    columns=Config.YEAR_COL, 
+                    values='Meses con Datos'
+                )
+                # Estilo: Resaltar celdas completas (12)
+                st.dataframe(
+                    pivot_avail.style.background_gradient(cmap="Greens", vmin=0, vmax=12).format("{:.0f}"),
+                    use_container_width=True
+                )
         else:
             st.warning("No hay datos cargados para generar la matriz de disponibilidad.")
-
+            
     # ==========================================
     # PESTAÑA 3: SERIES ANUALES
     # ==========================================
@@ -3939,6 +4000,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
