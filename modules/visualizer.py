@@ -1258,9 +1258,6 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         "6. Distribución de Frecuencias (NUEVO)"
     ]
     tabs = st.tabs(tab_names)
-
-
-Serie Anual, Ranking Multianual, Serie Mensual, Ciclo Anual (Promedio), Análisis Estacional Detallado, Distribución de Frecuencias
     
     # -------------------------------------------------------------------------
     # 1. SERIE ANUAL
@@ -4038,6 +4035,7 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         file_name="estaciones_promedio_satelite.geojson",
                         mime="application/geo+json"
                     )
+
 
 
 
