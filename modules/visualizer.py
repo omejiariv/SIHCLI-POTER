@@ -144,7 +144,7 @@ def display_welcome_tab():
         * **Investigación:** Base de datos depurada y herramientas estadísticas para estudios académicos.
         
         ---
-        **Versión:** 2.0 (Cloud-Native) | **Desarrollado para:** omejia - POTER.
+        **Versión:** 2.0 (Cloud-Native) | **Desarrollado por:** omejia - POTER.
         """)
 
     # --- PESTAÑA 2: CLIMATOLOGÍA ANDINA ---
@@ -4256,3 +4256,4 @@ def display_statistics_summary_tab(df_monthly, df_anual, gdf_stations, **kwargs)
             {"Tipo": "Mayor Aumento", "Estación": max_trend['Estacion'], "Pendiente": f"{max_trend['Slope']:.2f} mm/año"},
             {"Tipo": "Mayor Disminución", "Estación": min_trend['Estacion'], "Pendiente": f"{min_trend['Slope']:.2f} mm/año"}
         ]), use_container_width=True, hide_index=True)
+
