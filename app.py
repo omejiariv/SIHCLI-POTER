@@ -67,13 +67,17 @@ def main():
         st.error("No se pudieron cargar los datos. Revise la conexión.")
         st.stop()
 
-    # --- C. SIDEBAR (FILTROS) ---
-    (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_filtered, analysis_mode, 
-     sel_regions, sel_munis, selected_months, year_range) = create_sidebar(gdf_stations, df_long)
+    # --- C. SIDEBAR ---
+    try:
+        (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_filtered, analysis_mode, 
+         sel_regions, sel_munis, selected_months, year_range) = create_sidebar(gdf_stations, df_long)
+    except Exception as e:
+        st.error(f"Error en Sidebar: {e}")
+        st.stop()
 
-    # Interpolación (Opcional)
+    # Procesamiento adicional (Interpolación)
     if st.session_state.get('apply_interpolation', False):
-        with st.spinner("Aplicando interpolación..."):
+        with st.spinner("Interpolando..."):
             df_monthly_filtered = complete_series(df_monthly_filtered)
             df_anual_melted = df_monthly_filtered.groupby([Config.STATION_NAME_COL, Config.YEAR_COL])[Config.PRECIPITATION_COL].sum().reset_index()
 
@@ -84,7 +88,6 @@ def main():
     except:
         start_date, end_date = None, None
 
-    # Datos Completos
     mask_base = (
         (df_long[Config.YEAR_COL] >= year_range[0]) & 
         (df_long[Config.YEAR_COL] <= year_range[1]) &
@@ -92,7 +95,7 @@ def main():
     )
     df_complete_filtered = df_long.loc[mask_base].copy()
 
-    # Argumentos Globales
+    # Argumentos
     display_args = {
         "df_long": df_monthly_filtered,
         "df_complete": df_complete_filtered,
@@ -114,7 +117,7 @@ def main():
         "end_date": end_date
     }
 
-    # --- D. RENDERIZADO PRINCIPAL ---
+    # --- D. RENDERIZADO (AQUÍ ESTÁ LA CLAVE) ---
     
     # 1. CAJA DE RESUMEN (LLAMADA DIRECTA Y SEGURA)
     try:
@@ -129,79 +132,59 @@ def main():
     except Exception as e:
         st.warning(f"No se pudo mostrar el resumen de filtros: {e}")
 
-    # 2. PESTAÑAS DE NAVEGACIÓN
+    # 2. PESTAÑAS
     tab_titles = [
-        "🏠 Inicio", 
-        "🚨 Monitoreo", 
-        "🗺️ Distribución", 
-        "📈 Gráficos", 
-        "📊 Estadísticas",
-        "🔮 Pronóstico Climático", 
-        "📉 Tendencias",
-        "⚠️ Anomalías", 
-        "🔗 Correlación", 
-        "🌊 Extremos", 
-        "🌍 Mapas Avanzados", 
-        "🧪 Sesgo",
-        "🌿 Cobertura", 
-        "🌱 Zonas Vida", 
-        "🌡️ Clima Futuro", 
-        "📄 Reporte"
+        "🏠 Inicio", "🚨 Monitoreo", "🗺️ Distribución", "📈 Gráficos", 
+        "📊 Estadísticas", "🔮 Pronóstico Climático", "📉 Tendencias", "⚠️ Anomalías", 
+        "🔗 Correlación", "🌊 Extremos", "🌍 Mapas Avanzados", "🧪 Sesgo",
+        "🌿 Cobertura", "🌱 Zonas Vida", "🌡️ Clima Futuro", "📄 Reporte"
     ]
     
-    # Renderizar Pestañas
     tabs = st.tabs(tab_titles)
 
-    # Contenido de Pestañas (Uno por uno)
+    # 3. CONTENIDO DE PESTAÑAS (PROTEGIDO)
     with tabs[0]: display_welcome_tab()
     with tabs[1]: display_realtime_dashboard(df_complete_filtered, gdf_stations, gdf_filtered)
+    
     with tabs[2]: 
         display_spatial_distribution_tab(
             user_loc=None, 
             interpolacion="Si" if st.session_state.get('apply_interpolation') else "No", 
             **display_args
         )
+    
     with tabs[3]: display_graphs_tab(**display_args)
     with tabs[4]: 
         display_stats_tab(**display_args)
         st.markdown("---")
         display_station_table_tab(**display_args)
+    
     with tabs[5]: display_climate_forecast_tab(**display_args)
     with tabs[6]: display_trends_and_forecast_tab(**display_args)
     with tabs[7]: display_anomalies_tab(**display_args)
     with tabs[8]: display_correlation_tab(**display_args)
     with tabs[9]: display_drought_analysis_tab(**display_args)
     with tabs[10]: display_advanced_maps_tab(**display_args)
+    
     with tabs[11]: 
         try:
             from modules.visualizer import display_bias_correction_tab
             display_bias_correction_tab(**display_args)
-        except Exception as e:
-            st.error(f"Error cargando módulo de Sesgo: {e}")
+        except: st.info("Módulo Sesgo cargando...")
+        
     with tabs[12]: display_land_cover_analysis_tab(**display_args)
     with tabs[13]: display_life_zones_tab(**display_args)
     with tabs[14]: display_climate_scenarios_tab(**display_args)
+    
     with tabs[15]: 
-        st.header("Generar Reporte PDF")
-        if st.button("Generar Reporte Ejecutivo", type="primary"):
-            with st.spinner("Generando..."):
-                res = {"n_estaciones": len(stations_for_analysis), "rango": f"{year_range}"}
-                pdf = generate_pdf_report(df_monthly_filtered, gdf_filtered, res)
-                if pdf: st.download_button("📥 Descargar PDF", pdf, "reporte.pdf", "application/pdf")
-                else: st.error("Error al generar reporte.")
+        st.header("Reporte PDF")
+        if st.button("Generar"):
+            res = {"n_estaciones": len(stations_for_analysis), "rango": f"{year_range}"}
+            pdf = generate_pdf_report(df_monthly_filtered, gdf_filtered, res)
+            if pdf: st.download_button("Descargar", pdf, "reporte.pdf", "application/pdf")
 
-    # CSS para ajustar espaciado
-    st.markdown("""
-    <style>
-        /* Reducir espacio superior */
-        .block-container { padding-top: 1rem; }
-        /* Ajuste de pestañas */
-        .stTabs [data-baseweb="tab-list"] { gap: 2px; }
-        .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; }
-    </style>
-    """, unsafe_allow_html=True)
+    # CSS
+    st.markdown("""<style>.stTabs [data-baseweb="tab-panel"] { padding-top: 1rem; }</style>""", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
-
-
