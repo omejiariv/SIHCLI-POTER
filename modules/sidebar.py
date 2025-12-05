@@ -142,7 +142,7 @@ def create_sidebar(gdf_stations, df_long):
             max_y = int(df_long[Config.YEAR_COL].max())
             year_range = st.slider("Años:", min_y, max_y, (max_y-10, max_y))
         except:
-            year_range = (1990, 2020) # Fallback por seguridad
+            year_range = (1980, 2020) # Fallback por seguridad
 
         # --- 4. FILTRO DE MESES ---
         st.markdown("### 📆 Análisis Estacional")
@@ -211,3 +211,4 @@ def create_sidebar(gdf_stations, df_long):
         # RETORNO
         return (stations_for_analysis, df_anual_melted, df_monthly_filtered, gdf_final, 
                 str_interpolacion, selected_regions, selected_municipios, selected_months_nums, year_range)
+
