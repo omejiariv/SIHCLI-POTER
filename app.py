@@ -109,16 +109,18 @@ def main():
 
     # --- D. RENDERIZADO PRINCIPAL ---
     
-    # 1. CAJA DE RESUMEN (Visible siempre arriba)
-    # La ponemos FUERA de las pestañas para garantizar visibilidad
-    display_current_filters(
-        stations_sel=stations_for_analysis, 
-        regions_sel=sel_regions, 
-        munis_sel=sel_munis, 
-        year_range=year_range,
-        interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
-        df_data=df_monthly_filtered
-    )
+    # 1. CAJA DE RESUMEN (LLAMADA DIRECTA Y SEGURA)
+    try:
+        display_current_filters(
+            stations_sel=stations_for_analysis, 
+            regions_sel=sel_regions, 
+            munis_sel=sel_munis, 
+            year_range=year_range,
+            interpolacion="Si" if st.session_state.get('apply_interpolation') else "No",
+            df_data=df_monthly_filtered
+        )
+    except Exception as e:
+        st.warning(f"No se pudo mostrar el resumen de filtros: {e}")
 
     # 2. PESTAÑAS DE NAVEGACIÓN
     tab_titles = [
@@ -194,3 +196,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
