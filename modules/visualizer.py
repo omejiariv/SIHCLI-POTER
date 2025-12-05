@@ -48,45 +48,48 @@ except ImportError:
     def calculate_climatic_indices(ts, a): return {}
     def calculate_hypsometric_curve(g): return None
 
-# 0. CAJA DE RESUMEN GLOBAL (MEJORADA Y UNIFICADA)
+# 0. CAJA DE RESUMEN GLOBAL (VISIBLE SIEMPRE)
 # ==============================================================================
 def display_current_filters(stations_sel, regions_sel, munis_sel, year_range, interpolacion="No detectado", df_data=None):
     """
-    Muestra un resumen desplegable de los filtros activos en la aplicación.
-    Fusiona la lógica de presentación general con las estadísticas detalladas.
+    Muestra el resumen de filtros activo. Se debe llamar al inicio de la app.
     """
-    # 1. Formateo de Listas (Municipios)
+    # Lógica de texto para Municipios
     if not munis_sel:
         munis_str = "Todos / Ninguno específico"
     else:
         total_munis = len(munis_sel)
         if total_munis > 3:
-            munis_str = ", ".join(list(munis_sel)[:3]) + f", ... (y {total_munis - 3} más)"
+            munis_list = list(munis_sel)
+            munis_str = ", ".join(munis_list[:3]) + f", ... (y {total_munis - 3} más)"
         else:
             munis_str = ", ".join(munis_sel)
 
-    # 2. Formateo de Regiones
+    # Lógica de texto para Regiones
     if not regions_sel:
         region_str = "Todas las regiones"
     else:
         region_str = ", ".join(regions_sel)
         
-    # 3. Lógica de Interpolación (Auto-detección si no se pasa explícito)
+    # Lógica de Interpolación
     if interpolacion == "No detectado":
-        interpolacion = "Si" if st.session_state.get('apply_interpolation') else "No"
+        interpolacion = "Si" if st.session_state.get('apply_interpolation', False) else "No"
 
-    # 4. Cálculo de Estadísticas (Si hay DataFrame)
+    # Estadísticas Rápidas
     stats_str = ""
     total_records_metric = 0
     if df_data is not None and not df_data.empty:
         total_records_metric = len(df_data)
-        valid_rows = len(df_data[df_data[Config.PRECIPITATION_COL] > 0])
-        pct_registros = (valid_rows / total_records_metric * 100) if total_records_metric > 0 else 0
-        stats_str = f"* **💾 Calidad de Datos:** {pct_registros:.1f}% registros válidos (>0 mm)"
+        if total_records_metric > 0:
+            valid_rows = len(df_data[df_data[Config.PRECIPITATION_COL] > 0])
+            pct_registros = (valid_rows / total_records_metric * 100)
+            stats_str = f"* **💾 Calidad de Datos:** {pct_registros:.1f}% registros válidos (>0 mm)"
+        else:
+            stats_str = "* **💾 Calidad de Datos:** 0 registros"
     else:
         stats_str = "* **💾 Calidad de Datos:** No disponible"
 
-    # 5. Renderizado de la Caja Unificada
+    # Renderizado
     with st.expander("📝 Resumen de Filtros, Configuración y Estadísticas", expanded=False):
         st.info(f"""
         **Configuración Actual del Tablero:**
@@ -97,9 +100,8 @@ def display_current_filters(stations_sel, regions_sel, munis_sel, year_range, in
         {stats_str}
         """)
         
-        # Métricas visuales integradas
         c1, c2, c3 = st.columns(3)
-        c1.metric("Estaciones Seleccionadas", len(stations_sel))
+        c1.metric("Estaciones Seleccionadas", len(stations_sel) if stations_sel else 0)
         c2.metric("Años de Análisis", f"{year_range[1] - year_range[0] + 1}")
         if total_records_metric > 0:
             c3.metric("Total Registros Procesados", f"{total_records_metric:,}")
@@ -4256,5 +4258,6 @@ def display_statistics_summary_tab(df_monthly, df_anual, gdf_stations, **kwargs)
             {"Tipo": "Mayor Aumento", "Estación": max_trend['Estacion'], "Pendiente": f"{max_trend['Slope']:.2f} mm/año"},
             {"Tipo": "Mayor Disminución", "Estación": min_trend['Estacion'], "Pendiente": f"{min_trend['Slope']:.2f} mm/año"}
         ]), use_container_width=True, hide_index=True)
+
 
 
