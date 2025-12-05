@@ -2,62 +2,69 @@ import streamlit as st
 import pandas as pd
 import warnings
 
-# --- 1. CONFIGURACIÓN DE PÁGINA (ESTRICTAMENTE PRIMERA LÍNEA) ---
+# --- 1. CONFIGURACIÓN DE PÁGINA (PRIMERA LÍNEA ABSOLUTA) ---
 st.set_page_config(page_title="SIHCLI-POTER", page_icon="🌧️", layout="wide")
 warnings.filterwarnings('ignore')
 
 # --- 2. IMPORTACIONES ---
-from modules.config import Config
-from modules.data_processor import load_and_process_all_data, complete_series
-from modules.sidebar import create_sidebar
-from modules.reporter import generate_pdf_report
-
-# Importación segura de db_manager
 try:
-    import modules.db_manager as db_manager
-    DB_AVAILABLE = True
-except ImportError:
-    DB_AVAILABLE = False
-    # print("Advertencia: db_manager no encontrado.") # Comentado para no ensuciar logs
+    from modules.config import Config
+    from modules.data_processor import load_and_process_all_data, complete_series
+    from modules.sidebar import create_sidebar
+    from modules.reporter import generate_pdf_report
+    
+    # Intentamos importar db_manager pero no dejamos que rompa la app
+    try:
+        import modules.db_manager as db_manager
+        DB_AVAILABLE = True
+    except ImportError:
+        DB_AVAILABLE = False
 
-# Importaciones del Visualizador
-from modules.visualizer import (
-    display_current_filters,
-    display_welcome_tab,
-    display_realtime_dashboard,
-    display_spatial_distribution_tab,
-    display_graphs_tab,
-    display_stats_tab,
-    display_trends_and_forecast_tab,
-    display_anomalies_tab,
-    display_correlation_tab,
-    display_drought_analysis_tab,
-    display_advanced_maps_tab,
-    display_life_zones_tab,
-    display_land_cover_analysis_tab,
-    display_climate_scenarios_tab,
-    display_station_table_tab,
-    display_weekly_forecast_tab,      
-    display_satellite_imagery_tab,
-    display_climate_forecast_tab
-)
+    from modules.visualizer import (
+        display_current_filters,
+        display_welcome_tab,
+        display_realtime_dashboard,
+        display_spatial_distribution_tab,
+        display_graphs_tab,
+        display_stats_tab,
+        display_trends_and_forecast_tab,
+        display_anomalies_tab,
+        display_correlation_tab,
+        display_drought_analysis_tab,
+        display_advanced_maps_tab,
+        display_life_zones_tab,
+        display_land_cover_analysis_tab,
+        display_climate_scenarios_tab,
+        display_station_table_tab,
+        display_weekly_forecast_tab,      
+        display_satellite_imagery_tab,
+        display_climate_forecast_tab
+    )
+except Exception as e:
+    st.error(f"Error crítico importando módulos: {e}")
+    st.stop()
 
 def main():
     # --- A. INICIALIZACIÓN ---
     if DB_AVAILABLE:
         try: db_manager.init_db()
-        except Exception: pass
+        except: pass
 
-    # Inicializar estado
     for k in ['lz_raster_result', 'lz_profile', 'lz_names', 'lz_colors']:
         if k not in st.session_state: st.session_state[k] = None
 
-    # --- B. CARGA DE DATOS ---
-    with st.spinner("Cargando sistema SIHCLI-POTER..."):
-        gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
+    # --- B. CARGA DE DATOS (CON SPINNER VISIBLE) ---
+    data_loaded = False
+    with st.spinner("Cargando datos..."):
+        try:
+            gdf_stations, gdf_municipios, df_long, df_enso, gdf_subcuencas, gdf_predios = load_and_process_all_data()
+            data_loaded = True
+        except Exception as e:
+            st.error(f"Error cargando datos: {e}")
+            st.stop()
     
-    if gdf_stations is None or df_long is None:
-        st.error("⚠️ Error Crítico: No se pudieron cargar los datos. Revise la conexión.")
+    if not data_loaded or gdf_stations is None or df_long is None:
+        st.error("No se pudieron cargar los datos. Revise la conexión.")
         st.stop()
 
     # --- C. SIDEBAR (FILTROS) ---
@@ -196,4 +203,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
