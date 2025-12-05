@@ -2630,34 +2630,39 @@ def display_anomalies_tab(df_long, df_monthly_filtered, stations_for_analysis, *
             wettest['Fecha'] = wettest['Fecha'].dt.strftime('%Y-%m')
             st.dataframe(wettest.style.format("{:.1f}", subset=['Ppt Real', 'Ppt Normal', 'Diferencia']), use_container_width=True)
 
-def display_stats_tab(**kwargs):
+# FUNCIÓN ESTADÍSTICAS (REVISADA Y MEJORADA)
+# ==============================================================================
+def display_stats_tab(df_long, df_anual_melted, gdf_stations, **kwargs):
     st.subheader("📊 Estadísticas Hidrológicas Detalladas")
     
-    # Recuperar datos
-    df_monthly = kwargs.get('df_monthly_filtered')
-    df_anual = kwargs.get('df_anual_melted')
-    
-    if df_monthly is None or df_monthly.empty:
-        st.warning("No hay datos para calcular estadísticas.")
+    # Validación de datos
+    if df_long is None or df_long.empty:
+        st.warning("No hay datos mensuales disponibles para calcular estadísticas.")
         return
 
-    tab1, tab2 = st.tabs(["Resumen General", "Matriz de Disponibilidad"])
+    # Definición de Pestañas Internas
+    # Agregamos la pestaña "Síntesis (Récords)" que creamos antes
+    tab_desc, tab_matriz, tab_sintesis = st.tabs([
+        "📋 Resumen Descriptivo", 
+        "📅 Matriz de Disponibilidad", 
+        "🏆 Síntesis de Récords"
+    ])
 
-    with tab1:
-        # 1. Tabla de Resumen Estadístico
-        st.markdown("##### Estadísticas Descriptivas por Estación")
+    # --- PESTAÑA 1: RESUMEN DESCRIPTIVO ---
+    with tab_desc:
+        st.markdown("##### Estadísticas Descriptivas por Estación (Mensual)")
         
-        # Agrupar por estación
-        stats_df = df_monthly.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].describe()
+        # Agrupar y calcular estadísticas básicas
+        stats_df = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].describe()
         
-        # Añadir suma total histórica
-        sum_total = df_monthly.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].sum()
+        # Añadir suma total histórica (útil para ver volumen total registrado)
+        sum_total = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].sum()
         stats_df['Total Histórico (mm)'] = sum_total
         
-        # Formatear
+        # Formatear y mostrar
         st.dataframe(stats_df.style.format("{:.1f}"), use_container_width=True)
         
-        # 2. Descargar
+        # Botón de descarga
         st.download_button(
             "📥 Descargar Estadísticas (CSV)",
             stats_df.to_csv().encode('utf-8'),
@@ -2665,31 +2670,46 @@ def display_stats_tab(**kwargs):
             "text/csv"
         )
 
-    with tab2:
+    # --- PESTAÑA 2: MATRIZ DE DISPONIBILIDAD ---
+    with tab_matriz:
         st.markdown("##### Disponibilidad de Datos (Mapa de Calor)")
-        st.info("Muestra qué meses tienen datos registrados. Útil para identificar huecos.")
+        st.info("Muestra la densidad de registros por mes. Color más oscuro = Más datos.")
         
-        # Crear matriz: Filas=Años, Columnas=Meses, Valor=Conteo
-        # Pivotear datos
         try:
-            matrix = df_monthly.pivot_table(
-                index=df_monthly[Config.DATE_COL].dt.year,
-                columns=df_monthly[Config.DATE_COL].dt.month,
+            # Crear matriz pivot: Años vs Meses
+            # Usamos dt.year y dt.month asumiendo que 'date' es datetime
+            # Si df_long no tiene columna 'date' datetime directa, la creamos al vuelo
+            df_matrix = df_long.copy()
+            if 'date' not in df_matrix.columns:
+                 df_matrix['date'] = pd.to_datetime(df_matrix[[Config.YEAR_COL, Config.MONTH_COL]].assign(DAY=1))
+
+            matrix = df_matrix.pivot_table(
+                index=df_matrix['date'].dt.year,
+                columns=df_matrix['date'].dt.month,
                 values=Config.PRECIPITATION_COL,
                 aggfunc='count'
             ).fillna(0)
             
+            # Mapa de calor con Plotly
             fig_matrix = px.imshow(
                 matrix,
-                labels=dict(x="Mes", y="Año", color="Registros"),
+                labels=dict(x="Mes", y="Año", color="N° Registros"),
                 x=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
                 title="Matriz de Densidad de Datos (Registros por Mes)",
-                color_continuous_scale="Greens"
+                color_continuous_scale="Greens",
+                aspect="auto" # Ajustar altura automáticamente
             )
             fig_matrix.update_layout(height=600)
             st.plotly_chart(fig_matrix, use_container_width=True)
+            
         except Exception as e:
             st.warning(f"No se pudo generar la matriz de disponibilidad: {e}")
+
+    # --- PESTAÑA 3: SÍNTESIS (NUEVA) ---
+    with tab_sintesis:
+        # Llamamos a la función que creamos en el paso anterior
+        # Asegúrate de que esta función exista en el mismo archivo o esté importada
+        display_statistics_summary_tab(df_long, df_anual_melted, gdf_stations)
 
 def display_correlation_tab(**kwargs):
     st.subheader("🔗 Análisis de Correlación")
@@ -4236,52 +4256,3 @@ def display_statistics_summary_tab(df_monthly, df_anual, gdf_stations, **kwargs)
             {"Tipo": "Mayor Aumento", "Estación": max_trend['Estacion'], "Pendiente": f"{max_trend['Slope']:.2f} mm/año"},
             {"Tipo": "Mayor Disminución", "Estación": min_trend['Estacion'], "Pendiente": f"{min_trend['Slope']:.2f} mm/año"}
         ]), use_container_width=True, hide_index=True)
-
-# ==============================================================================
-# MODIFICACIÓN EN display_stats_tab PARA INCLUIR ESTA NUEVA PESTAÑA
-# ==============================================================================
-def display_stats_tab(df_long, df_anual_melted, gdf_stations, **kwargs):
-    st.subheader("📊 Estadísticas Descriptivas")
-    
-    # Crear sub-pestañas dentro del módulo Estadísticas
-    # Asegúrate de tener st.tabs aquí
-    t_desc, t_sintesis = st.tabs(["📋 Tabla Descriptiva General", "🏆 Síntesis Estadística (Récords)"])
-    
-    with t_desc:
-        # ... (Aquí va tu código original de la tabla estadística grande) ...
-        # Si tenías st.dataframe(df.describe()...) ponlo aquí.
-        if df_long is not None:
-            st.markdown("##### Resumen Estadístico por Estación (Mensual)")
-            stats_df = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].describe()
-            st.dataframe(stats_df.style.format("{:.1f}"), use_container_width=True)
-        else:
-            st.info("Sin datos.")
-
-    with t_sintesis:
-        # LLAMADA A LA NUEVA FUNCIÓN
-        display_statistics_summary_tab(df_long, df_anual_melted, gdf_stations)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
