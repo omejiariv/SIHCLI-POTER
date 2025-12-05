@@ -4036,6 +4036,230 @@ def display_bias_correction_tab(df_long, gdf_stations, gdf_filtered, **kwargs):
                         mime="application/geo+json"
                     )
 
+def display_statistics_summary_tab(df_monthly, df_anual, gdf_stations, **kwargs):
+    """
+    Tablero de resumen estadístico de alto nivel: Récords, extremos y promedios.
+    """
+    st.markdown("### 🏆 Síntesis Estadística de Precipitación")
+    st.info("Resumen de valores extremos históricos y promedios climatológicos de la red seleccionada.")
+
+    if df_monthly is None or df_monthly.empty or df_anual is None or df_anual.empty:
+        st.warning("No hay suficientes datos para calcular estadísticas.")
+        return
+
+    # --- 1. PREPARACIÓN DE DATOS ---
+    # Aseguramos columnas auxiliares
+    if 'Municipio' not in df_anual.columns and gdf_stations is not None:
+        # Merge para traer municipio y cuenca si no están
+        cols_to_merge = [Config.STATION_NAME_COL, Config.MUNICIPALITY_COL]
+        if 'Cuenca' in gdf_stations.columns: cols_to_merge.append('Cuenca')
+        
+        # Limpieza de duplicados en gdf antes del merge
+        gdf_clean = gdf_stations[cols_to_merge].drop_duplicates(Config.STATION_NAME_COL)
+        
+        df_anual = pd.merge(df_anual, gdf_clean, on=Config.STATION_NAME_COL, how='left')
+        df_monthly = pd.merge(df_monthly, gdf_clean, on=Config.STATION_NAME_COL, how='left')
+
+    # Rellenar nulos de texto
+    df_anual[Config.MUNICIPALITY_COL] = df_anual[Config.MUNICIPALITY_COL].fillna("Desconocido")
+    df_monthly[Config.MUNICIPALITY_COL] = df_monthly[Config.MUNICIPALITY_COL].fillna("Desconocido")
+    
+    col_cuenca = 'Cuenca' if 'Cuenca' in df_anual.columns else None
+    if col_cuenca: 
+        df_anual[col_cuenca] = df_anual[col_cuenca].fillna("N/A")
+        df_monthly[col_cuenca] = df_monthly[col_cuenca].fillna("N/A")
+
+    # --- 2. CÁLCULO DE RÉCORDS ANUALES ---
+    # Máximo Anual
+    idx_max_anual = df_anual[Config.PRECIPITATION_COL].idxmax()
+    row_max_anual = df_anual.loc[idx_max_anual]
+    
+    # Mínimo Anual (evitando ceros si se desea, o absoluto)
+    # Filtramos ceros si se considera error, o los dejamos si son reales. Asumimos > 0 para "año seco real" vs "sin datos"
+    df_anual_pos = df_anual[df_anual[Config.PRECIPITATION_COL] > 0]
+    if not df_anual_pos.empty:
+        idx_min_anual = df_anual_pos[Config.PRECIPITATION_COL].idxmin()
+        row_min_anual = df_anual_pos.loc[idx_min_anual]
+    else:
+        row_min_anual = row_max_anual # Fallback
+
+    # --- 3. CÁLCULO DE RÉCORDS MENSUALES ---
+    idx_max_men = df_monthly[Config.PRECIPITATION_COL].idxmax()
+    row_max_men = df_monthly.loc[idx_max_men]
+    
+    # Mínimo Mensual > 0 (el 0 es común, buscamos el mínimo llovido)
+    df_men_pos = df_monthly[df_monthly[Config.PRECIPITATION_COL] > 0]
+    if not df_men_pos.empty:
+        idx_min_men = df_men_pos[Config.PRECIPITATION_COL].idxmin()
+        row_min_men = df_men_pos.loc[idx_min_men]
+    else:
+        row_min_men = row_max_men
+
+    # --- 4. PROMEDIOS REGIONALES ---
+    # Año más lluvioso (Promedio de todas las estaciones ese año)
+    regional_anual = df_anual.groupby(Config.YEAR_COL)[Config.PRECIPITATION_COL].mean()
+    year_max_reg = regional_anual.idxmax()
+    val_max_reg = regional_anual.max()
+    
+    year_min_reg = regional_anual.idxmin()
+    val_min_reg = regional_anual.min()
+    
+    # Mes Climatológico más lluvioso
+    regional_mensual = df_monthly.groupby(Config.MONTH_COL)[Config.PRECIPITATION_COL].mean()
+    mes_max_reg_idx = regional_mensual.idxmax()
+    val_mes_max_reg = regional_mensual.max()
+    meses_dict = {1: 'Ene', 2: 'Feb', 3: 'Mar', 4: 'Abr', 5: 'May', 6: 'Jun', 7: 'Jul', 8: 'Ago', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dic'}
+    mes_max_name = meses_dict.get(mes_max_reg_idx, str(mes_max_reg_idx))
+
+    # --- 5. TENDENCIAS (Si hay datos suficientes) ---
+    # Calculamos Mann-Kendall rápido para todas las estaciones
+    trend_results = []
+    import pymannkendall as mk
+    
+    stations = df_anual[Config.STATION_NAME_COL].unique()
+    for stn in stations:
+        sub = df_anual[df_anual[Config.STATION_NAME_COL] == stn]
+        if len(sub) >= 10:
+            try:
+                res = mk.original_test(sub[Config.PRECIPITATION_COL])
+                trend_results.append({'Estacion': stn, 'Slope': res.slope})
+            except: pass
+            
+    df_trends = pd.DataFrame(trend_results)
+    if not df_trends.empty:
+        max_trend = df_trends.loc[df_trends['Slope'].idxmax()]
+        min_trend = df_trends.loc[df_trends['Slope'].idxmin()]
+        regional_trend = df_trends['Slope'].mean()
+    else:
+        max_trend = {'Estacion': 'N/A', 'Slope': 0}
+        min_trend = {'Estacion': 'N/A', 'Slope': 0}
+        regional_trend = 0
+
+    # --- 6. ALTITUD ---
+    if gdf_stations is not None and Config.ALTITUDE_COL in gdf_stations.columns:
+        # Filtrar solo las que tienen datos
+        gdf_valid = gdf_stations[gdf_stations[Config.STATION_NAME_COL].isin(stations)]
+        max_alt = gdf_valid.loc[gdf_valid[Config.ALTITUDE_COL].idxmax()]
+        min_alt = gdf_valid.loc[gdf_valid[Config.ALTITUDE_COL].idxmin()]
+    else:
+        max_alt = {'Estacion': 'N/A', Config.ALTITUDE_COL: 0}
+        min_alt = {'Estacion': 'N/A', Config.ALTITUDE_COL: 0}
+
+    # ==========================================================================
+    # RENDERIZADO VISUAL (TARJETAS)
+    # ==========================================================================
+    
+    # Estilos CSS para tarjetas
+    st.markdown("""
+    <style>
+    div.metric-card {
+        background-color: #f9f9f9;
+        border: 1px solid #e0e0e0;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+        margin-bottom: 10px;
+    }
+    h5.card-title { color: #1f77b4; margin-bottom: 0.5rem; font-size: 1.1rem; }
+    div.big-val { font-size: 1.8rem; font-weight: bold; color: #333; }
+    div.sub-val { font-size: 0.9rem; color: #666; margin-top: 5px;}
+    span.label { font-weight: bold; color: #444; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    def card(title, val, unit, stn, loc_info, date_info, icon="🌧️"):
+        # Función helper para renderizar tarjeta HTML
+        cuenca_str = f"<br><span class='label'>Cuenca:</span> {loc_info.get(col_cuenca, 'N/A')}" if col_cuenca else ""
+        return st.markdown(f"""
+        <div class="metric-card">
+            <h5 class="card-title">{icon} {title}</h5>
+            <div class="big-val">{val:,.1f} {unit}</div>
+            <div class="sub-val">
+                <span class="label">Estación:</span> {stn}<br>
+                <span class="label">Ubicación:</span> {loc_info.get(Config.MUNICIPALITY_COL, 'N/A')} {cuenca_str}<br>
+                <span class="label">Fecha:</span> {date_info}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # --- FILA 1: RÉCORDS ANUALES ---
+    st.markdown("#### 📅 Récords Históricos Anuales")
+    c1, c2 = st.columns(2)
+    with c1:
+        card("Máxima Precipitación Anual", row_max_anual[Config.PRECIPITATION_COL], "mm", 
+             row_max_anual[Config.STATION_NAME_COL], row_max_anual, row_max_anual[Config.YEAR_COL], "🌊")
+    with c2:
+        card("Mínima Precipitación Anual", row_min_anual[Config.PRECIPITATION_COL], "mm", 
+             row_min_anual[Config.STATION_NAME_COL], row_min_anual, row_min_anual[Config.YEAR_COL], "🌵")
+
+    # --- FILA 2: RÉCORDS MENSUALES ---
+    st.markdown("#### 🗓️ Récords Históricos Mensuales")
+    c3, c4 = st.columns(2)
+    with c3:
+        # Formatear fecha mensual
+        try: m_date = f"{meses_dict[row_max_men[Config.MONTH_COL]]} - {row_max_men[Config.YEAR_COL]}"
+        except: m_date = str(row_max_men[Config.YEAR_COL])
+        card("Máxima Lluvia Mensual", row_max_men[Config.PRECIPITATION_COL], "mm", 
+             row_max_men[Config.STATION_NAME_COL], row_max_men, m_date, "⛈️")
+    with c4:
+        try: m_date_min = f"{meses_dict[row_min_men[Config.MONTH_COL]]} - {row_min_men[Config.YEAR_COL]}"
+        except: m_date_min = str(row_min_men[Config.YEAR_COL])
+        card("Mínima Lluvia Mensual (>0)", row_min_men[Config.PRECIPITATION_COL], "mm", 
+             row_min_men[Config.STATION_NAME_COL], row_min_men, m_date_min, "☀️")
+
+    st.divider()
+
+    # --- FILA 3: COMPORTAMIENTO REGIONAL ---
+    st.markdown("#### 🌐 Comportamiento Regional y Tendencias")
+    
+    # Métricas Regionales
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Año Más Lluvioso (Promedio)", f"{year_max_reg}", f"{val_max_reg:,.0f} mm/año")
+    m2.metric("Año Menos Lluvioso (Promedio)", f"{year_min_reg}", f"{val_min_reg:,.0f} mm/año", delta_color="inverse")
+    m3.metric("Mes Más Lluvioso (Climatología)", f"{mes_max_name}", f"{val_mes_max_reg:,.0f} mm/mes")
+    m4.metric("Tendencia Regional Promedio", f"{regional_trend:+.2f} mm/año", 
+              delta="Aumento" if regional_trend > 0 else "Disminución")
+
+    # --- FILA 4: EXTREMOS GEOGRÁFICOS Y TENDENCIAS ---
+    c5, c6 = st.columns(2)
+    
+    with c5:
+        st.markdown("**🏔️ Extremos Altitudinales**")
+        st.dataframe(pd.DataFrame([
+            {"Tipo": "Mayor Altitud", "Estación": max_alt[Config.STATION_NAME_COL], "Altitud": f"{max_alt[Config.ALTITUDE_COL]:.0f} msnm"},
+            {"Tipo": "Menor Altitud", "Estación": min_alt[Config.STATION_NAME_COL], "Altitud": f"{min_alt[Config.ALTITUDE_COL]:.0f} msnm"}
+        ]), use_container_width=True, hide_index=True)
+        
+    with c6:
+        st.markdown("**📈 Extremos de Tendencia (Mann-Kendall)**")
+        st.dataframe(pd.DataFrame([
+            {"Tipo": "Mayor Aumento", "Estación": max_trend['Estacion'], "Pendiente": f"{max_trend['Slope']:.2f} mm/año"},
+            {"Tipo": "Mayor Disminución", "Estación": min_trend['Estacion'], "Pendiente": f"{min_trend['Slope']:.2f} mm/año"}
+        ]), use_container_width=True, hide_index=True)
+
+# ==============================================================================
+# MODIFICACIÓN EN display_stats_tab PARA INCLUIR ESTA NUEVA PESTAÑA
+# ==============================================================================
+def display_stats_tab(df_long, df_anual_melted, gdf_stations, **kwargs):
+    st.subheader("📊 Estadísticas Descriptivas")
+    
+    # Crear sub-pestañas dentro del módulo Estadísticas
+    # Asegúrate de tener st.tabs aquí
+    t_desc, t_sintesis = st.tabs(["📋 Tabla Descriptiva General", "🏆 Síntesis Estadística (Récords)"])
+    
+    with t_desc:
+        # ... (Aquí va tu código original de la tabla estadística grande) ...
+        # Si tenías st.dataframe(df.describe()...) ponlo aquí.
+        if df_long is not None:
+            st.markdown("##### Resumen Estadístico por Estación (Mensual)")
+            stats_df = df_long.groupby(Config.STATION_NAME_COL)[Config.PRECIPITATION_COL].describe()
+            st.dataframe(stats_df.style.format("{:.1f}"), use_container_width=True)
+        else:
+            st.info("Sin datos.")
+
+    with t_sintesis:
+        # LLAMADA A LA NUEVA FUNCIÓN
+        display_statistics_summary_tab(df_long, df_anual_melted, gdf_stations)
 
 
 
