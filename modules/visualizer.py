@@ -1255,7 +1255,7 @@ def display_graphs_tab(df_monthly_filtered, df_anual_melted, stations_for_analys
         "3. Serie Mensual", 
         "4. Ciclo Anual (Promedio)",
         "5. Análisis Estacional Detallado",
-        "6. Distribución de Frecuencias (NUEVO)"
+        "6. Distribución de Frecuencias"
     ]
     tabs = st.tabs(tab_names)
     
@@ -4256,4 +4256,5 @@ def display_statistics_summary_tab(df_monthly, df_anual, gdf_stations, **kwargs)
             {"Tipo": "Mayor Aumento", "Estación": max_trend['Estacion'], "Pendiente": f"{max_trend['Slope']:.2f} mm/año"},
             {"Tipo": "Mayor Disminución", "Estación": min_trend['Estacion'], "Pendiente": f"{min_trend['Slope']:.2f} mm/año"}
         ]), use_container_width=True, hide_index=True)
+
 
