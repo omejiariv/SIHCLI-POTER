@@ -31,3 +31,4 @@ cmdstanpy
 sqlalchemy
 psycopg2-binary
 geoalchemy2
+psycopg
